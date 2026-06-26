@@ -4,62 +4,62 @@
 [![Coverage](https://raw.githubusercontent.com/chotchki/recon-gen/badges/coverage-badge.svg)](https://github.com/chotchki/recon-gen/blob/badges/coverage-report.md)
 [![PyPI](https://img.shields.io/pypi/v/recon-gen.svg)](https://pypi.org/project/recon-gen/)
 
-## Outside validation that your financial system is sound
+## What it does
 
-Do you have a financial system you need to know is consistent and reconcilable? Recon Generator is an independent validation tool for midsize financial institutions: it tells you whether your books balance day to day, and when they don't, it tells you where to look first.
+Recon Generator is an independent validation tool for midsize financial institutions: it tells you whether your books balance day to day, and when they don't, where to look first.
 
-Accounting is standard. Your institution is not. Recon Generator layers the two: standard double-entry invariants on top of the unique shape of your institution — your accounts, your rails, your multi-leg transfer templates, your bundling rules, your aging caps — so every way you actually move money is checked against the rules that govern it.
+Accounting is standard. Your institution is not. Recon Generator layers the two: standard double-entry invariants on top of the unique shape you declare (your accounts, your rails, your multi-leg transfer templates, your bundling rules, your aging caps), so every way you actually move money is checked against the rules that govern it.
 
-## Built for the people who actually do the work
+## Who it's for
 
-Reconciliation needs more than one perspective because no single role has the full picture. Recon Generator carries specialized surfaces for:
+No single role sees the whole reconciliation, so the tool carries a surface per role:
 
 - **Integrators** — wiring the institution's shape into the tool (Studio editor, L2 Flow Tracing, Hygiene Exceptions).
-- **Trainers** — shaping the demo and seeded scenarios so the dashboards exercise every path before going live (data-shaping panel, scope knobs, plant overlays).
+- **Trainers** — shaping the demo and seeded scenarios so the dashboards exercise every path before go-live (data-shaping panel, scope knobs, plant overlays).
 - **Operators** — driving the L1 invariants daily, walking exceptions back to their cause (L1 Dashboard, Daily Statement, Today's Exceptions).
-- **Investigators / Executives** — compliance-AML triage and board-cadence rollups built on the same base ledger (Investigation + Executives apps).
+- **Investigators / Executives** — compliance-AML triage and board-cadence rollups off the same base ledger (Investigation + Executives apps).
 
-Every surface speaks **your** institution's vocabulary — account names, role labels, persona prose are all driven from the L2 institution YAML and substituted into the rendered output. Swap the L2, the language follows.
+Every surface speaks YOUR institution's vocabulary — account names, role labels and persona prose all come from the L2 institution YAML, substituted into the rendered output. Swap the L2, the language follows.
 
 **See it live — two public demos, no install:**
 
 - **[Spec Example](https://recon-gen-spec.hotchkiss.io/)** — the smallest viable bank, dashboards only. The four bundled apps served by the self-hosted HTMX runtime.
-- **[Sasquatch Bank Example](https://recon-gen-sasquatch.hotchkiss.io/)** — realistic community-bank flavor, served through the **Studio** surface in read-only demo mode (L2 editor, unified diagram, and data-shaping panel — with every mutation locked down).
+- **[Sasquatch Bank Example](https://recon-gen-sasquatch.hotchkiss.io/)** — a fuller community-bank flavor, served through the **Studio** surface in read-only demo mode (L2 editor, unified diagram and data-shaping panel — every mutation locked down).
 
-Both render straight from the bundled L2 YAMLs (`tests/l2/{spec_example,sasquatch_pr}.yaml`): read them to evaluate the tool, fork one to start your own. The full persona-driven handbooks, walkthroughs, and per-sheet explainers your operators would see live at **[GitHub Pages](https://chotchki.github.io/recon-gen/)**; the Python API reference (tree primitives, dataset contract, db helpers, runner internals — everything ETL authors and integrators crib from) lives at **[ReadTheDocs](https://recon-gen.readthedocs.io/en/latest/)**.
+Both render straight from the bundled L2 YAMLs (`tests/l2/{spec_example,sasquatch_pr}.yaml`): read them to evaluate the tool, fork one to start your own. The full persona-driven handbooks, walkthroughs and per-sheet explainers your operators would see live at **[GitHub Pages](https://chotchki.github.io/recon-gen/)**; the Python API reference (tree primitives, dataset contract, db helpers, runner internals — everything ETL authors and integrators crib from) lives at **[ReadTheDocs](https://recon-gen.readthedocs.io/en/latest/)**.
 
-## Not an ETL tool — but we'll help you wire one in
+## Not an ETL tool
 
-Recon Generator validates data; it doesn't move it. Your transactions and daily-balance feeds land in `<prefix>_transactions` and `<prefix>_daily_balances` (the Data Integration handbook documents the column contract) and Recon Generator reads from there.
+Recon Generator validates data; it doesn't move it. Your transactions and daily-balance feeds land in `<prefix>_transactions` and `<prefix>_daily_balances` (the Data Integration handbook documents the column contract), and Recon Generator reads from there.
 
-Two ways we close the loop:
+Two ways it closes the loop:
 
-- **Documented carefully, supported responsively.** Wiring an upstream system into the L1 schema is real work — column mapping, type narrowing, metadata extraction, the supersession contract. The Data Integration handbook walks the path end-to-end, issues get a real response, and the Studio Deploy-changes pipeline carries an ETL hook so your existing extract can plug in without bolting code onto Recon Generator itself.
-- **Synthetic scenarios on top of your real data.** Once your data is flowing, the test-data generator plants additional scenarios on top — drift events, overdraft breaches, stuck-pending aging, supersession trails, fanout patterns, anomaly spikes — so you can validate every L1 invariant without delaying go-live. Trainer knobs (`scope: full / uncovered_rails / exceptions_only / only_template`, `derive_balances`) shape what gets generated.
+- **Wiring it in.** Mapping an upstream system into the L1 schema is real work (column mapping, type narrowing, metadata extraction, the supersession contract). The Data Integration handbook documents it column-by-column, and the Studio Deploy-changes pipeline carries an ETL hook so your existing extract plugs in without bolting code onto Recon Generator itself.
+- **Synthetic scenarios on your real data.** Once your data is flowing, the test-data generator plants extra scenarios on top (drift events, overdraft breaches, stuck-pending aging, supersession trails, fanout patterns, anomaly spikes) so you can validate every L1 invariant without delaying go-live. Trainer knobs (`scope: full / uncovered_rails / exceptions_only / only_template`, `derive_balances`) shape what gets generated.
 
-## Runs where you run
+## Where it runs
 
-Database backends — **PostgreSQL 17+** and **Oracle 19c+** for the on-prem / cloud-managed production targets, plus **DuckDB** as the zero-install integrator-laptop iteration backend (pure-Python wheel, no server, in-process vectorized executor). The prior SQLite backend was dropped in v13.0.0 (Phase CB.8).
+Database backends — **PostgreSQL 17+** and **Oracle 19c+** for the on-prem / cloud-managed production targets, plus **DuckDB** as the zero-install integrator-laptop backend — a pure-Python wheel with an in-process vectorized executor and no server to stand up. The prior SQLite backend was dropped in v13.0.0 (Phase CB.8).
 
 Three runtime environments — pick what your auditors and analysts already trust:
 
-- **AWS QuickSight** — managed BI, embeddable in your portal, role-aware permissions.
-- **Self-hosted HTMX web app** — same dashboards, no AWS dependency, offline-iteration-friendly. Suitable for sensitive deployments that can't reach external SaaS.
-- **Regulator-ready PDF audit report** — printable, cryptographically fingerprinted, optionally pyHanko-signed. Same source data as the dashboards (and an end-of-pipeline 4-way agreement test gates that they stay in agreement).
+- **AWS QuickSight** — managed BI you embed in your own portal; permissions follow the QS user.
+- **Self-hosted HTMX web app** — the same dashboards with NO AWS dependency, so it runs offline. For sensitive deployments that can't reach external SaaS.
+- **Regulator-ready PDF audit report** — printable and cryptographically fingerprinted (optionally pyHanko-signed). Same source data as the dashboards, and an end-of-pipeline 4-way agreement test gates that they stay in agreement.
 
-## Heavily tested because trust is the product
+## How it's tested
 
 You can't ship a reconciliation tool on "trust me." This tool ships with:
 
-- **Layered test gates** that run in order — unit → DB → self-hosted app → deploy → API → browser — so a regression at layer N short-circuits before burning minutes on layer N+1.
-- **Strong typing throughout** (Pyright strict on the core, NewType-wrapped identifiers, dataclass invariants), so an entire class of bug becomes a type error at the wiring site instead of a silent zero-row dashboard.
+- **Layered test gates** that run in order — unit → db → app2 → qs_api → qs_browser — so a regression at layer N short-circuits before burning minutes on layer N+1.
+- **Strong typing throughout** (Pyright strict on the core, NewType-wrapped identifiers and dataclass invariants), so an entire class of bug becomes a type error at the wiring site instead of a silent zero-row dashboard.
 - **Fuzz testing as a property axis** — every test variant runs against random L2 institution shapes (`fuzz:N` for N seeds, pinned via `f<seed>_..` for repro), so the same invariants check against shapes nobody hand-wrote.
 - **Deterministic, exhaustive test-data generation** — your L2 institution shape drives positive and negative scenarios that the harness plants automatically: drift, overdraft, limit breach, stuck-pending, stuck-unbundled, supersession audit, fanout, anomaly spikes, money-trail chains. Each scenario is hash-locked per `(L2 instance, dialect)`.
-- **Cross-runtime parity** — the same scenario fans out into the QuickSight cell, the self-hosted cell, and the audit PDF, and a 4-way agreement test gates that all four agree on every L1 invariant violation set. A drift the dashboard shows must equal the drift the PDF prints.
+- **Cross-runtime parity** — the same scenario fans out into the QuickSight cell, the self-hosted cell and the audit PDF, and a 4-way agreement test gates that all four agree on every L1 invariant violation set (the drift the dashboard shows is the drift the PDF prints).
 
 ---
 
-CLI is organized as five artifact groups: `recon-gen schema|data|json|docs|audit`. Each artifact has `apply`/`clean`/`test` (plus a few extras); destructive operations default to emit and require `--execute` to actually run. The `audit` group also exposes a `verify` subcommand for recomputing a generated PDF's provenance fingerprint. Change the Python (or ask Claude), re-run `json apply --execute`, get a new dashboard.
+CLI is organized as five artifact groups: `recon-gen schema|data|json|docs|audit`. Each artifact has `apply`/`clean`/`test` (plus a few extras); destructive operations default to emit and require `--execute` to actually run. The `audit` group also exposes a `verify` subcommand for recomputing a generated PDF's provenance fingerprint. Change the Python (or ask Claude) and re-run `json apply --execute` — you get a new dashboard.
 
 ## Demo Docs
 
@@ -67,7 +67,7 @@ CLI is organized as five artifact groups: `recon-gen schema|data|json|docs|audit
 - **[L2 Flow Tracing handbook](https://chotchki.github.io/recon-gen/handbook/l2_flow_tracing/)** — Rails / Chains / Transfer Templates / L2 Hygiene Exceptions for L2 spec verification.
 - **[Investigation handbook](https://chotchki.github.io/recon-gen/handbook/investigation/)** — Compliance / Investigation team flow. 4 walkthroughs, one per sheet's question.
 - **[Executives handbook](https://chotchki.github.io/recon-gen/handbook/executives/)** — board scorecard: account coverage, transaction volume, money moved.
-- **[Data Integration handbook](https://chotchki.github.io/recon-gen/handbook/etl/)** — how the Data Integration Team maps an upstream system into `<prefix>_transactions` + `<prefix>_daily_balances`, validates the load, and extends the metadata contract.
+- **[Data Integration handbook](https://chotchki.github.io/recon-gen/handbook/etl/)** — how the Data Integration Team maps an upstream system into `<prefix>_transactions` + `<prefix>_daily_balances`, validates the load and extends the metadata contract.
 - **[Audit Reconciliation Report handbook](https://chotchki.github.io/recon-gen/handbook/audit/)** — regulator-ready PDF generated by `recon-gen audit apply`; covers the L1 invariants, embeds a provenance fingerprint, optionally auto-signs via pyHanko.
 
 Source lives in `src/recon_gen/docs/` (shipped with the wheel — extract with `recon-gen docs export -o ./somewhere/`); rebuild locally with `recon-gen docs serve`.
@@ -128,7 +128,7 @@ Reads from per-instance `<prefix>_*` views/matviews emitted by `common.l2.emit_s
 
 ### Shared conventions
 
-- **Clickable cells look clickable.** Accent-colored text = left-click drill; accent text on a pale tint background = right-click menu drill.
+- Accent-colored text = left-click drill; accent text on a pale-tint background also carries a right-click menu drill. The styling IS the affordance — a tinted cell clicks.
 - Every sheet has a plain-language description; every visual has a subtitle. Coverage is asserted in unit + API e2e tests.
 - All resources tagged `ManagedBy: recon-gen`; extra tags via `extra_tags` in config.
 
@@ -136,9 +136,9 @@ Reads from per-instance `<prefix>_*` views/matviews emitted by `common.l2.emit_s
 
 ### Prerequisites
 
-- Python 3.13+
+- Python 3.14+
 - An AWS account with QuickSight Enterprise enabled
-- Either a pre-existing QuickSight datasource ARN **or** a PostgreSQL **17+** / Oracle **19c+** database URL for demo mode (the schema uses SQL/JSON path syntax — `JSON_VALUE` / `JSON_QUERY` / `JSON_EXISTS` — supported on both engines)
+- Either a pre-existing QuickSight datasource ARN or a PostgreSQL 17+ / Oracle 19c+ / DuckDB database URL for demo mode (PG and Oracle use SQL/JSON path syntax — `JSON_VALUE` / `JSON_QUERY` / `JSON_EXISTS`; DuckDB uses `json_extract_string`)
 
 ### Install from PyPI
 
@@ -166,7 +166,7 @@ For demo mode against DuckDB (no extra install — DuckDB ships as a pure-Python
 pip install recon-gen
 ```
 
-> The package was renamed from `quicksight-gen` to `recon-gen` in v11.0.0. `pip install quicksight-gen` continues to work transparently for a 1-2 month grace period after the rename via a meta-package shim; switch to `recon-gen` at your convenience.
+> The package was renamed from `quicksight-gen` to `recon-gen` in v11.0.0. `pip install quicksight-gen` still works for a 1-2 month grace period via a meta-package shim; switch to `recon-gen` when you want.
 
 ### Setup from source
 
@@ -315,7 +315,7 @@ out/
 
 ## Demo mode
 
-A deterministic demo generator seeds the four apps end-to-end so you can see them work without wiring up real data. Every app feeds two per-prefix base tables — `<db_table_prefix>_transactions` (every money-movement leg) and `<db_table_prefix>_daily_balances` (per-account end-of-day snapshots), where `<db_table_prefix>` is `cfg.db.table_prefix` (required).
+A deterministic demo generator seeds the four apps so you can see them work without wiring up real data. Every app feeds two per-prefix base tables — `<db_table_prefix>_transactions` (every money-movement leg) and `<db_table_prefix>_daily_balances` (per-account end-of-day snapshots), where `<db_table_prefix>` is `cfg.db.table_prefix` (required).
 
 ```bash
 # Apply schema + seed to your demo database, then generate QuickSight JSON.
@@ -329,7 +329,7 @@ recon-gen json apply   -c config.yaml -o out/ --execute  # JSON + AWS deploy
 recon-gen audit apply  -c config.yaml --execute -o report.pdf  # regulator-ready PDF (optional)
 ```
 
-`schema apply --execute` creates the per-prefix base tables + matviews via `common/l2/schema.py::emit_schema(l2_instance, prefix=cfg.db.table_prefix)`. `data apply --execute` inserts the L2-shape seed data (90-day baseline + every L1 SHOULD-violation plant + the Investigation fanout / volume / chain plants). `data refresh --execute` refreshes every dependent matview in dependency order. `json apply --execute` writes a `datasource.json` derived from the database URL (Type=`POSTGRESQL` or `ORACLE`, dispatched off `dialect`), generates all QuickSight JSON to `out/`, and deploys to AWS. `audit apply --execute` queries the per-prefix L1 invariant matviews and writes a regulator-ready PDF reconciliation report (cover, executive summary, per-invariant violation tables, per-account-day Daily Statement walks, sign-off block, cryptographic provenance fingerprint) — see the [Audit Reconciliation Report handbook](https://chotchki.github.io/recon-gen/handbook/audit/) for the full reference. The `account_type` and `transfer_type` columns discriminate which app a row belongs to. See [`Schema_v6.md`](src/recon_gen/docs/Schema_v6.md) for the full feed contract, canonical type values, metadata key catalog, and ETL examples.
+`schema apply --execute` creates the per-prefix base tables + matviews via `common/l2/schema.py::emit_schema(l2_instance, prefix=cfg.db.table_prefix)`. `data apply --execute` inserts the L2-shape seed data (90-day baseline + every L1 SHOULD-violation plant + the Investigation fanout / volume / chain plants). `data refresh --execute` refreshes every dependent matview in dependency order. `json apply --execute` writes a `datasource.json` derived from the database URL (Type=`POSTGRESQL` or `ORACLE`, dispatched off `dialect`), generates all QuickSight JSON to `out/` and deploys to AWS. `audit apply --execute` queries the per-prefix L1 invariant matviews and writes a regulator-ready PDF reconciliation report (cover, executive summary, per-invariant violation tables, per-account-day Daily Statement walks, sign-off block, cryptographic provenance fingerprint) — see the [Audit Reconciliation Report handbook](https://chotchki.github.io/recon-gen/handbook/audit/) for the full reference. The `account_type` and `transfer_type` columns discriminate which app a row belongs to. See [`Schema_v6.md`](src/recon_gen/docs/Schema_v6.md) for the full feed contract, canonical type values, metadata key catalog and ETL examples.
 
 **PostgreSQL 17+, Oracle 19c+, or DuckDB required** for `schema apply --execute`. PG + Oracle support the SQL/JSON path syntax (`JSON_VALUE`, `JSON_QUERY`, `JSON_EXISTS`) the schema uses for `metadata` JSON columns; DuckDB uses `json_extract_string` for the equivalent reads (DuckDB's `JSON_VALUE` returns a quoted JSON form). The portable subset forbids the Postgres-only `->>` / `->` / `@>` / `?` operators and JSONB; on Oracle, also no named `WINDOW` clause and no `TIMESTAMP WITH TIME ZONE` in PK columns; on DuckDB, matviews emit as `CREATE TABLE … AS SELECT` (refreshed by re-CREATE). See `Schema_v6.md` → Forbidden SQL patterns for the full constraint matrix.
 
@@ -395,7 +395,7 @@ src/recon_gen/
                         # "Tree pattern" for the L1 / L2 / L3 layer model.
         l2/             # L2 model: primitives, validate, loader, schema, seed,
                         # auto_scenario, derived, theme, topology
-        sql/dialect.py  # Dialect enum (POSTGRES / ORACLE)
+        sql/dialect.py  # Dialect enum (POSTGRES / ORACLE / DUCKDB)
         browser/        # Playwright helpers (helpers.py + ScreenshotHarness)
         handbook/       # mkdocs-macros vocabulary + diagrams
         sheets/app_info.py  # populate_app_info_sheet — Info canary builder
@@ -442,12 +442,12 @@ E2E tunables (env vars): `RECON_E2E_PAGE_TIMEOUT`, `RECON_E2E_VISUAL_TIMEOUT`, `
 
 Edit the dataset builders in `apps/<app>/datasets.py`. Each dataset has a `sql` string and a `DatasetContract` (column name + type list) — unit tests assert the SQL projection matches the contract, so the contract is the safety net when rewriting.
 
-The dataset SQL reads from two shared base tables (`<prefix>_transactions`, `<prefix>_daily_balances`) plus the L1 invariant + Investigation matviews. To wire your production data in, ETL into the same shape: see [`Schema_v6.md`](src/recon_gen/docs/Schema_v6.md) for column specifications, the canonical `account_type` / `transfer_type` values, the JSON metadata key catalog, and end-to-end ETL examples.
+The dataset SQL reads from two shared base tables (`<prefix>_transactions`, `<prefix>_daily_balances`) plus the L1 invariant + Investigation matviews. To wire your production data in, ETL into the same shape: see [`Schema_v6.md`](src/recon_gen/docs/Schema_v6.md) for column specifications, the canonical `account_type` / `transfer_type` values, the JSON metadata key catalog and end-to-end ETL examples.
 
 ### Add a visual or tab
 
 1. Open `apps/<app>/app.py` and find the relevant sheet's populator function.
-2. Place the visual on a layout row: `row.add_kpi(...)`, `row.add_table(...)`, `row.add_bar_chart(...)`, `row.add_sankey(...)`. Pass `title=`, `subtitle=`, and the typed `Dim`/`Measure` slots — the tree validates dataset / column references at emit time.
+2. Place the visual on a layout row: `row.add_kpi(...)`, `row.add_table(...)`, `row.add_bar_chart(...)`, `row.add_sankey(...)`. Pass `title=`, `subtitle=` and the typed `Dim`/`Measure` slots — the tree validates dataset / column references at emit time.
 3. Subtitle is required — enforced at construction (`Visual.__post_init__` raises on a blank subtitle), not by a separate test.
 4. Run `pytest` — typed cross-reference errors fail at the wiring site, not deep in the generated JSON.
 
@@ -456,7 +456,7 @@ The dataset SQL reads from two shared base tables (`<prefix>_transactions`, `<pr
 Filters push to SQL — a `<<$paramName>>` placeholder in the dataset's CustomSql, not an analysis-level `FilterGroup` (a Phase Y change that converged the QuickSight and self-hosted renderers on the same query-level narrowing). So:
 
 1. **Date filter:** write the dataset SQL with a `{date_filter}` slot in its `WHERE` and call `build_dataset(sql_template, CONTRACT, ..., app2_date_column="<table>.<col>")` — it substitutes the slot per renderer (QuickSight's universal date control narrows QS; the self-hosted renderer gets a `BETWEEN :date_from AND :date_to` bind).
-2. **Categorical / slider filter:** put `<<$pParamName>>` directly in the `WHERE`; declare the analysis parameter and wire its control (`ParameterDropDownControl` / slider) in `apps/<app>/app.py`. The dataset parameter, the analysis→dataset bridge, and the self-hosted renderer's filter spec are all auto-derived from that one control node.
+2. **Categorical / slider filter:** put `<<$pParamName>>` directly in the `WHERE`; declare the analysis parameter and wire its control (`ParameterDropDownControl` / slider) in `apps/<app>/app.py`. The dataset parameter, the analysis→dataset bridge and the self-hosted renderer's filter spec are all auto-derived from that one control node.
 3. `pytest` walks the tree and flags missing references at emit time; the dataset's `DatasetContract` is the safety net when you edit the SQL.
 
 (See `CLAUDE.md` → "Filter authoring" for the full pattern. Analysis-level `FilterGroup`s are deprecated for filter intent — kept only for the universal date control and the rare highlight-without-narrowing case.)
@@ -467,4 +467,4 @@ Edit your L2 institution YAML's `theme:` block (or copy from `tests/l2/sasquatch
 
 ### Ask Claude
 
-The codebase is intentionally easy to mutate. Ask Claude to add visuals, reshape the layout, adjust filters, update SQL for your schema, or add conditional formatting — it'll edit the Python and re-run tests.
+Everything's generated from code, so a change is a Python edit. Ask Claude to add visuals, reshape the layout, adjust filters, update SQL for your schema or add conditional formatting — it'll edit the Python and re-run the tests.
