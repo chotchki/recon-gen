@@ -374,7 +374,7 @@ To customize the demo persona's brand: edit the `theme:` block on `tests/l2/sasq
 Everything generates from one L2 YAML — your institution's shape — plus your ETL feed, through one shared core, into three renderers. The core is layered **L1 → L2 → L3**: persona-blind primitives, per-app assembly in domain vocabulary, then your persona / customer flavor.
 
 ```mermaid
-flowchart TB
+flowchart LR
     YAML["L2 institution YAML<br/>accounts · rails · templates · chains · limits · theme"]
     FEED[("ETL feed<br/>transactions + daily_balances")]
 
@@ -387,7 +387,7 @@ flowchart TB
     end
 
     YAML --> core
-    FEED --> L3
+    FEED --> core
     core --> QS["AWS QuickSight<br/>JSON resource graph"]
     core --> HTMX["Self-hosted HTMX<br/>Dashboards + Studio"]
     core --> PDF["Regulator-ready PDF<br/>audit report"]
