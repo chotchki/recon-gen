@@ -832,6 +832,47 @@ section flags this as a footgun.
 
 ---
 
+## 6. Local browser-test-harness quirks (not QS)
+
+These are gotchas in the local qs_browser / app2 WebKit harness, not
+QuickSight itself — documented here because that's where they surface.
+
+### 6.1 macOS WebKit "headless" leaks IOSurfaces and crashes WindowServer
+
+**Symptom.** On macOS the qs_browser / app2 tier launches a *visible*
+WebKit window (despite `headless=True`) and, after enough screenshots,
+the whole display server (`WindowServer`) SIGABRTs with
+`WSIOSurfaceDebugTallyAndAbort` — taking the session down. The `unit`
+layer then hang-kills on the next run while the system recovers.
+
+**Cause.** Playwright's macOS WebKit is NOT off-WindowServer the way the
+Linux/CI port is — it renders through Cocoa and routes screenshot/trace
+capture through WindowServer's Metal window-capture path
+(`captureWindowList` → `CompositorMetal::CreateCaptureSurface` →
+`iosurface_create_common`). The trace **screenshot filmstrip**
+(`context.tracing.start(screenshots=True)` in `common/browser/helpers.py`)
+runs continuously per session, allocating a GPU-backed IOSurface per
+frame against WindowServer's per-client tally; under xdist `-n auto`
+(N concurrent WebKit sessions) the tally crosses threshold and aborts.
+macOS 26.5.1 tightened the tally enforcement + surfaced the window; the
+bundled WebKit 26.4 (`webkit-2272`, playwright 1.59) is one OS-minor
+behind the host. Linux/CI has no WindowServer, so the identical code is
+green — a genuine host-OS divergence.
+
+**Fix (shipped).** The filmstrip is now OFF by default and armed only
+under `RECON_GEN_TRACE_ALL=1`. DOM snapshots + sources stay on (they
+don't touch WindowServer); the on-failure full-page screenshot is
+bounded (one per failing test). **DO NOT** set `RECON_GEN_TRACE_ALL=1`
+for a full xdist qs_browser run on macOS — it re-arms the leak across
+all workers. Use it only for a focused single-test `--trace-all` debug.
+
+**Durable follow-ups (PLAN.md backlog).** (a) Spike playwright 1.59 → 1.61
+(WebKit 26.4 → 26.5, matching host macOS 26.5) to confirm whether it
+restores true off-screen headless. (b) The only byte-for-byte parity with
+CI is running the qs_browser tier in a Linux WebKit container locally.
+
+---
+
 ## How to use this page when filing defects
 
 For each issue you want to file with the QuickSight team:

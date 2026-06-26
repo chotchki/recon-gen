@@ -201,6 +201,11 @@ def webkit_page(
     - On clean exit → trace written iff ``RECON_GEN_TRACE_ALL=1`` is set
       (operator opt-in for "I want the full trace even on green tests";
       flag plumbed by ``Y.2.gate.c.7``).
+    - The trace SCREENSHOT filmstrip is OFF by default and armed only
+      under ``RECON_GEN_TRACE_ALL=1`` — on macOS WebKit it is the
+      WindowServer IOSurface allocator that aborts the compositor (see
+      the tracing.start block below). DOM snapshots + sources stay on
+      always; the on-failure full-page screenshot is unaffected.
 
     Capture is best-effort: each capture function catches its own
     exceptions and emits a ``[CAPTURE FAILURE] <artifact>: <type>: <msg>``
@@ -219,11 +224,31 @@ def webkit_page(
         # Y.2.gate.c.11 — start tracing immediately so the trace bundle
         # captures EVERYTHING the test does. We decide whether to save
         # vs. discard in the finally block based on outcome + env flag.
-        # screenshots/snapshots/sources are the kitchen-sink set —
-        # enables full timeline replay in `playwright show-trace`.
+        #
+        # The screenshot FILMSTRIP (`screenshots=`) is a CONTINUOUS GPU
+        # window-capture. On macOS, WebKit "headless" is NOT off-
+        # WindowServer like the Linux/CI port — every captured frame
+        # routes through the WindowServer capture path (captureWindowList
+        # -> CompositorMetal::CreateCaptureSurface ->
+        # CaptureSurfaceMetal::CreateMetalBacking -> iosurface_create_common)
+        # and allocates a GPU-backed IOSurface against WindowServer's
+        # per-client tally. Started unconditionally it leaks UNBOUNDED
+        # (x N xdist workers) until the tally guard
+        # (WSIOSurfaceDebugTallyAndAbort) SIGABRTs the whole compositor
+        # (observed on macOS 26.5.1 / webkit-2272 = WebKit 26.4, one OS-
+        # minor behind the host). DOM snapshots + sources do NOT touch
+        # that path, so keep them always and gate the filmstrip on the
+        # SAME RECON_GEN_TRACE_ALL flag that already decides whether a
+        # green run's trace is even saved (line 404 below). Linux/CI has
+        # no WindowServer, so this is identical on both surfaces (POLICY 1);
+        # the only on-green change is dropping a filmstrip that was
+        # discarded anyway. Do NOT set RECON_GEN_TRACE_ALL=1 for a full
+        # xdist qs_browser run on macOS — it re-arms the leak across all
+        # workers (see docs/reference/quicksight-quirks.md).
+        trace_screenshots = bool(RECON_GEN_TRACE_ALL.get_or_none())
         try:
             context.tracing.start(
-                screenshots=True, snapshots=True, sources=True,
+                screenshots=trace_screenshots, snapshots=True, sources=True,
             )
         except Exception:
             # Old Playwright versions or odd configs — keep going
