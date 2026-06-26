@@ -693,6 +693,15 @@ Rewrite the reader-facing prose so it reads as chotchki, not generic-AI. Source 
 - [x] DT.7 - **RELEASE_NOTES forward style note.** Add a short "new entries in chotchki's voice" note; leave the 14.6.0 → 13.14.4 history untouched.
 - [ ] DT.8 - **Phase exit.** Full mkdocs build clean + all doc-content tests green + persona-neutrality + App2↔QS handbook parity + link check; operator final review; RELEASE_NOTES entry (ask before cut per [[feedback_always_ask_before_release_cut]]); sweep DT to PLAN_ARCHIVE.md.
 
+## Phase DU - Logical→physical column terminology alignment
+
+Drop the v3 logical-name hold-over (`signed_amount` / `posted_at` / `balance_date` / `balance` / `transfer_type` / `account_type` / `parent_transfer_id` / `transaction_id` / `amount`-absolute) from reader-facing docs + CLAUDE.md; align to the v6 physical columns. Decisions (2026-06-26): SPEC.md stays the conceptual/logical layer (untouched); fix prose only — the Investigation matview `*_account_type` output aliases stay (no code/parity churn). Context-aware: base-table column refs → physical; matview OUTPUT columns + SPEC concepts → untouched.
+
+- [x] DU.0 - Mapping + scope + decisions. Authoritative map from the v6 DDL (`schema.py:1959`/`2022`) + rename comments (`transfer_type`→`rail_name` Z.B; `account_type`→`account_role` `:3984`; `posted_at`→`posting`; `balance_date`→`business_day_start`; `balance`→`money`; `signed_amount`→`amount_money`; `parent_transfer_id`→`transfer_parent_id`; `transaction_id`→`id`; `amount`-absolute → `ABS(amount_money)`).
+- [ ] DU.1 - Fan-out: align the ~30 reader-facing docs to physical base-table column names (context-aware; keep matview output aliases + SPEC). rewrite → verify → fix + the doc/handbook/parity gates.
+- [x] DU.2 - CLAUDE.md Domain Model section align to physical (the source of the hold-over).
+- [ ] DU.3 - Verify (full unit + docs + build + parity gates) + commit; operator review.
+
 ## Backlog (not yet phased)
 
 - **Revert (or justify) the DP.5 trainer-apply timeout bump (120s→300s, commit `531dd020`, shipped v14.4.1)** — added 2026-06-16. The bump was a wrong-diagnosis fix: the Oracle `test_trainer_dogfood_per_kind[or-*]` failures' real cause was an 11h-stale Oracle container (DG-phase debris), not apply slowness — a fresh container ran 17/17 green. Confirm a fresh-Oracle `trainer_apply` finishes under 120s; if so revert to 120s, else keep 300s as legitimate headroom (the docstring already says "oracle ~few min"). Low-priority cleanup; harmless either way.
