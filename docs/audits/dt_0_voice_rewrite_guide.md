@@ -182,11 +182,13 @@ His isolated red-line of the README draft (commit `2425f602`). These are the
 corrections his pen made that the lint above didn't catch — apply them to every
 fan-out file. Full analysis upstream in `chotchki-voice-profile-evidence.md` v0.13.
 
-- **Keep the first-person SERVICE voice — don't de-market it.** "We help you
-  implement", "we hand integrators X", "issues get a real response" are
-  authentic warmth-via-service, NOT marketing-"we" to strip. Strip only tool
-  PUFFERY ("we deliver powerful X"). I over-fired the de-market reflex; he
-  restored "we help you". When in doubt, keep the helpful "we".
+- **Keep the first-person SERVICE FRAMING — don't de-market it.** "We help you
+  implement", "we hand integrators X" are authentic warmth-via-service, NOT
+  marketing-"we" to strip. Strip only tool PUFFERY ("we deliver powerful X").
+  I over-fired the de-market reflex (changed "we close the loop" → "it closes
+  the loop"); he restored "We help you implement". Note the discriminator: he
+  KEPT my cut of a genuinely-vague support platitude ("issues get a real
+  response") — so a vague clause can still go; the "we help you" FRAMING cannot.
 - **Reader-facing prose gives the REASON, never the internal tag.** "(Phase
   CB.8)" → "since it isn't optimized for analytics". Strip phase ids / commit
   shas / internal bookkeeping from anything a customer reads; state the why.
@@ -212,3 +214,29 @@ fixes, de-windup) — the adversarial lint was right; the misses were the
 de-market over-fire plus the structural / content / strategy moves above. His
 red-pen operates above prose-cadence, so a voice rewrite that only fixes cadence
 under-reaches (the [[feedback-voice-rewrite-review-everything]] lesson, sharpened).
+
+---
+
+## 7. Doc-architecture: inline only the essential, link or generate the rest (DT, 2026-06-25)
+
+A doc that REPRODUCES code-derived artifacts inline — directory trees, output /
+file listings, dataset counts, constraint tables, config dumps — drifts, because
+nothing regenerates them from the source. The DT staleness audit caught exactly
+this on the README: the project-structure tree listed two deleted modules, the
+`out/` listing undercounted every app's datasets, the forbidden-SQL restatement
+had drifted from `Schema_v6.md`. Operator call (2026-06-25): de-drift by design.
+
+Rules for the fan-out:
+- **Inline only the small ESSENTIAL orientation** a reader needs in-place (a few
+  lines: the key directories, the shape) — not an exhaustive mirror.
+- **Link to the source** for anything that's a copy of code structure (the GitHub
+  tree, `apps/*/datasets.py`, the authoritative reference doc). Links-as-proof,
+  applied to structure — the link can't drift.
+- **A diagram beats a wall when the thing is a RELATIONSHIP.** The README's
+  file-tree became an L1/L2/L3 + three-renderers Mermaid diagram: a tree shows
+  where files sit, the diagram shows how it's built. Text-based + LLM-parsable
+  (Mermaid / D2 / DOT / ASCII).
+- **Drop counts that drift** (per-app dataset numbers); keep the stable shape
+  (filename patterns, "3 per app" — true by construction), cut the hand-kept ints.
+- Mermaid renders on GitHub + mkdocs but shows RAW on PyPI — keep a one-line prose
+  summary above the diagram as graceful degradation.
