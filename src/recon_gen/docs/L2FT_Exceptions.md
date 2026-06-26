@@ -2,13 +2,12 @@
 
 The L2 Flow Tracing dashboard's **L2 Hygiene Exceptions** sheet
 surfaces six runtime checks against the integrator's L2 YAML
-declaration. Each row in any check is a piece of L2 declaration that
-doesn't match what the live `<prefix>_current_transactions` matview
-shows — a declared rail with no postings, a Posted transaction
-against an undeclared rail, a Required chain whose parent fired but
-child didn't, etc. None of these break the ledger; they break the
-L2-to-runtime correspondence the integrator's ETL is supposed to
-maintain.
+declaration. Each row is a piece of L2 declaration the live
+`<prefix>_current_transactions` matview contradicts — a declared rail
+with no postings, a Posted transaction against an undeclared rail, a
+Required chain whose parent fired but no child followed. None of these
+break the ledger; they break the L2-to-runtime correspondence the
+integrator's ETL is supposed to maintain.
 
 Healthy = empty. A non-empty row tells the integrator either to fix
 their ETL (so the L2 declaration matches reality) or retire the
@@ -73,7 +72,7 @@ with the right `source_role` / `destination_role`, or fix the ETL to
 stop emitting rows with that `rail_name`. A row here means the L2
 doesn't even know about a money path the bank is running — the L1
 limit-breach + drift checks can't fire against undeclared rails, so
-this is a silent-blind-spot indicator.
+it's a silent blind spot.
 
 ### 3. Dead Rails
 

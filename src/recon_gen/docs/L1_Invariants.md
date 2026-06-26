@@ -7,7 +7,7 @@ prefixed PostgreSQL view; rows in any of these views ARE the
 constraint violations. Healthy = empty.
 
 This page is the authoritative reference for what each
-`{{ l2_instance_name }}_*` view returns, the SHOULD-constraint motivation, and
+`{{ l2_instance_name }}_*` view returns, the SHOULD-constraint motivation and
 what the matview surfaces against the canonical
 demo seed.
 
@@ -22,31 +22,43 @@ Current* matviews (M.1.5 — max-Entry-per-logical-key projection)
   ├── {{ l2_instance_name }}_current_transactions
   └── {{ l2_instance_name }}_current_daily_balances
                   ↓
-Helper matviews (computed-balance derivation)
+Helper matviews (derived inputs the invariants read)
   ├── {{ l2_instance_name }}_computed_subledger_balance
-  └── {{ l2_instance_name }}_computed_ledger_balance
+  ├── {{ l2_instance_name }}_computed_ledger_balance
+  ├── {{ l2_instance_name }}_effective_balances      (CL.5 — sparse-day carry-forward)
+  ├── {{ l2_instance_name }}_data_anchor             (DK.1 — latest-activity singleton)
+  └── {{ l2_instance_name }}_transfer_parents        (AB.4.3 — per-child parent set)
                   ↓
-L1 invariant matviews (the SHOULD-constraint surfaces)
+L1 invariant matviews (the 12 SHOULD-constraint surfaces)
   ├── {{ l2_instance_name }}_drift
   ├── {{ l2_instance_name }}_ledger_drift
   ├── {{ l2_instance_name }}_overdraft
   ├── {{ l2_instance_name }}_expected_eod_balance_breach
   ├── {{ l2_instance_name }}_limit_breach
-  ├── {{ l2_instance_name }}_stuck_pending          (M.2b.8)
-  └── {{ l2_instance_name }}_stuck_unbundled        (M.2b.9)
+  ├── {{ l2_instance_name }}_balance_cadence_gap     (CL.6)
+  ├── {{ l2_instance_name }}_stuck_pending           (M.2b.8)
+  ├── {{ l2_instance_name }}_stuck_unbundled         (M.2b.9)
+  ├── {{ l2_instance_name }}_chain_parent_disagreement (AB.2.3)
+  ├── {{ l2_instance_name }}_xor_group_violation     (AB.3.3)
+  ├── {{ l2_instance_name }}_fan_in_disagreement     (AB.4.7 — JOINs _transfer_parents)
+  └── {{ l2_instance_name }}_multi_xor_violation     (AB.6.5)
                   ↓
 Dashboard-shape matviews (UI convenience)
+  ├── {{ l2_instance_name }}_drift_summary           (DL.3.5 — drift + ledger_drift roll-up)
   ├── {{ l2_instance_name }}_daily_statement_summary
-  └── {{ l2_instance_name }}_l1_exceptions      (UNION over the 5 baseline L1s)
+  └── {{ l2_instance_name }}_l1_exceptions      (UNION over the 12 L1 surfaces)
 ```
 
-13 matviews total. Refresh contract: every batch insert into the
-base tables MUST be followed by `refresh_matviews_sql(instance)`
-to recompute every dependent matview in dependency order. The
-refresh is deterministic — leaves first, helpers second, L1
-invariants third, dashboard-shape last.
+22 matviews in the L1 pipeline. `refresh_matviews_sql(instance)`
+rebuilds these plus the two Investigation matviews
+(`{{ l2_instance_name }}_inv_pair_rolling_anomalies` +
+`{{ l2_instance_name }}_inv_money_trail_edges`) — 24 in all. Refresh
+contract: every batch insert into the base tables MUST be followed
+by that call to recompute every dependent matview in dependency
+order. The refresh is deterministic — leaves first, helpers second,
+L1 invariants third, dashboard-shape last.
 
-## The seven L1 SHOULD-constraints
+## The twelve L1 SHOULD-constraints
 
 ### 1. `{{ l2_instance_name }}_drift` — Sub-ledger drift
 
@@ -236,7 +248,7 @@ days_ago=35` surfaces with `age_seconds > max_unbundled_age_seconds`
 
 A child Transfer where leg_rail firings claim **different**
 `parent_transfer_id` values surfaces here. The pattern usually means
-an ETL bug: stale parent reference, cross-cycle contamination, or a
+an ETL bug: stale parent reference, cross-cycle contamination or a
 race where two parent firings both wrote into the same downstream
 template Transfer.
 
@@ -280,14 +292,14 @@ A Transfer where a group has 0 firings (missed — the template
 fired but no variant did, the cycle didn't close) or ≥2 firings
 (overlap — the runtime double-posted competing variants) surfaces
 here. The pattern usually means an ETL bug: a misrouted variant
-trigger, a re-post that didn't suppress the original, or a race
+trigger, a re-post that didn't suppress the original or a race
 where two variants both wrote the closure.
 
 The matview's CTE inlines `(template_name, xor_group_index,
 member_rail_name)` rows from the L2 yaml's `leg_rail_xor_groups`
 declarations, LEFT JOINs them against
 `<prefix>_current_transactions` per (Transfer-of-template,
-group-of-template, member-rail), and gates on
+group-of-template, member-rail) and gates on
 `COUNT(tx.transfer_id) <> 1`. When no template declares
 `leg_rail_xor_groups`, the matview short-circuits with
 `WHERE 1=0` (parses cleanly, zero rows).
@@ -337,7 +349,7 @@ contamination).
 The matview's CTE inlines the L2 chain config rows
 `(chain_parent_name, child_template_name, expected_parent_count)`,
 joins them against the upstream `<prefix>_transfer_parents`
-matview's per-(child, parent) DISTINCT projection, and emits a
+matview's per-(child, parent) DISTINCT projection and emits a
 row when:
 
 - `expected_parent_count IS NULL AND parent_count < 2` →
@@ -404,7 +416,7 @@ for every multi-children chain after filtering out per-child
 firing of a multi-XOR chain, the CTE LEFT JOINs against
 `<prefix>_current_transactions` keyed on `transfer_parent_id`,
 matches the firing's child name against the declared siblings,
-counts distinct matches, and emits a row when the count ≠ 1.
+counts distinct matches and emits a row when the count ≠ 1.
 
 When no chain qualifies (no multi-children chain after stripping
 fan_in entries), the body falls back to a typed-NULL placeholder
@@ -498,7 +510,7 @@ surfaces with `entry_count > 1`.
 ## Refresh + extend contracts
 
 - **Refresh:** `refresh_matviews_sql(instance)` returns a single
-  SQL string with 26 statements (13 REFRESH + 13 ANALYZE) in
+  SQL string with 48 statements (24 REFRESH + 24 ANALYZE) in
   dependency order. Caller splits on `;` and executes
   per-statement (psycopg2's `cursor.execute` can't run multiple
   statements separated by `;` reliably).
@@ -508,12 +520,12 @@ surfaces with `entry_count > 1`.
   dashboard's per-visual SELECTs hit indexed lookups.
 - **Adding a new SHOULD-constraint:** declare the underlying L1
   primitive in the SPEC, add the matview to
-  `common.l2.schema._L1_INVARIANT_VIEWS_TEMPLATE`, register it in
-  `_L1_INVARIANT_VIEWS_DROPS_TEMPLATE` + `refresh_matviews_sql`,
-  and write a `_render_<name>_cases` helper if it needs L2 data
-  inlined at schema-emit time (mirror of
-  `_render_pending_age_cases`). Then surface it via a new dataset
-  + sheet on the L1 dashboard.
+  `common.l2.schema._L1_INVARIANT_VIEWS_TEMPLATE`, register its drop
+  in `_L1_INVARIANT_DROP_NAMES` and its refresh in the `names` list
+  inside `refresh_matviews_sql` then write a `_render_<name>_body`
+  helper if it needs L2 data inlined at schema-emit time (mirror of
+  `_render_xor_group_violation_body`). Then surface it via a new
+  dataset + sheet on the L1 dashboard.
 
 ## See also
 

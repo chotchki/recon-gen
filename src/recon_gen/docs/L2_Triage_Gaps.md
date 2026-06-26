@@ -2,12 +2,12 @@
 
 The Studio **`/etl/triage`** surface diffs the integrator's L2 YAML
 declaration against what the live `<prefix>_transactions` table
-actually carries, and surfaces typed `Gap` records as decision cards.
+actually carries and surfaces typed `Gap` records as decision cards.
 
 Each row is one piece of L2-to-runtime divergence: a posted rail that
 doesn't resolve to any declared `Rail`, a template the L2 doesn't
 know about, a `(parent_role, rail)` combo with no `LimitSchedule`
-covering it, or a template-required metadata key missing on rows
+covering it or a template-required metadata key missing on rows
 tagged with that template. None of these break the ledger; they
 break the L2-to-runtime correspondence the integrator's ETL hook is
 supposed to maintain.
