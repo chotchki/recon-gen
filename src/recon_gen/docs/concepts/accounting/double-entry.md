@@ -19,7 +19,10 @@ rows:
 - Account B: `signed_amount = +100` (money in)
 
 Sum across the whole transfer and you land on zero. That's L1
-Conservation.
+Conservation. (Strictly the invariant is Σ legs = a declared
+expected-net — ZERO for a classic two-leg transfer, NONZERO for a
+template-materialized bundle that lands net money somewhere on
+purpose.)
 
 ## The problem it solves
 

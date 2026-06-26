@@ -40,7 +40,7 @@ declaration-vs-runtime gap.
   </div>
   <div class="snb-card">
     <h3>Transfer Templates</h3>
-    <p>Sankey of multi-leg flow per declared TransferTemplate: debit legs flow into the template node, credit legs flow out to destination accounts. Per-instance balance table beside the Sankey reads <code>Balanced</code> / <code>Imbalanced</code> against the template's <code>ExpectedNet</code>.</p>
+    <p>Sankey of multi-leg flow per declared TransferTemplate: debit legs flow into the template node, credit legs flow out to destination accounts. The balance table beside it carries one status column, <code>completion_status</code> — <code>Complete</code> / <code>Imbalanced</code> / <code>Orphaned</code>. <code>Imbalanced</code> IS the <code>ExpectedNet</code> break — legs don't sum to the template's declared net. <code>Orphaned</code> means a Required chain child never fired (balanced money, broken topology). <code>Complete</code> is both clean. There's no separate Balanced/Imbalanced readout — the net check surfaces AS the <code>Imbalanced</code> value, and the same column backs the Completion filter.</p>
   </div>
   <div class="snb-card">
     <h3>L2 Exceptions</h3>
@@ -97,8 +97,10 @@ anything new go dead overnight?" The bar chart shows the dominant
   a glance. Same metadata cascade is wired here.
 - *Did this multi-leg template balance?* → **Transfer Templates** sheet.
   The Sankey shows the flow shape per declared template; the table
-  beside it shows `Balanced` / `Imbalanced` per shared Transfer (the
-  L1 ExpectedNet invariant, projected onto the template's grouping).
+  beside it reads `completion_status` per shared Transfer — `Imbalanced`
+  is the L1 ExpectedNet break (legs don't sum to the template's declared
+  net), sharing the column with the `Orphaned` chain-completeness
+  verdict. The Completion filter narrows on those same values.
 
 ## The L2-instance contract
 

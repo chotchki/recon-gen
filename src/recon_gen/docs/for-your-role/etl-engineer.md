@@ -34,14 +34,21 @@ Statement / Transactions chain the operators use.
 
 When a load goes silently wrong, the L1 dashboard surfaces it as
 a specific row on a specific sheet. The check_type names the
-class of failure — and tells you which load step to audit:
+class of failure — and tells you which load step to audit. The
+main classes land on their own sheets:
 
 - Drift
 - Overdraft
 - Limit Breach
-- Stuck Pending
-- Stuck Unbundled
-- Supersession
+- Pending Aging
+- Unbundled Aging
+- Supersession Audit
+
+Headline set, not the whole of it — chain / XOR / fan-in
+disagreements plus the balance-cadence checks also roll into L1
+Exceptions. The
+[L1 Invariants reference](../L1_Invariants.md) names every check
+with the columns it carries and the load step it points at.
 
 Ship a load fix and the matching row drops off L1 Exceptions on
 the next run. The ETL is OBSERVABLE — you watch the fix land

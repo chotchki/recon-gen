@@ -10,10 +10,14 @@ on its own against the same ceiling.
 
 Each schedule has:
 
-- ``parent_role`` — picks WHICH accounts the cap governs: every child
-  whose ``parent_role`` matches (e.g. ``DDAControl`` picks up every
-  customer DDA). Each matched account is evaluated on its own, never
-  pooled. Direct (singleton) caps name the singleton account's own role.
+- ``parent_role`` — picks WHICH accounts the cap governs: every account
+  whose denormalized ``account_parent_role`` matches (e.g. ``DDAControl``
+  picks up every customer DDA). Each matched account is evaluated on its
+  own, never pooled. The match is ALWAYS the ``account_parent_role``
+  link — the ``limit_breach`` matview drops any row where it's NULL, so
+  a cap never reaches an account by the account's own role. To cap one
+  specific account give it a ``parent_role`` no sibling shares and name
+  that value; a parentless leaf can't be capped.
 - ``rail`` — the kind of money movement this cap applies to. Caps are
   per-rail-type, never global. (Renamed from ``transfer_type`` so it
   references a Rail name directly — a templated leg no longer slips the

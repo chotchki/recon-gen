@@ -5,6 +5,20 @@ Clear-cut fixes are applied in the commits; THIS file is the "your call" list +
 found bugs. Per-batch, appended as the autonomous run proceeds. Everything is
 staged on `feature/dt-doc-voice` (main untouched).
 
+## DT.3 followup — bug fixed + flags researched/resolved (2026-06-25 night)
+
+Operator: "fix the bug and finish the research … v14 is out, everything is nested now config wise."
+
+- **BUG FIXED** (`f71e05b7`): `recon-gen docs test` ran `pyright … main.py` (no `main.py` at repo root) → now `src/recon_gen/main.py`; `docs test: OK`.
+- **v14 config nesting FIXED** (`f71e05b7`): `signing:` → `audit.signing:` in audit.md + install.md (`config.py:556` maps it). DT.3-docs flat-config sweep was otherwise clean.
+- **Conceptual flags RESEARCHED + FIXED against the code** (5 pages):
+  - etl-engineer: the 6 check_types are a SUBSET (7 more roll into L1 Exceptions) → reframed; "Stuck Pending/Unbundled" → the actual sheets "Pending Aging" / "Unbundled Aging".
+  - l1: "UNION across all 5 invariants" was WRONG (the `l1_exceptions` matview UNIONs 12 check_types) → named the categories. ("5 views + 2 aging" at line 24 IS correct — registry has 7.)
+  - l2_flow_tracing: "Balanced/Imbalanced" was stale → the real column is `completion_status` (Complete/Imbalanced/Orphaned); disambiguated filter-vs-column.
+  - limit-schedule: "singleton caps name their own role" was FALSE (the matview joins on `parent_role`; a `parent_role=None` singleton can never breach) → corrected; noted inbound (AML) caps exist.
+  - double-entry: added a concise note that Conservation is `Σ(legs)=expected_net` (nonzero for bundles), keeping the simple example.
+- **NEW code-staleness (DT.6 / code fix):** `apps/l2_flow_tracing/app.py:184` `_TRANSFER_TEMPLATES_DESCRIPTION` still says "net status (Balanced / Imbalanced)" but the sheet column is `completion_status` — the rendered sheet description is stale.
+
 ## Live-demo cross-reference (recon-gen-sasquatch, 2026-06-25)
 
 Curled the live Studio demo (renders from the deployed sasquatch fixture) to
