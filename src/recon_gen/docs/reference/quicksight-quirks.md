@@ -317,7 +317,7 @@ tab strip
 **Observed.** Naming a sheet `"i"` (1-char) makes the tab
 invisible in the deployed dashboard's tab strip. The sheet still
 exists and is reachable via deep link, but the navigation tab is
-gone. Verified against `us-east-2`.
+gone. Verified against `us-east-1` and `us-east-2`.
 
 **Workaround.** All app-info / canary sheets renamed to a 2+ char
 display name (we ship as `Info`).

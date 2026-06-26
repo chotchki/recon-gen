@@ -113,7 +113,7 @@ on account `cust-019` specifically" is the drill.
 apply here.
 `external` = counterparty books (banks, payment networks, the fed).
 Excluded from L1 invariants because the institution can't audit
-what someone else's ledger says.
+what someone else's ledger says. The physical column is `account_scope`.
 
 ### Parent / leaf accounts
 
