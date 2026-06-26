@@ -5,6 +5,33 @@ Clear-cut fixes are applied in the commits; THIS file is the "your call" list +
 found bugs. Per-batch, appended as the autonomous run proceeds. Everything is
 staged on `feature/dt-doc-voice` (main untouched).
 
+## Live-demo cross-reference (recon-gen-sasquatch, 2026-06-25)
+
+Curled the live Studio demo (renders from the deployed sasquatch fixture) to
+resolve flags empirically. Routes: `/dashboards/<app>/sheets/<sheet-id>` (shell)
+→ `/visuals/<id>/data` (HTMX data fragments) + the `/l2_shape/*` editor.
+
+**RESOLVED (facts confirmed — the editorial call is still yours):**
+- **Inbound caps ARE real.** `/l2_shape/limit_schedule/` declares **6 Inbound + 24
+  Outbound** schedules. So the open-vs-closed-loop / limit-schedule gloss ("a daily
+  outbound-flow cap toward external counterparties") is genuinely too narrow —
+  inbound (AML / structuring) caps exist and are used. Broaden the concept page, or
+  keep the simplification?
+- **etl-engineer's "6 check_types" is a subset.** The live L1 Exceptions sheet
+  renders ~10+ kinds (drift, overdraft, pending, unbundled, limit-breach,
+  supersession, **chain, xor, ledger, cadence**). Add "among others", or keep the
+  six as the headline classes?
+- **Program Health renders as described** — the sheet shows green / amber / red +
+  "healthy" / "violation" / "systemic". The page's tripwire description is accurate.
+  (The separate QS-bookmarks / saved-views sub-claim is QS-specific and not in the
+  HTMX demo — stays unverified.)
+
+**Follow-up (needs a browser — flagged, not done):** confirming rendered KPI
+values + the inbound-breach row + pulling handbook screenshots needs Playwright
+(`uv sync --extra dev`, then an `App2Driver` session against the live URL). Route
+map above makes it a quick focused task — best paired with DT.4 (walkthroughs own
+the `screenshots/` dir).
+
 ## for-your-role/ — commit `70e57847`
 
 - **integrator.md** — the limit-schedule gloss says caps per `(parent_role,

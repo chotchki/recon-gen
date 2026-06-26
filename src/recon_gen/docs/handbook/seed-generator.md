@@ -4,15 +4,14 @@
 baseline + plant overlay shape it produces. Currently rendered against
 **{{ vocab.institution.name }}** ({{ l2_instance_name }}).*
 
-This page is durable reference for integrators who want to understand
-**what the demo data looks like and why** — the volume, amount,
-time-of-day, and chain-completion shapes the per-rail loop emits, and
-the deterministic plant overlays layered on top. If you're planning to
-swap to your own L2 instance and want to predict what the dashboards
-will surface before you load real data, start here. The headline
-numbers below describe the generator as it stands; the SHA256 hash-lock
-tests in `tests/data/test_l2_baseline_seed.py` keep them from drifting
-silently.
+Reference for integrators who want to understand what the demo data
+looks like and why — the volume, amount, time-of-day and
+chain-completion shapes the per-rail loop emits, plus the deterministic
+plant overlays layered on top. If you're planning to swap to your own
+L2 instance and want to predict what the dashboards will surface before
+you load real data, start here. The headline numbers below describe the
+generator as it stands; the SHA256 hash-lock tests in
+`tests/data/test_l2_baseline_seed.py` keep them from drifting silently.
 
 The pipeline lives in `src/recon_gen/common/l2/seed.py`
 (baseline + composer) plus
@@ -39,8 +38,9 @@ account ids and baseline account ids live in disjoint pools
 
 ## Window and anchor
 
-The baseline emits a **90-day rolling window** ending on the
-`anchor` date (defaults to UTC `datetime.now().date()` at call time).
+The baseline emits a 90-day rolling window ending on the
+`anchor` date (defaults to `datetime.now().date()` at call time — local
+time, not UTC).
 Every `posted_at` and `business_day` literal in the generated SQL is
 computed against this anchor, not against `now()` at apply time, so
 the SHA256 hash-lock stays deterministic for a fixed anchor. The
@@ -51,13 +51,13 @@ same anchor convention as the legacy plant emitter.
 
 ## Volume per Rail — `target_leg_count(rail, window_days=90)`
 
-Each Rail is classified into one of 12 `_RailKind` values by
+Each Rail is classified into one of 14 `_RailKind` values by
 `_classify_rail(rail)`, which inspects the rail's `aggregating` flag,
-`cadence`, and `rail_name` substring. The classifier is heuristic
+`cadence` and `rail_name` substring. The classifier is heuristic
 (falls back to `OTHER` for anything novel) — calibrated against the
 bundled L2 instances ({{ l2_instance_name }} included).
 
-The table below shows the **per-business-day firing target** per kind,
+The table below shows the per-business-day firing target per kind,
 and the rough scaling rule. Each firing emits 1 or 2 legs depending on
 rail shape (single-leg vs two-leg vs aggregating-with-children).
 
@@ -75,6 +75,7 @@ rail shape (single-leg vs two-leg vs aggregating-with-children).
 | Merchant payout (`payout_*`) | 1.0 | merchant-account count |
 | External card settlement | 1.0 | system |
 | ACH return (NSF, stop-pay) | 0.2 | customer-account count |
+| Payroll / batch credit (`payroll` / `batch` rail names) | 0.1 | system |
 | Other (fallback) | 1.0 | system |
 
 `_baseline_target_leg_count(rail, kind, customer_count, merchant_count, business_day_count)`
@@ -87,10 +88,10 @@ byte-identical SQL but per-day counts naturally fluctuate.
 Headline volumes scale with the account universe of the L2 instance.
 For an instance with the typical mix of customer + merchant accounts
 the bundled fixtures use, the baseline produces on the order of
-**5,000 to 65,000 transaction rows** over the 90-day window — a
-small reference instance lands at the low end, an instance with
-enough customer accounts to feel like a working bank lands at the
-high end (~47 MB of generated SQL).
+5,000 to 65,000 transaction rows over the 90-day window — a small
+reference instance lands at the low end, an instance with enough
+customer accounts to feel like a working bank lands at the high end
+(~47 MB of generated SQL).
 
 ## Amount distribution — per-Rail-kind lognormal `(mu, sigma)`
 
@@ -114,6 +115,7 @@ meaningful z-scores against.
 | Merchant payout | 9.0 | 1.1 | ~$8,100 | ~$105,000 |
 | External card settlement | 11.5 | 0.6 | ~$98,700 | ~$400,000 |
 | ACH return | 6.5 | 1.2 | ~$665 | ~$11,000 |
+| Payroll batch | 11.5 | 0.9 | ~$98,700 | ~$800,000 |
 | Other (fallback) | 7.0 | 1.0 | ~$1,100 | ~$11,000 |
 
 `(mu, sigma)` lives on `_RailKindParams` in
@@ -122,17 +124,18 @@ meaningful z-scores against.
 
 ## Time distribution
 
-- **Day-of-week.** Weekends (Sat/Sun) drop to **0 firings** for all
-  rails. US bank holidays drop to **0 firings** for all rails.
+- **Day-of-week.** Weekends (Sat/Sun) drop to 0 firings for all
+  rails. US bank holidays drop to 0 firings for all rails.
   Holiday calendar uses the `holidays` package when available, falling
   back to a hard-coded list of fixed-date federal holidays.
-- **Day-of-month.** Rails with `aggregating: monthly_eom` fire **only
-  on the last business day of each month** (3 firings over a 90-day
+- **Day-of-month.** Rails with `aggregating: monthly_eom` fire only
+  on the last business day of each month (3 firings over a 90-day
   window). Rails with `aggregating: daily_eod` fire on every business
   day. Non-aggregating rails fire uniformly across business days.
 - **Time-of-day.** Per-kind time bands on `_RailKindParams.time_band`,
   uniform-sampled within the band:
     - Customer inbound + merchant payout: 09:00–15:00 ET (banking hours)
+    - Payroll / batch credit: 06:00–09:00 ET (early ACH settlement window)
     - Customer outbound + customer fee + internal transfer + ACH return + other: 09:00–17:00 ET
     - Card sale: 10:00–22:00 ET (extended retail hours)
     - Aggregating daily (parent post): 17:00–19:00 ET (after children)
@@ -210,12 +213,12 @@ side of a force-posted Fed leg has no `daily_balances` row).
   posts at 17:00–19:00 ET as a higher-Entry row with
   `Supersedes = BundleAssignment` that retroactively assigns the day's
   children to its `transfer_id`. Stuck-unbundled-aging plants are the
-  few children that **never** get a parent assignment.
+  few children that NEVER get a parent assignment.
 - **Non-aggregating chain (parent → child).** Parent fires first;
   child fires synchronously (same business day, child time-of-day =
   parent time-of-day + small delay). Required-completion vs
   Optional-completion respects the Chain's declared `Required` flag:
-  Required ≈ **95%** completion rate, Optional ≈ **50%**. The
+  Required ≈ 95% completion rate, Optional ≈ 50%. The
   remaining percentage shows up as orphan-chain rows on the L2
   Exceptions sheet.
 
@@ -237,12 +240,12 @@ balance because rails iterate in name order across all days.
 ## Plant catalog
 
 `default_scenario_for(instance)` walks the L2 declarations and tries
-to materialize **one plant per kind** that the instance can support.
+to materialize one plant per kind that the instance can support.
 The picker is conservative: if any plant kind has no matching L2
 primitive (no `LimitSchedule`, no `chains`, etc.) it gets skipped
 with an `omitted` reason rather than raising. Each plant kind targets
 a specific dashboard sheet, exists as a frozen dataclass in
-`common/l2/seed.py`, and resolves into one or more transactions when
+`common/l2/seed.py` and resolves into one or more transactions when
 `emit_seed(instance, scenario)` runs.
 
 | Plant | Surfaces on | Picker condition (when fires) |
@@ -254,8 +257,8 @@ a specific dashboard sheet, exists as a frozen dataclass in
 | `StuckUnbundledPlant` | L1 Unbundled Aging | A rail with `max_unbundled_age` declared AND that's named in some `bundles_activity`. |
 | `SupersessionPlant` | L1 Supersession Audit | Always (writes a higher-`entry` row on existing `(account, day)`). |
 | `InvFanoutPlant` | Investigation Recipient Fanout | At least one ACH-shaped rail and ≥12 customer DDAs to source senders from. |
-| `TransferTemplatePlant` | L2 Flow Tracing — Transfer Templates | Per declared `transfer_templates` entry whose first `leg_rails` resolves and `expected_net == 0` (M.3.10g + v8.6.7 SingleLegRail extension). |
-| `RailFiringPlant` | L2 Flow Tracing — Rails / Chains | **Broad mode only.** Per declared rail whose role(s) resolve to a materialized account. |
+| `TransferTemplatePlant` | L2 Flow Tracing — Transfer Templates | Per declared `transfer_templates` entry whose first `leg_rails` resolves and `expected_net == 0` (single-leg rails included). |
+| `RailFiringPlant` | L2 Flow Tracing — Rails / Chains | Broad mode only. Per declared rail whose role(s) resolve to a materialized account. |
 
 When the picker can't materialize a plant, it appends an entry to
 `AutoScenarioReport.omitted` — a tuple of `(plant_label, reason)`.
@@ -265,16 +268,16 @@ below.
 
 ### One rail per kind, by design
 
-The picker materializes **one demonstrative plant per kind** — it
-selects the *first* eligible rail (by sorted name) and stops. This is
+The picker materializes one demonstrative plant per kind — it
+selects the FIRST eligible rail (by sorted name) and stops. This is
 deliberate: the demo's job is to make each dashboard sheet
-*non-empty and legible*, not to exhaustively cover every rail. For an
+non-empty and legible, not to exhaustively cover every rail. For an
 L2 that declares N rails eligible for a given kind (e.g. several rails
 carrying `max_unbundled_age`), only ONE surfaces an auto-plant; the
 other N−1 stay clean even though they're equally eligible.
 
 That's the right default for a teaching demo, but it means the
-auto-scenario is **not a coverage tool**. If you're running an
+auto-scenario is NOT a coverage tool. If you're running an
 integrator-style exercise that asks "does every rail × every plant kind
 surface an exception?", the auto-scenario answers "no" for the N−1
 un-picked rails — you need explicit plants for them. Two ways to get
@@ -286,7 +289,7 @@ per-rail coverage:
 - **Declare more shape** — add the eligibility primitive (a
   `LimitSchedule`, a `chains` entry, a `max_*_age`) to the specific
   rails you want covered, then re-pick. The picker still takes the
-  first per kind, so this only helps if you want a *different* single
+  first per kind, so this only helps if you want a DIFFERENT single
   rail picked, not all of them.
 
 A `--coverage-mode` flag that iterates ALL rails per kind (one plant
@@ -297,20 +300,19 @@ ask. For now, treat one-rail-per-kind as the contract.
 ## Scenario modes
 
 `default_scenario_for(instance, mode=...)` picks WHICH plant kinds
-land in the returned `ScenarioPlant`. Three modes (M.4.2 +
-v8.6.7 demo bump):
+land in the returned `ScenarioPlant`. Three modes:
 
 | Mode | L1 SHOULD plants (drift / overdraft / breach / stuck_* / supersession / inv_fanout) | Broad-shape plants (`TransferTemplatePlant`, `RailFiringPlant`) | Used by |
 | --- | --- | --- | --- |
-| `l1_invariants` (default) | ✓ | ✗ | M.4.1 harness Layer 1 (matview-row presence checks) |
-| `broad` | ✗ | ✓ | M.4.1 harness — pure shape verification |
+| `l1_invariants` (default) | ✓ | ✗ | e2e harness Layer 1 (matview-row presence checks) |
+| `broad` | ✗ | ✓ | e2e harness — pure shape verification |
 | `l1_plus_broad` | ✓ | ✓ | The CLI `data apply` demo path (`cli/_helpers.py::build_full_seed_sql`) — gives the demo BOTH planted SHOULD violations AND non-empty L2FT sheets. |
 
-The CLI's choice (v8.6.7+) of `l1_plus_broad` is what makes the
-demo's L2FT Transfer Templates / Rails / Chains sheets render
-non-empty. Pre-v8.6.7 the demo ran in `l1_invariants` mode, so even
-when `TransferTemplatePlant` rows existed in code, they got filtered
-out before reaching `emit_full_seed`.
+The CLI's choice of `l1_plus_broad` is what makes the demo's L2FT
+Transfer Templates / Rails / Chains sheets render non-empty. Earlier
+the demo ran in `l1_invariants` mode, so even when
+`TransferTemplatePlant` rows existed in code, they got filtered out
+before reaching `emit_full_seed`.
 
 ## Live scenario for the active L2
 
@@ -347,9 +349,9 @@ dashboard sheet renders empty:
 
 ## Plant overlays
 
-The baseline produces a **healthy** ledger — every L1 invariant clean,
+The baseline produces a HEALTHY ledger — every L1 invariant clean,
 every Chain mostly-complete, every TransferTemplate netting to zero.
-Plant overlays then layer **intentional violations** on top so the
+Plant overlays then layer intentional violations on top so the
 dashboards have signal to render. The overlay pipeline is three stages:
 
 ### 1. `densify_scenario(base, factor=5)`
@@ -359,7 +361,7 @@ per L1 invariant kind (1 drift, 1 overdraft, 1 limit-breach, etc.).
 At 60k baseline rows per instance, a single plant gets visually lost.
 `densify_scenario` replicates each plant by varying `days_ago` so each
 kind shows ~5 rows on the dashboards instead of 1. The default factor
-is **5** (`factor=5`).
+is 5 (`factor=5`).
 
 `inv_fanout_plants` and `transfer_template_plants` are NOT replicated:
 the fanout already plants N senders per recipient (its own density),
@@ -369,7 +371,7 @@ and TransferTemplate plants already produce 3 firings per template
 ### 2. `add_broken_rail_plants(scenario, instance, broken_count=15)`
 
 For visual hierarchy: pick one Rail (deterministic — sorted by name,
-the first rail with `max_pending_age` set) and plant **15** stuck-pending
+the first rail with `max_pending_age` set) and plant 15 stuck-pending
 entries on it across the window. L1 Exceptions KPI then has a
 magnitude that matters; the L2 Exceptions sheet's bar chart shows the
 broken Rail spike immediately as one tall bar against the baseline.
@@ -380,7 +382,7 @@ The default `InvFanoutPlant.amount_per_transfer` from the auto-scenario
 sits below the customer-ACH baseline median. Without a boost, the
 12-sender → 1-recipient cluster is structurally visible on the
 Recipient Fanout sheet but per-transfer amounts don't stand out.
-This stage bumps each fanout plant's amount by **5×** so the cluster's
+This stage bumps each fanout plant's amount by 5× so the cluster's
 aggregate inflow stands out clearly on the Recipient Fanout sheet's
 Sankey and Volume Anomalies' z-score band.
 
@@ -389,7 +391,7 @@ Sankey and Volume Anomalies' z-score band.
 A separate harness file `_harness_l2_coverage_assertions.py`
 (referenced from the broader e2e harness) cross-checks every L2
 declaration against runtime evidence. The assertion set is the
-contract Phase R locked in alongside the realistic baseline:
+contract locked in alongside the realistic baseline:
 
 - **Per Rail.** `assert N_legs(rail) >= max(target_leg_count(rail) * 0.5, 5)` — at
   least half the heuristic target landed (Poisson variance can shave the
@@ -431,7 +433,7 @@ Skip cleanly when no demo DB URL is configured.
 - **Causal cascade ordering.** The current leg loop emits rails in name
   order, not in causal cascade order — a few intermediate clearing
   accounts therefore swing into negative under realistic ETL timing.
-  See the `Phase V` backlog for the leg-loop refactor.
+  Tracked in the backlog as the leg-loop refactor.
 
 ## Determinism and the hash lock
 
@@ -463,3 +465,5 @@ or a CRC32-derived per-Rail offset.
 - [Data Integration Handbook](etl.md) — the ETL-engineer view of the
   same two tables. Useful when comparing "what the demo seed produces"
   against "what your production feed should produce".
+
+See it live: https://recon-gen-spec.hotchkiss.io/

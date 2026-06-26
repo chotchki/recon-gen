@@ -11,13 +11,13 @@ Integration ETL engineer loading the two base tables (that's the
 [Data Integration Handbook](etl.md)).
 
 The product is built around a small, deliberate set of
-*customer-mutable* surfaces. Swap the SQL behind a dataset, swap
+customer-mutable surfaces. Swap the SQL behind a dataset, swap
 the colors on a theme, point the deploy at a different AWS
-account, or extend the metadata contract — each happens in one
+account or extend the metadata contract — each happens in ONE
 place, with one test that catches the regression. The visual,
-filter, and drill layer above the data binds to a stable column
-contract; you change *what fills the contract*, not *how the
-visuals consume it*.
+filter and drill layer above the data binds to a stable column
+contract; you change WHAT fills the contract, not HOW the
+visuals consume it.
 
 ## What stays stable
 
@@ -30,7 +30,7 @@ new persona work or dashboard redesigns:
   check doesn't add a new base table; it adds a new dataset SQL
   view over the same two tables.
 - **`DatasetContract`** — column name + type list per dataset.
-  The SQL query is *one* implementation; you can swap the SQL
+  The SQL query is ONE implementation; you can swap the SQL
   while preserving the contract and the visual layer keeps
   working untouched.
 - **`metadata` JSON column** — the per-app extension point.
@@ -40,11 +40,12 @@ new persona work or dashboard redesigns:
   Your brand drops in via one preset registration.
 - **`config.yaml` + CLI** — account, region, principals,
   resource prefix, datasource ARN, all configurable from one
-  file (or env vars). The CLI itself (`generate` / `deploy` /
-  `cleanup` / `demo`) is the customer-facing surface and won't
-  change shape without a major version bump.
+  file (or env vars). The CLI itself (`recon-gen json apply` /
+  `json clean` for emit + deploy + cleanup, `schema apply` /
+  `data apply` for the demo DB) is the customer-facing surface
+  and won't change shape without a major version bump.
 
-## What this handbook does *not* cover
+## What this handbook does NOT cover
 
 - **Per-visual customization.** Each shipped app's visuals
   evolve as the L1/L2 model + Investigation/Executives stories
@@ -52,23 +53,23 @@ new persona work or dashboard redesigns:
 - **Per-dataset SQL enumeration.** Each dataset's SQL is in
   `apps/<app>/datasets.py` (e.g. `apps/l1_dashboard/datasets.py`,
   `apps/investigation/datasets.py`); read it as the source of
-  truth. The pattern for *replacing* it is documented here once.
+  truth. The pattern for REPLACING it is documented here once.
 - **Per-sheet layout.** Sheet structure is part of the active
   product surface and may shift under integrator-driven redesigns.
 
 ## How filters work
 
-A filter — a date range, a status dropdown, a sigma-threshold slider — is a **parameter substituted into the dataset's SQL `WHERE` clause**, not a UI-side filter applied after the fact. The dataset query already carries a `<<$paramName>>` placeholder (or, for the universal date range, a `{date_filter}` slot the `build_dataset` helper fills); when the analyst moves a control, the renderer substitutes the value into that query and the database returns the narrowed set. The two renderers do the same thing the same way:
+A filter — a date range, a status dropdown, a sigma-threshold slider — is a parameter substituted into the dataset's SQL `WHERE` clause, NOT a UI-side filter applied after the fact. The dataset query already carries a `<<$paramName>>` placeholder (or, for the universal date range, a `{date_filter}` slot the `build_dataset` helper fills); when the analyst moves a control, the renderer substitutes the value into that query and the database returns the narrowed set. The two renderers do the same thing the same way:
 
 - **QuickSight** substitutes the literal value into the dataset's CustomSql at fetch time, bridged from an analysis-level parameter via `MappedDataSetParameters`.
 - **The self-hosted renderer** translates the same `<<$paramName>>` into a `:param_name` bind before running the query.
 
 Two consequences worth knowing if you're swapping SQL behind a dataset:
 
-1. **Keep the placeholders.** If the dataset you're replacing has a `{date_filter}` slot or a `<<$pSomething>>` in its `WHERE`, your replacement SQL needs the equivalent — that's how the date control / dropdown / slider stays wired. The `DatasetContract` still locks the *projection* (column names + types); the placeholders are the parameter contract on top of it.
+1. **Keep the placeholders.** If the dataset you're replacing has a `{date_filter}` slot or a `<<$pSomething>>` in its `WHERE`, your replacement SQL needs the equivalent — that's how the date control / dropdown / slider stays wired. The `DatasetContract` still locks the projection (column names + types); the placeholders are the parameter contract on top of it.
 2. **It narrows at the database.** A filtered view fetches fewer rows, not "all rows then hide some" — relevant when you're sizing matview/index work for your own data volumes.
 
-This is internal QuickSight/self-hosted-renderer architecture (a Phase Y / v9.0.0 change). It does **not** touch your `config.yaml` or your L2 instance YAML — the `theme:` block, the optional `persona:` block, your rails / chains / accounts / limit schedules are all unchanged. If you carried a customization across the v9.0.0 line, your YAML didn't need to move; only the generated QuickSight definitions did.
+This is internal renderer architecture (a v9.0.0 change). It does NOT touch your `config.yaml` or your L2 instance YAML — the `theme:` block, the optional `persona:` block, your rails / chains / accounts / limit schedules are all unchanged. If you carried a customization across the v9.0.0 line, your YAML didn't need to move; only the generated QuickSight definitions did.
 
 ## Setup
 
@@ -85,7 +86,7 @@ This is internal QuickSight/self-hosted-renderer architecture (a Phase Y / v9.0.
   </a>
   <a class="snb-card" href="../../walkthroughs/customization/how-do-i-run-my-first-deploy/">
     <h3>How do I run my first deploy?</h3>
-    <p>The <code>generate</code> + <code>deploy</code> + <code>cleanup</code> loop, idempotent delete-then-create, dry-run before live, <code>ManagedBy</code> tag scoping.</p>
+    <p>The <code>json apply</code> emit + deploy + <code>json clean</code> cleanup loop, idempotent delete-then-create, dry-run before live, <code>ManagedBy</code> tag scoping.</p>
   </a>
 </div>
 
@@ -129,7 +130,7 @@ This is internal QuickSight/self-hosted-renderer architecture (a Phase Y / v9.0.
 
 ## Optional ETL extensions
 
-A small set of feed columns are *optional* — leave them NULL and
+A small set of feed columns are OPTIONAL — leave them NULL and
 the downstream views fall back to a sensible default; populate
 them when you can give the dashboard rail-accurate signal:
 
@@ -151,11 +152,11 @@ them when you can give the dashboard rail-accurate signal:
 
 ## The L2-fed pattern (M.2b)
 
-The above sections cover the v5 customization path — `mapping.yaml`
-substitution onto a hand-rolled per-app dashboard. The newer
-**L2-fed pattern** is the recommended approach going forward: declare
-your institution as an L2 instance YAML once, and the L1 dashboard
-renders against it generically.
+The sections above cover the per-surface customization path — swap
+a dataset's SQL, register a theme, point the deploy at your account.
+The **L2-fed pattern** is the recommended approach going forward:
+declare your institution as an L2 instance YAML once and the L1
+dashboard renders against it generically.
 
 ### 1. Write your L2 instance YAML
 
@@ -171,8 +172,8 @@ Mirror `tests/l2/{{ l2_instance_name }}.yaml` for shape. The L2 declares:
 - A `description` field on every primitive (surfaces as TextBox
   prose on the dashboard)
 
-Rich descriptions matter — the M.2a.7 prose seam pulls them straight
-into the dashboard's Getting Started, Drift, Limit Breach, and
+Rich descriptions matter — a prose seam pulls them straight
+into the dashboard's Getting Started, Drift, Limit Breach and
 L1 Exceptions text boxes. Switching the L2 instance switches
 the prose without touching dashboard code.
 
@@ -190,22 +191,22 @@ with conn.cursor() as cur:
     cur.execute(sql)
 ```
 
-Every table, view, and matview in the emitted DDL is prefixed by
-the `prefix=` value you pass (typically `cfg.db.table_prefix` — Z.C),
+Every table, view and matview in the emitted DDL is prefixed by
+the `prefix=` value you pass (typically `cfg.db.table_prefix`),
 producing e.g. `myorg_transactions`, `myorg_drift`,
 `myorg_stuck_pending`. Multiple deployments of the same L2 instance
 coexist in one database via distinct prefixes.
 
 ### 3. Refresh the matviews after every load
 
-The L1 invariant views are MATERIALIZED (M.1a.9) for dashboard
+The L1 invariant views are MATERIALIZED for dashboard
 performance. After every batch insert into `{{ l2_instance_name }}_transactions`
 or `{{ l2_instance_name }}_daily_balances`, refresh the dependent matviews:
 
 ```python
 from recon_gen.common.l2 import refresh_matviews_sql
 sql = refresh_matviews_sql(instance)
-# 13 matviews × 2 statements each = 26 (REFRESH + ANALYZE) per call
+# 24 matviews × 2 statements each = 48 (REFRESH + ANALYZE) per call
 ```
 
 ### 4. Deploy the L1 dashboard against your instance
@@ -223,7 +224,7 @@ recon-gen json apply -c run/config.yaml -o run/out --execute
 
 The `./run_tests.sh up_to=db --variants=sp_pg_aw` chain (or `sp_or_aw`
 for Oracle) applies the schema, plants the canonical seed scenarios,
-refreshes matviews, and asserts each L1 invariant view returns rows
+refreshes matviews and asserts each L1 invariant view returns rows
 for every planted scenario via the e2e harness tests. For your own
 instance, write a sibling `myorg_seed.py` declaring your scenarios
 via the generic plant primitives (`DriftPlant`, `OverdraftPlant`,

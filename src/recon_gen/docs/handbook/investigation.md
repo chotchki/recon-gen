@@ -15,14 +15,14 @@ the same shared base ledger that the L1 dashboard reads.
 {{ vocab.institution.name }}'s Investigation team sits between
 Treasury (GL Recon) and the regulator. Their day is reactive — a SAR draft, a
 counterparty referral, a model alert — and each case has the same
-shape: pose a question about a person, a pair, or a transfer; pull
-the rows that answer it; preserve the chain that ties evidence back
-to the underlying postings.
+shape: pose a question about a person, a pair or a transfer, pull
+the rows that answer it, then preserve the chain tying that evidence
+back to the underlying postings.
 
 Unlike L1 Reconciliation (a continuous matview-driven exception
 surface read in a fixed morning rotation) and L2 Flow Tracing (the
 integrator's runtime evidence map for every declared Rail / Chain /
-TransferTemplate), Investigation is **question-shaped**.
+TransferTemplate), Investigation is QUESTION-SHAPED.
 Four sheets, four questions, in no particular order:
 
 - *Recipient Fanout* — who is receiving money from too many distinct
@@ -40,7 +40,7 @@ materialized views (`inv_pair_rolling_anomalies` and
 `inv_money_trail_edges`) that pre-compute the rolling-window
 statistics and recursive chain walk respectively. See
 [Materialized views](../Schema_v6.md#the-layered-model) for the
-refresh contract — these matviews **do not auto-refresh**, so a
+refresh contract — these matviews do NOT auto-refresh, so a
 skipped REFRESH after ETL load means the anomaly z-scores and chain
 edges lag the source data.
 
@@ -89,6 +89,8 @@ flags those natural transitions at the bottom.
 </div>
 
 ## What you'll see in the demo
+
+See it live: https://recon-gen-spec.hotchkiss.io/
 
 {% if vocab.demo.has_investigation_plants %}
 The bundled `{{ vocab.fixture_name }}` fixture plants three
@@ -140,16 +142,16 @@ re-render this page.
 ## Reference
 
 - [Account Structure](../scenario/index.md) — the bank, customers,
-  accounts, and money flows behind every walkthrough on this page.
+  accounts and money flows behind every walkthrough on this page.
 - [Schema v6 — Data Feed Contract](../Schema_v6.md) — column specs,
-  metadata keys, and ETL examples for the upstream feeds. The
+  metadata keys and ETL examples for the upstream feeds. The
   [Materialized views](../Schema_v6.md#the-layered-model) section
   documents `{{ l2_instance_name }}_inv_pair_rolling_anomalies` (Volume Anomalies)
   and `{{ l2_instance_name }}_inv_money_trail_edges` (Money Trail / Account
   Network) plus the REFRESH cadence contract.
 - [Data Integration Handbook](etl.md) — the team that populates the
   data behind every walkthrough on this page. Read it when an anomaly
-  z-score, fanout count, or chain-walk result disagrees with what you
+  z-score, fanout count or chain-walk result disagrees with what you
   see in the source feed.
 - [L1 Reconciliation Dashboard](l1.md) — Treasury's view of the same
   base tables. When a Money Trail edge needs row-level posting

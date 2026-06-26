@@ -1,24 +1,26 @@
 # ETL Hook — Bulk Helpers Reference
 
-*Integrator reference for the Python ETL hook surface. Covers the
+Integrator reference for the Python ETL hook surface. Covers the
 canonical column tuples, the `bulk_insert_tx` / `bulk_insert_balance`
-helpers, the `metadata.source` contract, and the
+helpers, the `metadata.source` contract and the
 `cfg.app2.etl_hook` ⇄ standalone-mode boundary. Companion to
 [Data Integration handbook](etl.md) and
-[Schema v6](../Schema_v6.md).*
+[Schema v6](../Schema_v6.md).
 
 ## The contract in one sentence
 
 Your job: emit rows into `{{ l2_instance_name }}_transactions` +
 `{{ l2_instance_name }}_daily_balances` matching the canonical column
 tuples. recon-gen handles the schema, the matview refresh, the
-dashboards, and the audit PDFs.
+dashboards and the audit PDFs.
 
 That's the entire integration surface. You own the projection from
 your source system into two tables; everything else
 (L1 invariant matviews, Investigation matviews, four dashboards,
 audit reconciliation report) is generated against your data without
 further customization.
+
+See it live: https://recon-gen-spec.hotchkiss.io/
 
 ## Canonical column tuples — source of truth
 
@@ -53,8 +55,8 @@ Column-by-column:
 - `account_parent_role` — `TEXT NULL`. The parent role if this is a
   leaf account; NULL for top-level accounts.
 - `amount_money` — `BIGINT NOT NULL` (integer cents). Signed by
-  `amount_direction`. **Bulk helpers auto-coerce dollars → cents** —
-  pass floats / Decimals / `Cents` / ints freely.
+  `amount_direction`. Bulk helpers auto-coerce dollars → cents (pass
+  floats / Decimals / `Cents` / ints freely).
 - `amount_direction` — `TEXT NOT NULL`. `'credit'` (money in) or
   `'debit'` (money out).
 - `status` — `TEXT NOT NULL`. `'Posted'`, `'Pending'`, `'Reversed'`,
@@ -69,13 +71,13 @@ Column-by-column:
   Money Trail / Account Network views can walk the chain recursively.
 - `rail_name` — `TEXT NOT NULL`. L2-declared rail name.
 - `template_name` — `TEXT NULL`. L2-declared transfer template; only
-  the AX-shape L1 invariants (chain parent disagreement, XOR group,
-  fan-in disagreement, multi-XOR) GROUP BY this.
+  the template-keyed L1 invariants (chain parent disagreement, XOR
+  group, fan-in disagreement, multi-XOR) GROUP BY this.
 - `origin` — `TEXT NOT NULL`. `'InternalInitiated'`,
   `'ExternalForcePosted'`, etc. — drives the L1 drift split between
   bank-initiated and force-posted activity.
-- `metadata` — `TEXT NULL`. JSON string with extras. **Your hook MUST
-  stamp `{"source": "real"}` here on every row** — see
+- `metadata` — `TEXT NULL`. JSON string with extras. Your hook MUST
+  stamp `{"source": "real"}` here on every row — see
   [The `metadata.source` contract](#the-metadatasource-contract) below.
 - `supersedes` — `TEXT NULL`. Set on `'TechnicalCorrection'` rows
   that supersede a prior posting (drives the Supersession Audit sheet).
@@ -95,14 +97,14 @@ DB_COLS = (
 - `expected_eod_balance` — `BIGINT NULL` (integer cents).
   L2-declared target; the L1 `expected_eod_balance_breach` matview
   fires when `money <> expected_eod_balance` at EOD. NULL = no
-  declared target. **Auto-coerced from dollars.**
+  declared target. Auto-coerced from dollars.
 - `business_day_start` / `business_day_end` — `TEXT NOT NULL`. ISO
   timestamps bracketing the business day (typically midnight-to-
   midnight in the DB's local TZ).
 - `money` — `BIGINT NOT NULL` (integer cents). Stored end-of-day
   balance. The drift check compares this to
   `SUM(signed amount_money)` from `_transactions` for the same
-  `(account_id, business_day)`. **Auto-coerced from dollars.**
+  `(account_id, business_day)`. Auto-coerced from dollars.
 - `metadata` — `TEXT NULL`. JSON string. Holds the per-day
   limit-schedule payload + the
   `metadata.source` stamp (same contract as `_transactions`).
@@ -137,8 +139,9 @@ Properties of both:
 - **Default columns: the spine-author subset.** When `columns=None`
   (the default), `bulk_insert_tx` uses `TX_COLS` and `bulk_insert_balance`
   uses `DB_COLS`. These cover the spine-generator-author subsets and
-  exclude a few schema columns that have plant-specific NULL defaults
-  (`transfer_completion` / `bundle_id` / `supersedes`).
+  exclude the schema columns no generator touches: `entry`
+  (dialect auto-increment), `transfer_completion` and `bundle_id`
+  (NULL by default — stuck_unbundled's plant relies on the NULL).
 - **Custom columns: `columns=<tuple>`** lifts the default restriction.
   Pass any column subset including the omitted-by-default fields when
   you're bulk-loading real (non-plant) data — typical CSV / pandas
@@ -154,14 +157,14 @@ Properties of both:
     (use this when your source system already gives you integer cents).
   - `None` → SQL NULL (use for the optional money cols).
   - To pass a literal integer-cents value, wrap it: `Cents(15432)`
-    means 15432 cents = $154.32. **Passing `15432` directly means
-    $15,432.00** — easy footgun, see Pitfalls below.
+    means 15432 cents = $154.32. Passing `15432` directly means
+    $15,432.00 (easy footgun, see Pitfalls below).
   - Any other type raises `TypeError` at the coerce boundary (no
     silent passthrough that surfaces as opaque downstream BIGINT
     INSERT failures).
 - **Empty rows = no-op.** `bulk_insert_tx(conn, [])` does not open
   a cursor and does not fire SQL.
-- **Dialect dispatch.** DuckDB connections route through the CA.10
+- **Dialect dispatch.** DuckDB connections route through the
   multi-row `VALUES (…), (…), …` coalescer (measured 54× faster than
   DuckDB's `executemany` at 50k rows). PG (psycopg) and Oracle
   (oracledb) connections route through `cursor.executemany` in
@@ -259,7 +262,7 @@ metadata = json.dumps({
 ```
 
 The bulk helpers do not call `scenario_metadata` — that's recon-gen's
-*internal* helper for stamping `source='training'` on synthetic plant
+INTERNAL helper for stamping `source='training'` on synthetic plant
 rows. The integrator surface is deliberately low-level: stamping at
 the bulk boundary would silently overwrite intentional `source='real'`
 rows.
@@ -274,7 +277,7 @@ app2:
   etl_hook: ./bin/my_etl.py
 ```
 
-When **configured** (pointing at your wrapper):
+When CONFIGURED (pointing at your wrapper):
 
 - recon-gen knows your ETL owns the data.
 - Trainer reset and Studio's *Deploy changes* truncate the base tables
@@ -283,9 +286,9 @@ When **configured** (pointing at your wrapper):
   through the `source='training'` tag, so they coexist with your real
   rows.
 
-When **`None`** (no hook configured):
+When `None` (no hook configured):
 
-- recon-gen treats the demo DB as **standalone mode**: there is no
+- recon-gen treats the demo DB as standalone mode: there is no
   upstream feed, so the synthetic seed IS the data.
 - Trainer reset narrows its DELETE to
   `WHERE JSON_VALUE(metadata, '$.source') = 'training'` — rows your
@@ -371,7 +374,7 @@ conn.commit()
 Operator cfgs at `run/config.<dialect>.yaml`:
 
 - **`run/config.duckdb.yaml`** — `db.url: "duckdb:///run/<your-l2>.duckdb"`.
-  Single-process; the bulk helpers route to the CA.10 multi-row
+  Single-process; the bulk helpers route to the multi-row
   VALUES coalescer.
 - **`run/config.postgres.yaml`** — `db.url:
   "postgresql://user:pass@host:port/db"`. The schema emitter prepends
@@ -415,7 +418,7 @@ Add the `etl_hook` line to whichever cfg matches your dialect.
 ## Reference
 
 - [Data Integration handbook](etl.md) — the higher-level walkthrough
-  of the two-table contract, matview refresh sequence, and idempotency.
+  of the two-table contract, matview refresh sequence and idempotency.
 - [Schema v6 — Data Feed Contract](../Schema_v6.md) — column-by-column
   contract with per-column failure modes.
 - [Seed generator](seed-generator.md) — what the synthetic
@@ -423,8 +426,8 @@ Add the `etl_hook` line to whichever cfg matches your dialect.
 - [Walkthrough: how do I populate transactions?](../walkthroughs/etl/how-do-i-populate-transactions.md)
   — `INSERT INTO ... SELECT FROM` shape for a SQL-only ETL.
 - `src/recon_gen/common/spine/_emit_helpers.py` — source of truth
-  for the bulk helpers, `TX_COLS`, `DB_COLS`, and the money coercion.
-- `src/recon_gen/common/config.py` — `Config.etl_hook` field docs +
-  AO.1 money contract notes.
+  for the bulk helpers, `TX_COLS`, `DB_COLS` and the money coercion.
+- `src/recon_gen/common/config.py` — `App2Config.etl_hook` field docs +
+  the money contract notes.
 
 [Vocabulary](../handbook/etl.md)

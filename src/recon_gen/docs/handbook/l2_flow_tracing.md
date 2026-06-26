@@ -4,16 +4,17 @@
 the YAML declares and what the runtime data actually does. Currently
 rendered against **{{ vocab.institution.name }}** ({{ l2_instance_name }}).*
 
-The **L2 Flow Tracing Dashboard** answers a different question from the
-L1 Reconciliation Dashboard. L1 asks "are my postings internally
-consistent?" — drift, overdraft, limit breach, aging. L2 Flow Tracing
-asks one step up: **is my L2 declaration alive?** Every Rail, Chain,
-TransferTemplate, BundlesActivity selector, MetadataKey, and
-LimitSchedule the L2 instance YAML declares should be backed by some
-actual runtime activity. When it isn't, that's an L2 *hygiene*
-problem — the declaration drifted away from reality, or reality drifted
-away from the declaration — and it doesn't surface anywhere on the L1
+L2 Flow Tracing asks one question L1 never does: is my L2 declaration
+alive? L1 asks whether the postings are internally consistent — drift,
+overdraft, limit breach, aging. L2 Flow Tracing steps up one level.
+Every Rail, Chain, TransferTemplate, BundlesActivity selector,
+MetadataKey and LimitSchedule the L2 instance YAML declares should be
+backed by some actual runtime activity. When it isn't, that's an L2
+HYGIENE problem — the declaration drifted from reality, or reality
+drifted from the declaration — and it surfaces nowhere on the L1
 dashboard.
+
+See it live: https://recon-gen-spec.hotchkiss.io/
 
 ## Dataflow — which datasets feed which sheets
 
@@ -25,17 +26,17 @@ dashboard.
 
 ## What the L2 Flow Tracing dashboard reconciles
 
-Five interactive sheets, each one a different lens on the
+Four interactive sheets, each a different lens on the
 declaration-vs-runtime gap.
 
 <div class="snb-card-grid">
   <div class="snb-card">
     <h3>Rails</h3>
-    <p>Postings ledger filtered by date range, rail, status, bundle status, and a cascading metadata-key + value pair. The "are any rails dead?" surface — pick a rail, see if it fired.</p>
+    <p>Postings ledger filtered by date range, rail, status, bundle status and a cascading metadata-key + value pair. The "are any rails dead?" surface — pick a rail, see if it fired.</p>
   </div>
   <div class="snb-card">
     <h3>Chains</h3>
-    <p>One row per declared parent-firing transfer. <code>completion_status</code> reads <code>Complete</code> when every Required child fired against the parent's <code>transfer_id</code>, <code>Incomplete</code> if any Required child is missing, <code>No Required Children</code> when only optional / XOR children are declared.</p>
+    <p>One row per declared parent-firing transfer. <code>completion_status</code> reads <code>Completed</code> when every Required child fired against the parent's <code>transfer_id</code> AND every XOR group fired exactly one member, <code>Incomplete</code> otherwise (a Required child missing, or an XOR group with zero or more than one firing). The old <code>No Required Children</code> state is gone — the L2 validator rejects all-optional chains at load, so the SQL never produces it.</p>
   </div>
   <div class="snb-card">
     <h3>Transfer Templates</h3>
@@ -43,7 +44,7 @@ declaration-vs-runtime gap.
   </div>
   <div class="snb-card">
     <h3>L2 Exceptions</h3>
-    <p>All six L2 hygiene checks unified into one row-per-violation view. KPI = total open violations; bar chart breaks down by <code>check_type</code>; the detail table sorts by magnitude (descending) and right-clicks drill back to the offending Rail or Chain row.</p>
+    <p>All six L2 hygiene checks unified into one row-per-violation view. KPI = total open violations; bar chart breaks down by <code>check_type</code>; the detail table sorts by count (descending) and right-clicks drill back to the offending Rail or Chain row.</p>
   </div>
 </div>
 
@@ -92,9 +93,8 @@ anything new go dead overnight?" The bar chart shows the dominant
   populates with the distinct values currently in the data, pick one
   or more Values to slice the table.
 - *Which chain firings closed?* → **Chains** sheet. One row per parent
-  firing; `completion_status` tells you `Complete` /  `Incomplete` /
-  `No Required Children` at a glance. Same metadata cascade is wired
-  here.
+  firing; `completion_status` tells you `Completed` or `Incomplete` at
+  a glance. Same metadata cascade is wired here.
 - *Did this multi-leg template balance?* → **Transfer Templates** sheet.
   The Sankey shows the flow shape per declared template; the table
   beside it shows `Balanced` / `Imbalanced` per shared Transfer (the
@@ -116,21 +116,21 @@ YAML the L1 dashboard reads. The instance declares:
 - LimitSchedules (per-(parent_role × rail_name) daily caps)
 
 The same `common.l2.emit_schema(instance)` that powers L1 also powers
-L2 Flow Tracing — the per-instance prefixed PostgreSQL DDL produces
-the `{{ l2_instance_name }}_current_transactions` matview every L2 Flow Tracing
+L2 Flow Tracing — the per-instance prefixed DDL (emitted per dialect:
+PostgreSQL, Oracle or DuckDB) produces the
+`{{ l2_instance_name }}_current_transactions` matview every L2 Flow Tracing
 dataset reads.
 
 Switching the L2 instance switches the dashboard. The same
-dashboard renders against any L2 instance without code changes —
-that's the M.3.4 / M.3.9 "L2-fed dashboard" promise. A 5-rail
-shop and a 50-rail shop get the same five sheets and the same
-six check_types; the data populates per-instance.
+dashboard renders against any L2 instance without code changes. A 5-rail shop and a 50-rail
+shop get the same five sheets (Getting Started plus the four lenses)
+and the same six check_types; the data populates per-instance.
 
 ## Cross-app integration
 
 L1 and L2 Flow Tracing are sibling dashboards over one L2 instance,
-not layered ones. Per the M.2d.3 prefix-isolation pattern, they share
-the same `{{ l2_instance_name }}_*` matviews on the same Aurora schema and produce
+not layered ones. They share the same `{{ l2_instance_name }}_*` matviews on the
+same database schema and produce
 their dashboard IDs as `<deployment_name>-l1-dashboard` and
 `<deployment_name>-l2-flow-tracing` respectively — `cfg.aws.deployment_name`
 namespaces both apps under one stable prefix, so an integrator deploying

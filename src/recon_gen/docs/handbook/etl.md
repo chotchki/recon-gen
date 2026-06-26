@@ -4,11 +4,11 @@
 Integration Team. Currently rendered against
 **{{ vocab.institution.name }}** ({{ l2_instance_name }}).*
 
-This handbook backs the **feeds behind every dashboard** — the
+This handbook backs the feeds behind every dashboard — the
 upstream ETL that populates `transactions` and `daily_balances` at
 {{ vocab.institution.name }}. Each entry here is a task the Data
 Integration Team actually does: map a source table, prove the feed
-is sound, tag a forced Fed posting, extend the metadata contract,
+is sound, tag a forced Fed posting, extend the metadata contract
 or debug a load that made it to the tables but not to the
 dashboards.
 
@@ -44,7 +44,7 @@ Every shipped dashboard (L1, L2 Flow Tracing, Investigation,
 Executives) reads from these two tables. `account_type` and
 `rail_name` discriminate which slice each app cares about;
 the schema itself is shared. Full column contract, per-column
-failure modes, metadata catalog, and ETL examples:
+failure modes, metadata catalog and ETL examples:
 
 - [Schema v6 — Data Feed Contract](../Schema_v6.md) — the
   source-of-truth document. Read the *Getting Started for Data
@@ -113,7 +113,7 @@ full refresh contract.
   </a>
   <a class="snb-card" href="../../walkthroughs/etl/how-do-i-validate-a-single-account-day/">
     <h3>How do I validate a single account-day after a load?</h3>
-    <p>Open the Daily Statement sheet on a specific `(account_id, balance_date)` to confirm opening, debits, credits, closing, and zero drift — the per-row companion to the universal pre-flight invariants.</p>
+    <p>Open the Daily Statement sheet on a specific `(account_id, balance_date)` to confirm opening, debits, credits, closing and zero drift — the per-row companion to the universal pre-flight invariants.</p>
   </a>
 </div>
 
@@ -151,12 +151,12 @@ in memory, then INSERTing — reach for `bulk_insert_tx` /
 `src/recon_gen/common/spine/_emit_helpers.py`. They take
 `Sequence[tuple[object, ...]]` in canonical `TX_COLS` / `DB_COLS`
 order, auto-coerce dollar shapes in the money columns to BIGINT
-cents, and dispatch to the per-dialect fast path (DuckDB's
+cents and dispatch to the per-dialect fast path (DuckDB's
 multi-row VALUES coalescer; psycopg / oracledb `executemany`).
 
 See [ETL Hook — Bulk Helpers Reference](etl-hook.md) for the column
 tuples, code examples, the `metadata.source` contract, the
-`cfg.app2.etl_hook` ⇄ standalone-mode boundary, and a ~40-line
+`cfg.app2.etl_hook` ⇄ standalone-mode boundary and a ~40-line
 `my_etl.py` skeleton.
 
 ## The exemplary helper
@@ -186,7 +186,7 @@ A sheet is rendering, but the most recent rows look stale —
 yesterday's postings are missing, the Drift KPI hasn't budged
 since the last load, the Daily Statement walks stop a day or two
 behind the date you just ETL'd. Your first instinct is to suspect
-an ETL bug or a query bug. Before you go there, check whether the
+an ETL or query bug. Before you go there, check whether the
 matviews are simply behind.
 
 ### First diagnostic step: open the App Info sheet
@@ -207,7 +207,7 @@ Compare the `latest_date` values:
   `{{ l2_instance_name }}_daily_balances` — reflect how fresh the source data
   is. Their `latest_date` is the high-water mark your ETL has
   loaded.
-- Every matview row below them should carry the **same**
+- Every matview row below them should carry the SAME
   `latest_date` (or within one ETL cycle of it).
 - If a matview's `latest_date` is significantly older than the
   base tables, that matview is stale relative to the loaded data.
@@ -216,7 +216,7 @@ Compare the `latest_date` values:
 
 ### Root cause
 
-PostgreSQL and Oracle materialized views do **not** auto-refresh.
+PostgreSQL and Oracle materialized views do NOT auto-refresh.
 They only update when explicitly told to via
 `REFRESH MATERIALIZED VIEW`. An ETL load that writes new rows to
 `{{ l2_instance_name }}_transactions` and `{{ l2_instance_name }}_daily_balances` but doesn't
@@ -245,10 +245,10 @@ on the left. It runs a real query against the database catalog. If
 it shows a number, QuickSight's rendering pipeline is healthy and
 any blank visual elsewhere on the dashboard is a data or SQL issue
 (stale matviews, an empty filter, an unexpected `WHERE` narrowing).
-If the Liveness KPI is **also** blank, QuickSight itself has
+If the Liveness KPI is ALSO blank, QuickSight itself has
 hung — every visual on every sheet stuck on the spinner with no
 error banner. That's a separate failure mode; the fix is to wait
-it out, open in a fresh incognito window, or force a full
+it out, open in a fresh incognito window or force a full
 delete-then-create of the QuickSight resource graph (theme,
 datasource, datasets, analysis, dashboard) plus a clean re-seed
 and matview refresh.

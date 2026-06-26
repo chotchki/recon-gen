@@ -2,9 +2,9 @@
 
 *Regulator-ready PDF reconciliation report generated directly from
 the per-instance L1 invariant matviews. Currently rendered against
-**{{ vocab.institution.name }}** ({{ l2_instance_name }}).*
+{{ vocab.institution.name }} ({{ l2_instance_name }}).*
 
-The **`audit` artifact group** generates a printable PDF that
+The `audit` artifact group generates a printable PDF that
 covers the same L1 SHOULD-constraints the
 [L1 Reconciliation Dashboard](l1.md) surfaces — drift, overdraft,
 limit breach, stuck pending, stuck unbundled, supersession — but
@@ -12,9 +12,9 @@ shaped for a regulator or external auditor sitting outside the
 operator's QuickSight account. The PDF is the artifact you hand off;
 the dashboard is the artifact you operate against.
 
-The report is generated **directly from the database** via
+The report is generated DIRECTLY from the database via
 `reportlab` — no QuickSight in the loop. The same matviews the L1
-dashboard reads supply the row counts, magnitudes, and per-day
+dashboard reads supply the row counts, magnitudes and per-day
 walks, so the numbers in the PDF and the numbers on the dashboard
 are computed from the same sources at the same point in time.
 
@@ -25,7 +25,7 @@ order, top to bottom:
 
 - **Cover page** — institution name (from the L2 persona block),
   reporting period, generation timestamp, L2 instance fingerprint
-  short hash, and a `Source-data provenance` panel naming the four
+  short hash and a `Source-data provenance` panel naming the four
   inputs the report binds to.
 - **Table of contents** — every section heading + sub-heading with
   resolved page numbers.
@@ -61,13 +61,13 @@ order, top to bottom:
   two empty PDF signature widgets the reviewer's PDF reader can
   fill in.
 - **Provenance Appendix** — three sub-sections covering matview
-  evidence sidecars, the one-shot `audit verify` command, and a
+  evidence sidecars, the one-shot `audit verify` command and a
   manual-recompute Python recipe. Embedded as a PDF attachment is
   a byte-exact copy of the L2 YAML the report bound to and the
   `verify-provenance.py` recipe script.
 
 Every page carries a footer with the `recon-gen` version,
-generation timestamp, page number, and short-form provenance hash.
+generation timestamp, page number and short-form provenance hash.
 
 For the L1 invariant definitions themselves — what each view
 contains, when a row qualifies as a violation, refresh contract
@@ -92,7 +92,7 @@ optional `signing:` block (see below). When `demo_database_url`
 is unset, the renderer falls back to a skeleton-mode placeholder
 in every numeric cell so the layout is still previewable.
 
-**Period default: a 7-day window ending yesterday.** `[today − 7,
+Period default: a 7-day window ending yesterday. `[today − 7,
 today − 1]` inclusive. Override via the typed `--period` flag:
 
 ```bash
@@ -104,7 +104,7 @@ recon-gen audit apply -c config.yaml --l2 instance.yaml \
 The `--period` flag accepts several shapes: `trailing:N` ("last N
 days ending yesterday"; default is `trailing:7`), `yesterday`,
 `today`, `YYYY-MM-DD..YYYY-MM-DD` for an explicit closed-closed
-range, or a single `YYYY-MM-DD` for a one-day report. Both
+range or a single `YYYY-MM-DD` for a one-day report. Both
 endpoints in the range form are inclusive. `--execute` is the
 universal opt-in across the CLI — without it, `audit apply` only
 emits the Markdown rendering (handy for content review without
@@ -116,7 +116,7 @@ unlink.
 
 ## Provenance fingerprint
 
-Every PDF carries a cryptographic fingerprint over **four inputs**
+Every PDF carries a cryptographic fingerprint over FOUR inputs
 that, taken together, fully determine the report's contents:
 
 1. `{{ l2_instance_name }}_transactions` — every row up to the
@@ -186,8 +186,8 @@ Extracts the embedded `ProvenanceFingerprint` JSON from the PDF's
 `/Subject` metadata, recomputes each input from current sources,
 and compares.
 
-A subtlety worth knowing: `verify` **recomputes against the
-embedded high-water-mark, not the current `MAX(entry)`**. New
+A subtlety worth knowing: `verify` recomputes against the
+embedded high-water-mark, NOT the current `MAX(entry)`. New
 rows added since report generation don't trigger a false diff —
 the fingerprint only fires when bytes the report actually bound
 to have changed.
@@ -253,7 +253,7 @@ provenance fingerprint still binds the report to its source data,
 just without a cryptographic countersignature.
 
 !!! note
-    Signing is **incremental**. Subsequent reviewers stack
+    Signing is INCREMENTAL. Subsequent reviewers stack
     additional signatures on top via Adobe Acrobat / pyHanko / any
     compliant tool — the document is deliberately silent on how
     many signatures are required. There's no "1 of N" advertised in
