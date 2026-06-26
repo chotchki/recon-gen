@@ -8,8 +8,8 @@
 
 Recon Generator is an independent validation tool for midsize financial institutions: it tells you whether your books balance day to day, and when they don't, where to look first.
 
-- Accounting is standard. We call it L1, meaning layer 1 in this tool. 
-- Your institution is not. We call it L2, meaning layer 2 in this tool. 
+- Accounting is standard. We call it L1, meaning layer 1 in this tool.
+- Your institution is not. We call it L2, meaning layer 2 in this tool.
 
 Recon Generator layers the two: standard double-entry invariants on top of the unique shape you declare (your accounts, your rails, your multi-leg transfer templates, your bundling rules, your aging caps), so every way you actually move money is checked against the rules that govern it.
 
@@ -52,7 +52,7 @@ flowchart LR
     FEED --> core
     core --> QS["AWS QuickSight<br/>JSON resource graph"]
     core --> HTMX["Self-hosted HTMX<br/>Dashboards + Studio"]
-    core --> PDF["Regulator-ready PDF<br/>audit report"]
+    core --> PDF["Auditor-ready PDF<br/>audit report"]
 ```
 
 Browse the full module tree on [GitHub](https://github.com/chotchki/recon-gen/tree/main/src/recon_gen); every module's API reference lives on [ReadTheDocs](https://recon-gen.readthedocs.io/en/latest/).
@@ -74,7 +74,7 @@ Multiple runtime environments — pick what your auditors and analysts already t
 
 - **AWS QuickSight** — managed BI you embed in your own portal; permissions follow the QS user. **NOTE:** This WILL be deprecated in future releases as AWS continues to change their pricing.
 - **Self-hosted HTMX web app** — the same dashboards with NO AWS dependency, so it runs offline. For sensitive deployments that can't reach external SaaS.
-- **Regulator-ready PDF audit report** — printable and cryptographically fingerprinted (optionally pyHanko-signed). Same source data as the dashboards, and an end-of-pipeline [4-way agreement test](https://github.com/chotchki/recon-gen/blob/main/tests/e2e/qs_browser/test_audit_invariants_agreement.py) (against the underlying sql) gates that they stay in agreement.
+- **Auditor-ready PDF audit report** — printable and cryptographically fingerprinted (optionally pyHanko-signed). Same source data as the dashboards, and an end-of-pipeline [4-way agreement test](https://github.com/chotchki/recon-gen/blob/main/tests/e2e/qs_browser/test_audit_invariants_agreement.py) (against the underlying sql) gates that they stay in agreement.
 
 ## How it's tested
 
@@ -149,10 +149,11 @@ Then invoke tools directly via the venv (no `source activate` needed):
 .venv/bin/recon-gen --help
 ```
 
-For a leaner install, swap `--all-extras` for the three real extras (collapsed from eight in BS.6 — one knob per persona): 
-- `--extra dev` (unit tests + pyright), 
-- `--extra prod` (everything a production run needs DB drivers, AWS deploy, the self-hosted server, PDF + docs), 
-- `--extra e2e` (Playwright + boto3 for the browser / API layers).
+For a leaner install, swap `--all-extras` for the three real extras (collapsed from eight in BS.6 — one knob per persona):
+
+- `--extra dev` (unit tests + pyright)
+- `--extra prod` (everything a production run needs — DB drivers, AWS deploy, the self-hosted server, PDF + docs)
+- `--extra e2e` (Playwright + boto3 for the browser / API layers)
 
 If you'd rather stick with pip, the standard PEP-621 path still works:
 
@@ -219,7 +220,7 @@ recon-gen schema apply -c config.yaml --execute   # tables + matviews
 recon-gen data apply   -c config.yaml --execute   # 90-day baseline + plants
 recon-gen data refresh -c config.yaml --execute   # populate matviews
 recon-gen json apply   -c config.yaml -o out/ --execute  # JSON + AWS deploy
-recon-gen audit apply  -c config.yaml --execute -o report.pdf  # regulator-ready PDF (optional)
+recon-gen audit apply  -c config.yaml --execute -o report.pdf  # auditor-ready PDF (optional)
 ```
 
 Datasets are all Direct Query (no SPICE), so seed changes show up immediately after a fresh `data apply --execute` + `data refresh --execute` — no QuickSight-side refresh needed.
@@ -255,7 +256,7 @@ The self-hosted stack isn't a lesser copy of QuickSight. A 4-way agreement test 
 
 Theme is declared inline on the L2 institution YAML's `theme:` block. When the L2 instance carries no `theme:` block, `build_theme` returns `None` and AWS QuickSight CLASSIC takes over at deploy (silent-fallback contract). The single `DEFAULT_PRESET` in `common/theme.py` is the in-canvas-accent fallback for apps when their L2 instance declares no theme — no registry, no CLI flag.
 
-To customize the demo persona's brand launch studio and use its built in editor!
+To customize the demo persona's brand, launch studio and use its built-in editor!
 
 ## Tests
 
