@@ -197,7 +197,7 @@ For every two-template chain (chain.children resolves to a TransferTemplate), ev
 
 ### What to do
 
-Identify which leg_rails of the child template wrote the conflicting `parent_transfer_id` values — usually the bug is upstream of the matview (in the ETL adapter that assigns `parent_transfer_id` from a stale reference). Compare the two parents by drilling into their respective transfer_ids on the Transactions sheet; one should be the correct first-firing parent and the other a contamination from an unrelated cycle. Fix the ETL's parent-resolution logic and re-run the affected child Transfer.
+Identify which leg_rails of the child template wrote the conflicting `transfer_parent_id` values — usually the bug is upstream of the matview (in the ETL adapter that assigns `transfer_parent_id` from a stale reference). Compare the two parents by drilling into their respective transfer_ids on the Transactions sheet; one should be the correct first-firing parent and the other a contamination from an unrelated cycle. Fix the ETL's parent-resolution logic and re-run the affected child Transfer.
 
 **Section reference:** `InvariantSection["chain_parent_disagreement"]`
 
@@ -239,7 +239,7 @@ For every chain child entry declaring `fan_in: true` (AB.6 per-child shape), eve
 
 ### What to do
 
-Identify which batch this is via the `business_day` + `child_template_name`. For 'missing': the upstream parent rail should have fired N times but one (or more) firings never landed — look at the parent rail's firing log for the batch period and find the missing date(s). For 'extra': a parent firing claimed membership in this batch it shouldn't have — could be a stale `parent_transfer_id` metadata value (ETL pulled from a wrong source) or a duplicate re-post. For 'orphan': only one parent contributed — either the chain shouldn't be `fan_in` (it's actually 1:1) OR the operator should set `expected_parent_count` so the matview can flag the missing siblings.
+Identify which batch this is via the `business_day` + `child_template_name`. For 'missing': the upstream parent rail should have fired N times but one (or more) firings never landed — look at the parent rail's firing log for the batch period and find the missing date(s). For 'extra': a parent firing claimed membership in this batch it shouldn't have — could be a stale `transfer_parent_id` metadata value (ETL pulled from a wrong source) or a duplicate re-post. For 'orphan': only one parent contributed — either the chain shouldn't be `fan_in` (it's actually 1:1) OR the operator should set `expected_parent_count` so the matview can flag the missing siblings.
 
 **Section reference:** `InvariantSection["fan_in_disagreement"]` [Missing-parent variant]
 
@@ -253,7 +253,7 @@ For every chain child entry declaring `fan_in: true` (AB.6 per-child shape), eve
 
 ### What to do
 
-Identify which batch this is via the `business_day` + `child_template_name`. For 'missing': the upstream parent rail should have fired N times but one (or more) firings never landed — look at the parent rail's firing log for the batch period and find the missing date(s). For 'extra': a parent firing claimed membership in this batch it shouldn't have — could be a stale `parent_transfer_id` metadata value (ETL pulled from a wrong source) or a duplicate re-post. For 'orphan': only one parent contributed — either the chain shouldn't be `fan_in` (it's actually 1:1) OR the operator should set `expected_parent_count` so the matview can flag the missing siblings.
+Identify which batch this is via the `business_day` + `child_template_name`. For 'missing': the upstream parent rail should have fired N times but one (or more) firings never landed — look at the parent rail's firing log for the batch period and find the missing date(s). For 'extra': a parent firing claimed membership in this batch it shouldn't have — could be a stale `transfer_parent_id` metadata value (ETL pulled from a wrong source) or a duplicate re-post. For 'orphan': only one parent contributed — either the chain shouldn't be `fan_in` (it's actually 1:1) OR the operator should set `expected_parent_count` so the matview can flag the missing siblings.
 
 **Section reference:** `InvariantSection["fan_in_disagreement"]` [Extra-parent variant]
 

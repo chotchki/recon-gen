@@ -74,7 +74,7 @@ Row count: **26** kinds.
 
 **Short statement:** For every two-template chain (chain.children resolves to a TransferTemplate), every leg_rail firing of one child Transfer SHOULD agree on which parent firing it descends from (first-firing-wins per gap doc §3).
 
-**What to do:** Identify which leg_rails of the child template wrote the conflicting `parent_transfer_id` values — usually the bug is upstream of the matview (in the ETL adapter that assigns `parent_transfer_id` from a stale reference). Compare the two parents by drilling into their respective transfer_ids on the Transactions sheet; one should be the correct first-firing parent and the other a contamination from an unrelated cycle. Fix the ETL's parent-resolution logic and re-run the affected child Transfer.
+**What to do:** Identify which leg_rails of the child template wrote the conflicting `transfer_parent_id` values — usually the bug is upstream of the matview (in the ETL adapter that assigns `transfer_parent_id` from a stale reference). Compare the two parents by drilling into their respective transfer_ids on the Transactions sheet; one should be the correct first-firing parent and the other a contamination from an unrelated cycle. Fix the ETL's parent-resolution logic and re-run the affected child Transfer.
 
 ## xor_group_missed
 
@@ -92,13 +92,13 @@ Row count: **26** kinds.
 
 **Short statement:** For every chain child entry declaring `fan_in: true` (AB.6 per-child shape), every child Transfer's contributing parent set SHOULD match the entry's `expected_parent_count` (when set), or have cardinality ≥2 (when unset).
 
-**What to do:** Identify which batch this is via the `business_day` + `child_template_name`. For 'missing': the upstream parent rail should have fired N times but one (or more) firings never landed — look at the parent rail's firing log for the batch period and find the missing date(s). For 'extra': a parent firing claimed membership in this batch it shouldn't have — could be a stale `parent_transfer_id` metadata value (ETL pulled from a wrong source) or a duplicate re-post. For 'orphan': only one parent contributed — either the chain shouldn't be `fan_in` (it's actually 1:1) OR the operator should set `expected_parent_count` so the matview can flag the missing siblings.
+**What to do:** Identify which batch this is via the `business_day` + `child_template_name`. For 'missing': the upstream parent rail should have fired N times but one (or more) firings never landed — look at the parent rail's firing log for the batch period and find the missing date(s). For 'extra': a parent firing claimed membership in this batch it shouldn't have — could be a stale `transfer_parent_id` metadata value (ETL pulled from a wrong source) or a duplicate re-post. For 'orphan': only one parent contributed — either the chain shouldn't be `fan_in` (it's actually 1:1) OR the operator should set `expected_parent_count` so the matview can flag the missing siblings.
 
 ## fan_in_extra_parent
 
 **Short statement:** For every chain child entry declaring `fan_in: true` (AB.6 per-child shape), every child Transfer's contributing parent set SHOULD match the entry's `expected_parent_count` (when set), or have cardinality ≥2 (when unset).
 
-**What to do:** Identify which batch this is via the `business_day` + `child_template_name`. For 'missing': the upstream parent rail should have fired N times but one (or more) firings never landed — look at the parent rail's firing log for the batch period and find the missing date(s). For 'extra': a parent firing claimed membership in this batch it shouldn't have — could be a stale `parent_transfer_id` metadata value (ETL pulled from a wrong source) or a duplicate re-post. For 'orphan': only one parent contributed — either the chain shouldn't be `fan_in` (it's actually 1:1) OR the operator should set `expected_parent_count` so the matview can flag the missing siblings.
+**What to do:** Identify which batch this is via the `business_day` + `child_template_name`. For 'missing': the upstream parent rail should have fired N times but one (or more) firings never landed — look at the parent rail's firing log for the batch period and find the missing date(s). For 'extra': a parent firing claimed membership in this batch it shouldn't have — could be a stale `transfer_parent_id` metadata value (ETL pulled from a wrong source) or a duplicate re-post. For 'orphan': only one parent contributed — either the chain shouldn't be `fan_in` (it's actually 1:1) OR the operator should set `expected_parent_count` so the matview can flag the missing siblings.
 
 ## multi_xor_missed
 
