@@ -690,7 +690,7 @@ Rewrite the reader-facing prose so it reads as chotchki, not generic-AI. Source 
 - [x] DT.4 - **Walkthroughs fan-out** (28 guides, ~6.6k lines — largest section). Same pipeline; operator review at boundary.
 - [ ] DT.5 - **In-app per-sheet help snippets** (37 files, ~3k lines — render LIVE in QS TextBoxes + App2). Pipeline + drift / liveness-gate guard (token preservation is the thing that breaks everything else if dropped); operator review.
 - [ ] DT.6 - **CLI `--help` + handbook vocabulary / invariant / diagram prose** (in-code: `cli/**`, `common/handbook/**`). Pipeline + App2↔QS parity / drift guard; operator review.
-- [ ] DT.7 - **RELEASE_NOTES forward style note.** Add a short "new entries in chotchki's voice" note; leave the 14.6.0 → 13.14.4 history untouched.
+- [x] DT.7 - **RELEASE_NOTES forward style note.** Add a short "new entries in chotchki's voice" note; leave the 14.6.0 → 13.14.4 history untouched.
 - [ ] DT.8 - **Phase exit.** Full mkdocs build clean + all doc-content tests green + persona-neutrality + App2↔QS handbook parity + link check; operator final review; RELEASE_NOTES entry (ask before cut per [[feedback_always_ask_before_release_cut]]); sweep DT to PLAN_ARCHIVE.md.
 
 ## Backlog (not yet phased)

@@ -6,6 +6,11 @@
 > AI, BK, BQ, BW, CK, BV close, snapshotter pattern, runner readiness).
 > v13.14.4 below resumes the convention.
 
+> **Voice note (Phase DT, 2026-06).** From here forward these notes are written in
+> my own voice — the same pass that rewrote and staleness-audited the reader-facing
+> prose (README, handbook, in-app sheet help, CLI `--help`) against the code. The
+> v14.6.0 → v13.14.4 entries below predate that pass and are left as written.
+
 ## v14.6.0 — Supersession Audit: detection fix + transaction-id navigation
 
 Minor. Phase DR adds the Supersession Audit's transaction-grain navigation
