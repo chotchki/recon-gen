@@ -462,7 +462,7 @@ def docs_test(pytest_args: str) -> None:
     pyright_argv = [
         sys.executable, "-m", "pyright",
         "src/recon_gen/common/handbook/",
-        "main.py",
+        "src/recon_gen/main.py",
     ]
     failed: list[str] = []
     click.echo(f"$ {' '.join(pytest_argv)}")

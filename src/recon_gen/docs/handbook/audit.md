@@ -220,7 +220,7 @@ confirm it matches the embedded `l2_yaml_sha`.
 
 ## Auto-signing the PDF
 
-When `config.yaml` carries a `signing:` block, `audit apply
+When `config.yaml` carries an `audit.signing:` block, `audit apply
 --execute` runs the rendered PDF through pyHanko and applies a
 CMS digital signature over the entire byte range. The signature
 field is named `QSGSystemSignature` and is the cryptographically
@@ -228,11 +228,12 @@ bound machine attestation referenced from the sign-off block.
 
 ```yaml
 # config.yaml
-signing:
-  key_path: "path/to/signing-key.pem"
-  cert_path: "path/to/signing-cert.pem"
-  passphrase_env: "QSG_SIGNING_PASSPHRASE"   # optional
-  signer_name: "Audit Pipeline (production)" # optional; defaults to cert CN
+audit:
+  signing:
+    key_path: "path/to/signing-key.pem"
+    cert_path: "path/to/signing-cert.pem"
+    passphrase_env: "QSG_SIGNING_PASSPHRASE"   # optional
+    signer_name: "Audit Pipeline (production)" # optional; defaults to cert CN
 ```
 
 Field reference (`SigningConfig` in `common/config.py`):

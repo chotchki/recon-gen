@@ -75,12 +75,12 @@ pip install "recon-gen[prod]"
 recon-gen audit apply -c config.yaml --execute -o report.pdf
 ```
 
-For digitally-signed PDFs, [add a `signing:` block to
+For digitally-signed PDFs, [add an `audit.signing:` block to
 `config.yaml`](../handbook/audit.md) — `[prod]` already covers it (no
 separate install step). pyHanko picks up the PEM key + cert at render
 time and stamps a CMS signature on the cover page. Every render also
-lands empty reviewer-signature widgets on the page, whether or not a
-`signing:` block is present.
+lands empty reviewer-signature widgets on the page, whether or not an
+`audit.signing:` block is present.
 
 ### "I want to hack on the source"
 
