@@ -20,7 +20,7 @@ to high-end retail), and you want the planted scenarios to size to
 the same band so plants look like ordinary firings (just at the
 boundary that triggers the SHOULD-constraint).
 
-This is the [amount_typical_range](../../concepts/l2/rail.md#optional-typical-amount-range-ab5)
+This is the [amount_typical_range](../../concepts/l2/rail.md#optional-typical-amount-range)
 feature: you declare a per-firing soft bound on the rail and both
 the baseline emitter and the planted-scenario emitter respect it
 without any schema migration or matview rewrite.
@@ -34,7 +34,7 @@ between $5 and $500 instead of the heavy-tailed lognormal default?"
 
 Three reference points:
 
-- **[Rail (concept) → Optional: typical amount range](../../concepts/l2/rail.md#optional-typical-amount-range-ab5)**
+- **[Rail (concept) → Optional: typical amount range](../../concepts/l2/rail.md#optional-typical-amount-range)**
   — the field semantics: the log-uniform sampler, the cap
   interaction and the V1a-c validator rules.
 - **`tests/l2/spec_example.yaml`** — the minimal fixture carries

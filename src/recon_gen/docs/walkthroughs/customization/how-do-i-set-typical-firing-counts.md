@@ -18,7 +18,7 @@ customer count and produced an institution-wide volume an order of
 magnitude too large. Per-firing realism alone never fixes the top-line:
 count × amount = aggregate, and the count half was UNBOUNDED.
 
-That's what [firings_typical_per_period](../../concepts/l2/rail.md#optional-typical-firing-count-range-af)
+That's what [firings_typical_per_period](../../concepts/l2/rail.md#optional-typical-firing-count-range)
 bounds — the complement to ``amount_typical_range``. You declare how
 many times the rail typically fires per period, and the generator
 samples within that band instead of falling back to the heuristic.
@@ -32,7 +32,7 @@ samples within that band instead of falling back to the heuristic.
 
 Three reference points:
 
-- **[Rail (concept) → Optional: typical firing-count range](../../concepts/l2/rail.md#optional-typical-firing-count-range-af)**
+- **[Rail (concept) → Optional: typical firing-count range](../../concepts/l2/rail.md#optional-typical-firing-count-range)**
   — the field semantics: the two YAML shapes, how the per-period
   sampler scales to the window, what the W1a-c validator rules enforce
   and how it composes with ``amount_typical_range``.

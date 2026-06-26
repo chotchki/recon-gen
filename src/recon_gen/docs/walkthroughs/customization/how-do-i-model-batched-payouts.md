@@ -25,7 +25,7 @@ The institution wants:
   batch when either failure mode fires.
 
 This is the
-[fan-in chain](../../concepts/l2/chain.md#fan-in-chains-ab4-n-parents-one-child-transfer)
+[fan-in chain](../../concepts/l2/chain.md#fan-in-chains-n-parents-one-child-transfer)
 feature. You declare the chain child carrying ``fan_in: true`` + a
 fixed ``expected_parent_count: N`` (both set per-child on the chain
 entry), and two things follow:

@@ -36,7 +36,7 @@ happened.
 > you can investigate why the chain broke (a rail SQL error, missing
 > data, or a manual posting that bypassed automation).
 
-## Template-as-chain-child (AB.2)
+## Template-as-chain-child
 
 When a chain row's ``children`` entry resolves to a TransferTemplate
 (rather than a Rail), the firing semantic shifts in two ways:
@@ -63,7 +63,7 @@ drift).
 > See [How do I chain two templates?](../../walkthroughs/customization/how-do-i-chain-two-templates.md)
 > for a worked example.
 
-## Fan-in chains (AB.4): N parents → one child Transfer
+## Fan-in chains: N parents → one child Transfer
 
 The default chain semantic is 1:1 — one parent firing invokes one
 child firing (or one of N XOR alternatives). The ``fan_in`` flag

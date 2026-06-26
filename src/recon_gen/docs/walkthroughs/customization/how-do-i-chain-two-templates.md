@@ -15,7 +15,7 @@ the downstream transfer never does, or worse, fires against the wrong
 parent (stale reference, cross-cycle contamination, race condition).
 
 This is exactly the
-[template-as-chain-child](../../concepts/l2/chain.md#template-as-chain-child-ab2)
+[template-as-chain-child](../../concepts/l2/chain.md#template-as-chain-child)
 feature. You declare a chain where:
 
 - `parent` = the rail (or template) that kicks off the cascade

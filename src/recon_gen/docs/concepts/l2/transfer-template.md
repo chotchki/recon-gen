@@ -37,7 +37,7 @@ a leg fired but the close-out leg hasn't, so the running sum doesn't yet
 equal ``expected_net``. A stuck template surfaces in the Pending Aging
 or Unbundled Aging matviews, depending on which leg is late.
 
-## Multi-mode templates (AB.3): one closure, several variants
+## Multi-mode templates: one closure, several variants
 
 The same merchant settlement might be authorized at several speeds —
 auto (intraday sweep), standard (T+1), slow (weekly batch) — set by the

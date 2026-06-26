@@ -18,16 +18,16 @@ base tables
   ├── {{ l2_instance_name }}_transactions
   └── {{ l2_instance_name }}_daily_balances
                   ↓
-Current* matviews (M.1.5 — max-Entry-per-logical-key projection)
+Current* matviews (max-Entry-per-logical-key projection)
   ├── {{ l2_instance_name }}_current_transactions
   └── {{ l2_instance_name }}_current_daily_balances
                   ↓
 Helper matviews (derived inputs the invariants read)
   ├── {{ l2_instance_name }}_computed_subledger_balance
   ├── {{ l2_instance_name }}_computed_ledger_balance
-  ├── {{ l2_instance_name }}_effective_balances      (CL.5 — sparse-day carry-forward)
-  ├── {{ l2_instance_name }}_data_anchor             (DK.1 — latest-activity singleton)
-  └── {{ l2_instance_name }}_transfer_parents        (AB.4.3 — per-child parent set)
+  ├── {{ l2_instance_name }}_effective_balances      (sparse-day carry-forward)
+  ├── {{ l2_instance_name }}_data_anchor             (latest-activity singleton)
+  └── {{ l2_instance_name }}_transfer_parents        (per-child parent set)
                   ↓
 L1 invariant matviews (the 12 SHOULD-constraint surfaces)
   ├── {{ l2_instance_name }}_drift
@@ -35,16 +35,16 @@ L1 invariant matviews (the 12 SHOULD-constraint surfaces)
   ├── {{ l2_instance_name }}_overdraft
   ├── {{ l2_instance_name }}_expected_eod_balance_breach
   ├── {{ l2_instance_name }}_limit_breach
-  ├── {{ l2_instance_name }}_balance_cadence_gap     (CL.6)
-  ├── {{ l2_instance_name }}_stuck_pending           (M.2b.8)
-  ├── {{ l2_instance_name }}_stuck_unbundled         (M.2b.9)
-  ├── {{ l2_instance_name }}_chain_parent_disagreement (AB.2.3)
-  ├── {{ l2_instance_name }}_xor_group_violation     (AB.3.3)
-  ├── {{ l2_instance_name }}_fan_in_disagreement     (AB.4.7 — JOINs _transfer_parents)
-  └── {{ l2_instance_name }}_multi_xor_violation     (AB.6.5)
+  ├── {{ l2_instance_name }}_balance_cadence_gap
+  ├── {{ l2_instance_name }}_stuck_pending
+  ├── {{ l2_instance_name }}_stuck_unbundled
+  ├── {{ l2_instance_name }}_chain_parent_disagreement
+  ├── {{ l2_instance_name }}_xor_group_violation
+  ├── {{ l2_instance_name }}_fan_in_disagreement     (JOINs _transfer_parents)
+  └── {{ l2_instance_name }}_multi_xor_violation
                   ↓
 Dashboard-shape matviews (UI convenience)
-  ├── {{ l2_instance_name }}_drift_summary           (DL.3.5 — drift + ledger_drift roll-up)
+  ├── {{ l2_instance_name }}_drift_summary           (drift + ledger_drift roll-up)
   ├── {{ l2_instance_name }}_daily_statement_summary
   └── {{ l2_instance_name }}_l1_exceptions      (UNION over the 12 L1 surfaces)
 ```
@@ -165,9 +165,7 @@ direction — the `direction` column distinguishes Outbound caps
 (`amount_direction = 'Credit'`, typical AML inbound-cap pattern).
 Both directions can apply to the same `(parent, rail)` pair via
 two LimitSchedules; the dashboard renders both on the Limit
-Breach sheet, distinguished by the Direction column. (Z.B
-2026-05-15: keyed on `rail_name` — previously `transfer_type`.
-AB.1 2026-05-19: added `direction` column.)
+Breach sheet, distinguished by the Direction column.
 
 **Columns:** `account_id`, `account_name`, `account_role`,
 `account_parent_role`, `business_day`, `rail_name`, `direction`,
@@ -188,7 +186,7 @@ planted at `days_ago=4` surfaces with `outbound_total > cap` for
 `rail_name='CustomerOutboundWire'`.
 {% endif %}
 
-### 6. `{{ l2_instance_name }}_stuck_pending` — Per-rail pending aging (M.2b.8)
+### 6. `{{ l2_instance_name }}_stuck_pending` — Per-rail pending aging
 
 > For every Rail with `max_pending_age` set, every Transaction
 > on that rail SHOULD transition `Pending → Posted` before
@@ -215,7 +213,7 @@ when `age_seconds` is in days rather than hours.
 (86400s for the `CustomerInboundACH` rail's PT24H cap).
 {% endif %}
 
-### 7. `{{ l2_instance_name }}_stuck_unbundled` — Per-rail unbundled aging (M.2b.9)
+### 7. `{{ l2_instance_name }}_stuck_unbundled` — Per-rail unbundled aging
 
 > For every Rail with `max_unbundled_age` set, every Posted leg
 > on that rail SHOULD be picked up by an AggregatingRail
@@ -239,7 +237,7 @@ days_ago=35` surfaces with `age_seconds > max_unbundled_age_seconds`
 (2,678,400s for the `CustomerFeeAccrual` rail's P31D cap).
 {% endif %}
 
-### 8. `{{ l2_instance_name }}_chain_parent_disagreement` — Two-template chain Parent disagreement (AB.2.3) {: #chain-parent-disagreement}
+### 8. `{{ l2_instance_name }}_chain_parent_disagreement` — Two-template chain Parent disagreement {: #chain-parent-disagreement}
 
 > For every two-template chain (chain.children resolves to a
 > TransferTemplate), every leg_rail firing of one child Transfer
@@ -281,7 +279,7 @@ different transfer_parent_ids ("tr-cpd-parent-a-0001" vs
 "tr-cpd-parent-b-0001").
 {% endif %}
 
-### 9. `{{ l2_instance_name }}_xor_group_violation` — Multi-mode template variant XOR violation (AB.3.3) {: #xor-group-violation}
+### 9. `{{ l2_instance_name }}_xor_group_violation` — Multi-mode template variant XOR violation {: #xor-group-violation}
 
 > For every TransferTemplate that declares `leg_rail_xor_groups`,
 > for every group in that template, exactly ONE member of the
@@ -332,10 +330,10 @@ template at days_ago=1 — both `SettlementAutoSettle` and
 apart for visual separability).
 {% endif %}
 
-### 10. `{{ l2_instance_name }}_fan_in_disagreement` — Fan-in chain parent-set mismatch (AB.4.7) {: #fan-in-disagreement}
+### 10. `{{ l2_instance_name }}_fan_in_disagreement` — Fan-in chain parent-set mismatch {: #fan-in-disagreement}
 
-> For every chain child entry declaring `fan_in: true` (AB.6
-> per-child shape), every child Transfer's contributing parent set
+> For every chain child entry declaring `fan_in: true` (per-child
+> shape), every child Transfer's contributing parent set
 > SHOULD match the entry's `expected_parent_count` (when set), or
 > have cardinality ≥2 (when unset).
 
@@ -392,7 +390,7 @@ days_ago=4, `disagreement_kind='missing'`), extra-parent (6 parents,
 days_ago=3, `disagreement_kind='extra'`).
 {% endif %}
 
-### 11. `{{ l2_instance_name }}_multi_xor_violation` — Chain XOR alternation violation (AB.6.5)
+### 11. `{{ l2_instance_name }}_multi_xor_violation` — Chain XOR alternation violation
 
 > For every multi-children chain (≥2 children) — after stripping
 > per-child `fan_in` entries — every parent firing SHOULD have
@@ -412,7 +410,7 @@ surfaces with `disagreement_kind` ∈ ('missed', 'overlap'):
 The matview's CTE inlines `(chain_parent_name, child_name)` rows
 for every multi-children chain after filtering out per-child
 `fan_in=True` entries (their cardinality is
-`_fan_in_disagreement`'s job per AB.5 coupling). For each parent
+`_fan_in_disagreement`'s job). For each parent
 firing of a multi-XOR chain, the CTE LEFT JOINs against
 `<prefix>_current_transactions` keyed on `transfer_parent_id`,
 matches the firing's child name against the declared siblings,
@@ -447,13 +445,13 @@ landed.
 `MerchantSettlementCycle` (XOR alternation across the 3 non-fan_in
 payout vehicles `MerchantPayoutACH` / `MerchantPayoutWire` /
 `MerchantPayoutCheck` — `MerchantWeeklyPayoutBatch` is fan_in so
-excluded per AB.5 coupling): missed (count=0, days_ago=6,
+excluded): missed (count=0, days_ago=6,
 `disagreement_kind='missed'`), overlap (count≥2, days_ago=5,
 `disagreement_kind='overlap'`). Healthy cycles (exactly one
 payout vehicle fires) emit no row.
 {% else %}
 **the matview should surface:** 2 planted violations on
-`BulkAccrualSettlement` (the AB.6.5.spec demo chain with XOR
+`BulkAccrualSettlement` (the demo chain with XOR
 alternation across `BulkAccrualSettleACH` / `BulkAccrualSettleWire`):
 missed (count=0, days_ago=6) + overlap (count=2, days_ago=5).
 {% endif %}
@@ -494,7 +492,7 @@ diagnostic view that surfaces logical keys with multiple `entry`
 versions (the audit trail for `TechnicalCorrection` /
 `BundleAssignment` / `Inflight` rewrites). Reads from BASE tables
 (not Current*) since Current* hides superseded entries by
-construction. See M.2b.12 dashboard for the visualization.
+construction. See the dashboard for the visualization.
 
 **What to do:** Diagnostic only — supersession is expected for
 normal corrections. Investigate when `entry_count` is unusually

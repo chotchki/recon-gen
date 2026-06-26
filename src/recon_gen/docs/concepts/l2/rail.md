@@ -31,7 +31,7 @@ Every Rail has:
   settlement rail, for example, picks up many sale-leg firings and
   emits one net-settled credit / debit pair).
 
-## Optional: typical amount range (AB.5)
+## Optional: typical amount range
 
 A rail can declare ``amount_typical_range: [min, max]`` to express
 "every firing on this rail is normally between these two dollar
@@ -84,7 +84,7 @@ queue, not landed yet.
 > (the validator's R10 / U3 rules enforce uniqueness + resolution at
 > L2 load time, so the binding can never be ambiguous).
 
-## Optional: typical firing-count range (AF)
+## Optional: typical firing-count range
 
 Where ``amount_typical_range`` bounds how MUCH each firing moves,
 ``firings_typical_per_period`` bounds how MANY times the rail fires

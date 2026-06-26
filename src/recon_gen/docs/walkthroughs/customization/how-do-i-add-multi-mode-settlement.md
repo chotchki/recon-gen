@@ -23,7 +23,7 @@ and any "did this merchant settle today?" query has to UNION
 across all three matview branches.
 
 This is exactly the
-[XOR groups](../../concepts/l2/transfer-template.md#multi-mode-templates-ab3-one-closure-several-variants)
+[XOR groups](../../concepts/l2/transfer-template.md#multi-mode-templates-one-closure-several-variants)
 feature. You declare ONE template with the variants as Variable-direction
 SingleLegRails inside its ``leg_rails``, and group the competing
 variants in ``leg_rail_xor_groups``. The runtime picks one per
