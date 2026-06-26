@@ -4,14 +4,15 @@
 
 ## The story
 
-Compliance has an account on a watchlist — the recipient of a fanout
-hit, or the terminal of a layering chain, or a referral from another
-bank's investigations team. Before opening a case, the analyst needs
-the account's full counterparty graph: every party that's sent it
-money (and how much), every party it's sent money to (and how much),
-laid out so the geometry makes the relationships obvious. The
-investigator wants to see the whole network around one anchor — both
-sides — and walk to a counterparty when the picture demands it.
+Compliance has an account on a watchlist — it landed there as the
+recipient of a fanout hit, the terminal of a layering chain or a
+referral from another bank's investigations team. Before opening a
+case the analyst needs the account's full counterparty graph: every
+party that's sent it money (and how much), every party it's sent
+money to (and how much), laid out so the geometry makes the
+relationships obvious. The investigator wants the whole network around
+one anchor — both sides — and the ability to walk to a counterparty
+when the picture demands it.
 
 ## The question
 
@@ -20,6 +21,8 @@ sides — and walk to a counterparty when the picture demands it.
 ## Where to look
 
 Open the **Investigation** dashboard, **Account Network** sheet.
+
+See it live: https://recon-gen-spec.hotchkiss.io/
 
 The sheet has two controls in the top-right panel:
 
@@ -50,18 +53,18 @@ Three visuals:
 - **Account Network — Touching Edges** (full-width, below) — table of
   every edge touching the anchor (either side), ordered by amount
   descending. Each row carries source + target + amount + the
-  computed counterparty (the side of the edge that **isn't** the
+  computed counterparty (the side of the edge that ISN'T the
   anchor).
 
-The two Sankeys are intentionally **side-by-side** with the anchor
-visually meeting in the middle. Direction is encoded by **layout** —
-inbound on the left, outbound on the right — because QuickSight's
-built-in Sankey right-click drill is non-functional in practice. The
-geometry is the contract.
+The two Sankeys are intentionally SIDE-BY-SIDE with the anchor
+meeting in the middle. Direction is encoded by LAYOUT — inbound on
+the left, outbound on the right — because QuickSight's built-in
+Sankey right-click drill is non-functional in practice. The geometry
+is the contract.
 
 ## Walking the anchor
 
-Account Network is a **walkable** sheet. Three ways to move the
+Account Network is a WALKABLE sheet. Three ways to move the
 anchor:
 
 - **Anchor dropdown.** Pick a new account; the page re-renders.
@@ -75,11 +78,11 @@ anchor:
   right-click would provide is gone. Left-click matches the "click
   the thing to drill" mental model.
 
-The anchor dropdown widget **may briefly lag behind a walk** — this
-is a known QuickSight URL-parameter control sync limitation; the
-data filters correctly, but the on-screen widget text may stay
-stale. The sheet description says "trust the chart, not the
-control text" so analysts know what to expect.
+The anchor dropdown widget may briefly LAG behind a walk — this is a
+known QuickSight URL-parameter control-sync limitation; the data
+filters correctly, but the on-screen widget text may stay stale. The
+sheet description says "trust the chart, not the control text" so
+analysts know what to expect.
 
 {% if vocab.demo.has_investigation_plants and vocab.demo.investigation.layering_chain and vocab.demo.investigation.anomaly_pair_sender %}
 ??? example "Worked example: {{ vocab.fixture_name }}"
@@ -131,14 +134,14 @@ control text" so analysts know what to expect.
     {% if vocab.demo.investigation.layering_chain | length > 1 %}{{ vocab.demo.investigation.layering_chain[1].name }}{% else %}the next hop{% endif %}
     (the next layering hop).
 
-    That's the **walk-the-flow** interaction — every walk re-anchors
-    the entire view, so multi-hop investigations don't require
-    leaving the sheet.
+    That's the walk-the-flow interaction — every walk re-anchors the
+    entire view, so multi-hop investigations don't require leaving
+    the sheet.
 {% endif %}
 
 ## What it means
 
-Account Network is a **graph view**, not a verdict. A dense inbound
+Account Network is a graph VIEW, not a verdict. A dense inbound
 Sankey + sparse outbound Sankey is consistent with collection (or
 with a normal merchant DDA on a slow week). A sparse inbound + dense
 outbound is consistent with disbursement (or with a payroll account
@@ -147,7 +150,7 @@ type, business line, prior history) gives you the answer.
 
 A clean network finding includes: the anchor account, the trailing
 window, the inbound counterparty list with amounts, the outbound
-counterparty list with amounts, and a one-line characterization of
+counterparty list with amounts and a one-line characterization of
 the shape (collection / disbursement / pass-through / mixed).
 
 ## Drilling in
@@ -175,7 +178,7 @@ usually goes:
 
 1. Set the anchor to the watchlisted account.
 2. Read the geometry — is this collection, disbursement, pass-
-   through, or mixed?
+   through or mixed?
 3. Pick the largest inbound and the largest outbound from the table;
    for each, decide whether they're benign (known relationship,
    normal cadence) or warrant a drill.

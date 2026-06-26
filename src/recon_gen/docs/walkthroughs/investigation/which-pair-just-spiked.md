@@ -8,9 +8,9 @@ A counterparty that's been wiring routine amounts to the same
 beneficiary for weeks suddenly sends a wire that's an order of
 magnitude bigger. By itself the wire is unremarkable — well within
 the bank's daily limit, fully authorized, posts cleanly. What makes
-it interesting is that **this pair**, on a normal week, doesn't move
+it interesting is that THIS pair, on a normal week, doesn't move
 that kind of money. The investigator needs a way to spot pair-windows
-that just spiked above their own baseline, separate from the
+that just spiked above their OWN baseline, separate from the
 absolute-dollar checks the bank already runs.
 
 ## The question
@@ -22,56 +22,57 @@ this pair usually moves?"
 
 Open the **Investigation** dashboard, **Volume Anomalies** sheet.
 
+See it live: https://recon-gen-spec.hotchkiss.io/
+
 The sheet has two controls in the top-right panel:
 
-- **Date range** — limits the analysis window via `window_end`.
+- **Window End Date** — limits the analysis window via `window_end`.
   Default covers the trailing month; narrow to "this week" for a
   focused review, widen for back-tests.
-- **σ threshold** — the cutoff above which a pair-window appears in
+- **Min sigma** — the cutoff above which a pair-window appears in
   the KPI + table. Default is 2σ; drag to 1σ to surface marginal
   spikes (and a lot of noise), or to 3–4σ to focus on the extreme
   tail.
 
 Three visuals:
 
-- **Flagged Pair-Windows KPI** (top-left, third-width) — count of
+- **Flagged at current σ** (top-left, third-width KPI) — count of
   (sender, recipient, window-end) tuples past the σ threshold.
 - **Pair-Window σ Distribution** (top-right, two-thirds-width) — a
   bar chart of every pair-window in the population bucketed into 5
   bands (`0-1 sigma`, `1-2 sigma`, `2-3 sigma`, `3-4 sigma`,
-  `4+ sigma`). The chart **intentionally ignores the σ filter** so the
+  `4+ sigma`). The chart intentionally IGNORES the σ slider, so the
   distribution shape stays visible — your cutoff lands in context.
 - **Flagged Pair-Windows — Ranked** (full-width below) — table of the
   flagged tuples sorted by z-score descending. Each row carries
   sender + recipient names, the window end date, the rolling 2-day
-  SUM, the z-score, and the σ bucket label.
+  SUM, the z-score and the σ bucket label.
 
 ## The math, briefly
 
 The matview `{{ l2_instance_name }}_inv_pair_rolling_anomalies` computes, per
 (sender, recipient) pair, a 2-day rolling SUM (today + yesterday's
-transfer amounts). It then computes the **population mean** and
-**sample standard deviation** of that rolling SUM across every
-pair-window in the matview, and projects each row's z-score
-(`(value - population_mean) / population_stddev`) plus a 5-band
-bucket label.
+transfer amounts). Each window is then z-scored against that PAIR's
+own history — the mean and sample standard deviation of the rolling
+SUM across every window for that pair, NOT the global population
+(`(value - pair_mean) / pair_stddev`) — plus a 5-band bucket label.
+Pairs with fewer than 3 windows of history get z=0: too little
+signal to compute a meaningful divisor.
 
 So the threshold is "this pair moved enough money in a 2-day window
-that, compared to every other pair-window the bank saw, this one is
-N standard deviations out." A pair that always moves $1M will not
-flag at 2σ unless this particular window is much more than $1M; a
-pair that usually moves $300 will flag at 2σ if it suddenly moves
-$5,000.
+that, compared to its OWN history, this one is N standard deviations
+out." A pair that always moves $1M will not flag at 2σ unless this
+particular window is much more than $1M; a pair that usually moves
+$300 will flag at 2σ if it suddenly moves $5,000.
 
-The window length is fixed at 2 days for now (changing it would
-require multiple matviews or a generate_series at dataset time —
-deferred to a later phase).
+The window length is hardcoded at 2 days (a slider would need either
+multiple matviews or a generate_series scan at dataset time).
 
-The matview **does not auto-refresh**. After every ETL load, the
+The matview does NOT auto-refresh. After every ETL load, the
 operator runs
 `REFRESH MATERIALIZED VIEW {{ l2_instance_name }}_inv_pair_rolling_anomalies;`
 — see [Refresh contract](../../Schema_v6.md#refresh-contract).
-A skipped refresh means the z-scores reflect yesterday's population.
+A skipped refresh means the z-scores reflect yesterday's data.
 
 {% if vocab.demo.has_investigation_plants and vocab.demo.investigation.anomaly_pair_sender %}
 ??? example "Worked example: {{ vocab.fixture_name }}"
@@ -89,8 +90,8 @@ A skipped refresh means the z-scores reflect yesterday's population.
       the rightmost bucket (`4+ sigma`).
     - **Table** — {{ vocab.demo.investigation.anomaly_pair_sender.name }}
       → {{ vocab.demo.investigation.anchor.name }} for the spike-day
-      window at the top, with a z-score well above 4 and a 2-day
-      SUM of $25,000+ vs. the baseline ~$500.
+      window topping the ranking, its 2-day SUM of $25,000+ towering
+      over the baseline ~$500.
 
     Drag σ down to 1 — the table fills with marginal flags, mostly
     incidental to the broader baseline. Drag σ up to 4 — the table
@@ -99,9 +100,9 @@ A skipped refresh means the z-scores reflect yesterday's population.
 
 ## What it means
 
-Volume Anomalies is a **deviation detector**. A high z-score is
-consistent with money laundering but also with plenty of normal
-patterns:
+Volume Anomalies is a deviation detector, NOT a fraud verdict. A high
+z-score is consistent with money laundering but also with plenty of
+normal patterns:
 
 - A merchant's monthly settlement landing on a single day after a
   long quiet stretch.
@@ -110,14 +111,14 @@ patterns:
 - A counterparty that's been quiet for weeks resuming normal
   activity in a single batch.
 
-The investigator's job is to **rule those out** before treating the
+The investigator's job is to RULE those out before treating the
 spike as suspicious. The chart is the first step — if the rest of
 the population is dense and your flag sits alone in the right tail
 (as the demo's $25,000 spike does), that's a stronger signal than a
 flag at the edge of a populated bucket.
 
 A clean anomaly finding includes: the (sender, recipient) names +
-account IDs, the window end date, the 2-day SUM, the z-score, and a
+account IDs, the window end date, the 2-day SUM, the z-score and a
 one-line reason the deviation is or isn't expected for the pair.
 
 ## Drilling in
@@ -142,7 +143,7 @@ The fastest path from a 4σ flag to "is this a SAR or not" usually
 goes:
 
 1. Confirm the spike on this sheet's table — copy the sender,
-   recipient, window end, and z-score for the case file.
+   recipient, window end and z-score for the case file.
 2. Switch to Account Network with the recipient as the anchor —
    confirm whether the rest of the pair's history is consistent
    (regular wires) or sparse (one-shot relationship).
@@ -161,7 +162,7 @@ point, not the destination.
 ## Related walkthroughs
 
 - [Who's getting money from too many senders?](who-is-getting-money-from-too-many-senders.md) —
-  the previous sheet. A pair-window spike on a recipient who *also*
+  the previous sheet. A pair-window spike on a recipient who ALSO
   shows up there is a stronger signal than either alone.
 - [Where did this transfer actually originate?](where-did-this-transfer-originate.md) —
   the right step when the spike transfer is part of a chain. Money

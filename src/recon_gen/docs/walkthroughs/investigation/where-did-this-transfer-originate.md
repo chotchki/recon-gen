@@ -22,6 +22,8 @@ where else did it go?"
 
 Open the **Investigation** dashboard, **Money Trail** sheet.
 
+See it live: https://recon-gen-spec.hotchkiss.io/
+
 The sheet has three controls in the top-right panel:
 
 - **Chain root** — dropdown of every chain root (depth-0 transfer)
@@ -41,25 +43,22 @@ Two visuals side-by-side:
   rightmost, ribbon thickness encodes hop amount.
 - **Money Trail — Hop-by-Hop** (right) — table of every edge in the
   chain, ordered by depth ascending. Each row carries the source +
-  target account names, the hop amount, the depth from root, and the
-  underlying `transfer_id` so the row can be matched back to the
-  postings.
+  target account names, the hop amount, the depth from root and the
+  underlying `transfer_id` so the row matches back to the postings.
 
-The **Sankey is the headline** — it's the geometry that makes a
-layering chain visually obvious. The table is for legibility (rows
-the Sankey collapses or hides) and for copying transfer IDs into a
-case file.
+The Sankey is the HEADLINE — it's the geometry that makes a layering
+chain visually obvious. The table is for legibility (rows the Sankey
+collapses or hides) and for copying transfer IDs into a case file.
 
 ## Single-leg transfers don't draw ribbons
 
-The matview projects one row per multi-leg edge. **Single-leg
-transfers** (`sale` and `external_txn` types — where the
-counterparty leg lives in the external system, not in
-`{{ l2_instance_name }}_transactions`) appear as chain members in the table but
-**do not produce Sankey ribbons** because the Sankey needs a
-source × target pair on each edge. The sheet's description calls
-this out — if a chain mixes multi-leg and single-leg transfers,
-the Sankey will look thinner than the table.
+The matview projects one row per multi-leg edge. Single-leg transfers
+(`sale` and `external_txn` types — the counterparty leg lives in the
+external system, not in `{{ l2_instance_name }}_transactions`) show up
+as chain members in the table but draw NO Sankey ribbons — the Sankey
+needs a source × target pair on each edge. The sheet's description
+calls this out: a chain that mixes multi-leg and single-leg transfers
+makes the Sankey look thinner than the table.
 
 ## The math, briefly
 
@@ -69,11 +68,11 @@ transfer's parent is the upstream transfer that funded it; chains
 terminate when `transfer_parent_id IS NULL` (the chain root). The
 matview joins each transfer's two legs (debit + credit) and projects
 one row per multi-leg edge with the chain root, the depth from root,
-the source + target account, the hop amount, and `source_display` /
+the source + target account, the hop amount and `source_display` /
 `target_display` strings (`name (id)`) so dropdowns and tables
 disambiguate accounts that share names.
 
-The matview **does not auto-refresh**. After every ETL load, the
+The matview does NOT auto-refresh. After every ETL load, the
 operator runs
 `REFRESH MATERIALIZED VIEW {{ l2_instance_name }}_inv_money_trail_edges;` —
 see [Refresh contract](../../Schema_v6.md#refresh-contract).
@@ -115,7 +114,7 @@ SQL dataset, so materialization isn't optional here.
 
 ## What it means
 
-Money Trail is a **provenance tool**. A clean chain walk gives you:
+Money Trail is a provenance tool. A clean chain walk gives you:
 
 - The chain root — the originating transfer that funded everything
   downstream.
@@ -134,7 +133,7 @@ money is moving, but the geometry is benign.
 
 A clean trail finding includes: the chain root transfer ID + posted
 date, every intermediate hop's `transfer_id`, the per-hop amounts,
-the terminal account, and a one-line reason the chain shape is or
+the terminal account and a one-line reason the chain shape is or
 isn't expected.
 
 ## Drilling in
@@ -165,7 +164,7 @@ chain" usually goes:
    `transfer_parent_id`, then walk back to the depth-0 ancestor.
 2. Pick that root in the Money Trail dropdown.
 3. Read the hop-by-hop table — confirm the chain depth, the per-hop
-   residue pattern, and the terminal account.
+   residue pattern and the terminal account.
 4. Anchor the Account Network sheet on the terminal account to
    check whether the chain is the end of the story or just a
    way-point.

@@ -4,17 +4,20 @@
 
 ## The story
 
-The 11-column `{{ l2_instance_name }}_transactions` contract intentionally
-doesn't carry every per-`rail_name` attribute as its own column
-— `card_brand` belongs on sales but is meaningless on internal
-transfers; `settlement_type` matters on settlements but not on
-payments; `statement_line_id` belongs on Fed force-posts only. The
-schema's answer is the `metadata` JSON column: each `rail_name`
-carries its own grab-bag of typed extras inside JSON, and dataset
-SQL extracts via `JSON_VALUE(metadata, '$.your_key')`.
+The `{{ l2_instance_name }}_transactions` contract deliberately
+doesn't give every per-`rail_name` attribute its own column — most
+attributes only make sense on one rail:
 
-That's powerful — and easy to misuse. Two failure modes show up
-when teams add a new metadata key:
+- `card_brand` belongs on sales, meaningless on internal transfers.
+- `settlement_type` matters on settlements, not on payments.
+- `statement_line_id` belongs on Fed force-posts only.
+
+The schema's answer is the `metadata` JSON column: each `rail_name`
+carries its own grab-bag of typed extras inside JSON, and dataset SQL
+extracts via `JSON_VALUE(metadata, '$.your_key')`.
+
+Flexible, and easy to misuse. Two failure modes show up when teams
+add a new metadata key:
 
 - **The wrong JSON dialect**: someone reaches for PostgreSQL's
   native `metadata->>'key'` operator and the query works in dev
@@ -59,7 +62,7 @@ from recon_gen.common.l2.seed import emit_seed
 from recon_gen.common.l2.auto_scenario import default_scenario_for
 
 l2 = load_instance("tests/l2/{{ l2_instance_name }}.yaml")
-sql = emit_seed(l2, default_scenario_for(l2).scenario)
+sql = emit_seed(l2, default_scenario_for(l2).scenario, prefix="{{ l2_instance_name }}")
 print(next(line for line in sql.splitlines() if "card_brand" in line))
 ```
 
@@ -77,12 +80,14 @@ card_brand` in the dataset projection. That pair —
 `JSON_VALUE(metadata, '$.key')` on the consumer side — is the only
 shape allowed.
 
+See it live: https://recon-gen-spec.hotchkiss.io/
+
 ## What it means
 
 The contract for any new metadata key has four parts:
 
 1. **JSON value type must be a portable scalar**. Strings,
-   numbers, booleans, and dates are fine. Nested objects work for
+   numbers, booleans and dates are fine. Nested objects work for
    well-defined sub-payloads. Arrays work in principle but no
    current dataset reads one — exercise caution. **No binary, no
    Postgres-specific types**.
@@ -91,12 +96,15 @@ The contract for any new metadata key has four parts:
    shape that breaks `JSON_VALUE` parsing on stricter dialects.
 3. **Use `JSON_VALUE(metadata, '$.key')` to read, never `->>`**.
    The `->>` operator is PostgreSQL-only; `JSON_VALUE` is the
-   SQL/JSON standard form.
+   SQL/JSON standard form. (Dataset SQL routes the read through
+   `common/sql/dialect.py::json_value(col, path, dialect)` — emits
+   `JSON_VALUE` on PG/Oracle, `json_extract_string` on DuckDB, the
+   local-iteration default.)
 4. **Document the new key in `Schema_v6.md`'s metadata catalog
    for that `rail_name`**. Otherwise the schema-doc drift
    tests fail the next time anyone touches the catalog.
 
-A subtle constraint on dataset visuals: if a visual *expects* the
+A subtle constraint on dataset visuals: if a visual EXPECTS the
 key to be present (e.g., uses it as a filter or grouping
 dimension), all rows the visual sees must carry the key. The
 options for handling rows without the key:
@@ -159,11 +167,11 @@ list.
 
 ## Next step
 
-Once the key is producing, consuming, and rendering:
+Once the key is producing, consuming and rendering:
 
 1. **Run the unit + integration tests**:
-   `.venv/bin/pytest tests/test_demo_etl_examples.py
-   tests/test_dataset_contract.py`. The schema-contract test
+   `.venv/bin/pytest tests/unit/test_etl_examples.py
+   tests/json/test_dataset_contract.py`. The schema-contract test
    verifies your new key is in the catalog; the dataset-contract
    test verifies the SQL projection matches.
 2. **Re-run the pre-flight invariants** from the validation

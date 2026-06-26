@@ -6,17 +6,18 @@
 
 The demo dashboards work. You ran the demo flow (`schema apply --execute`, `data apply --execute`, `data refresh --execute`, `json apply --execute`), opened the four
 L2-fed dashboards (L1 Reconciliation, L2 Flow Tracing,
-Investigation, Executives), and saw the planted exception
-scenarios light up the way they should. You then wrote your own
+Investigation, Executives) and saw the planted exception
+scenarios light up the way they should. See it live:
+https://recon-gen-spec.hotchkiss.io/. Then you wrote your own
 ETL against your own upstream feed, loaded a slice into the same
-`{{ l2_instance_name }}_transactions` and `{{ l2_instance_name }}_daily_balances` tables, and
-the dashboards look *off* — KPIs at zero where they shouldn't be,
-KPIs spiking where they shouldn't, visuals rendering "N/A" where
-there should be values.
+`{{ l2_instance_name }}_transactions` and `{{ l2_instance_name }}_daily_balances` tables — and
+the dashboards look OFF. KPIs sit at zero where they shouldn't,
+others spike for no reason, cells render "N/A" where a value
+belongs.
 
 Almost every "demo works, prod doesn't" failure traces back to a
-small set of root causes. This walkthrough is organized by
-*symptom* — what you're seeing on the dashboard — so you can jump
+small set of root causes. We organize this walkthrough by SYMPTOM
+— what you're seeing on the dashboard — so you can jump straight
 to the matching diagnosis and check.
 
 ## The question
@@ -27,7 +28,7 @@ I start?"
 ## Where to look
 
 Start at the symptom. Each section below names the visual
-behavior, the most-likely root cause, and a one-shot SQL or CLI
+behavior, the most-likely root cause and a one-shot SQL or CLI
 check to confirm.
 
 If a symptom matches more than one section, work top to bottom —
@@ -61,9 +62,9 @@ window.
 **Most likely**: a `rail_name` value in your data isn't in the
 canonical L2 vocabulary, so dataset SQL filters reject it — or, for
 the L1 net-zero classification specifically, the row is a single-
-leg type (`sale` or `external_txn`), which the schema flags as
-`expected_net_zero = 'not_expected'` and the check excludes by
-intent.
+leg type (`sale` records or single-leg `external_txn` rows). A
+single-leg transfer has no counterpart leg to net against, so the
+multi-leg net-zero check excludes it by intent.
 
 **Check 1 — values in your data vs the L2 vocabulary**:
 
@@ -86,15 +87,15 @@ checks (drift split, limit breach, aging) won't fire on it.
 view directly to see which (account, day) pairs are flagged:
 
 ```sql
-SELECT account_id, business_day_start, money, recomputed, drift
+SELECT account_id, business_day_start, stored_balance, computed_balance, drift
 FROM {{ l2_instance_name }}_drift
 WHERE -- your scope filter
 ORDER BY ABS(drift) DESC;
 ```
 
-The drift view subtracts `recomputed` (cumulative SUM of
-`amount_money`) from `money` (stored EOD value). A non-zero row
-here is a real drift; an empty result on data you know is broken
+The drift view subtracts `computed_balance` (cumulative SUM of
+`amount_money`) from `stored_balance` (stored EOD value). A non-zero
+row here is a real drift; an empty result on data you know is broken
 usually means your `rail_name` slipped through the canonical
 set and the matview filter dropped it.
 
@@ -131,11 +132,11 @@ disagrees with the cumulative SUM of `amount_money` in
    missed one branch.
 2. **Missing posting** — the balance feed lands postings that
    never made it to the transactions feed (or vice versa).
-3. **`business_day_start` mismatch** — the balance row's
-   `business_day_start` doesn't line up with the
-   `business_day_start` your transactions used. Common when one
-   feed snapshots at midnight UTC and the other at a local-time
-   EOD.
+3. **Clock mismatch** — the balance row's `business_day_start`
+   window doesn't bracket the `posting` timestamps your
+   transactions used, so a leg lands in the wrong day. Common
+   when one feed snapshots at midnight UTC and the other at a
+   local-time EOD.
 
 **Check**: the L1 drift view does this recompute internally; run
 it scoped to the offending account-day to see the magnitude:
@@ -149,7 +150,7 @@ SELECT
 FROM {{ l2_instance_name }}_daily_balances db
 LEFT JOIN {{ l2_instance_name }}_transactions t
   ON t.account_id          = db.account_id
- AND t.business_day_start <= db.business_day_start
+ AND t.posting            <= db.business_day_end
  AND t.status              = 'Posted'
 WHERE db.account_id          = 'your-account-id'
   AND db.business_day_start  = DATE 'your-date'

@@ -4,14 +4,12 @@
 
 ## The story
 
-A model alert fires for an account that's been receiving small ACH
-deposits from a long list of unrelated counterparties. The classic
-shape of structuring: many small inbounds funnel into one collection
-account so each individual deposit stays under the reporting
-threshold. The investigator needs a way to ask "show me every
-account whose inbound side looks like a funnel" — not just the one
-the alert pointed at — and rank them so the worst offenders sit on
-top.
+A model alert fires on an account taking small ACH deposits from a
+long list of unrelated counterparties — the classic structuring
+shape: many small inbounds funnel into one collection account so each
+deposit stays under the reporting threshold. The investigator needs
+to ask "show me every account whose inbound side looks like a funnel"
+(not just the one the alert pointed at) and rank them worst-first.
 
 ## The question
 
@@ -21,6 +19,8 @@ senders this week?"
 ## Where to look
 
 Open the **Investigation** dashboard, **Recipient Fanout** sheet.
+
+See it live: https://recon-gen-spec.hotchkiss.io/
 
 The sheet has two controls in the top-right panel:
 
@@ -35,18 +35,18 @@ Three KPIs across the top answer "how big is the problem":
 
 - **Qualifying Recipients** — count of recipient accounts past the
   threshold.
-- **Distinct Senders** — total distinct senders feeding those
-  recipients (an inflated count compared to a healthy baseline is the
-  concern).
+- **Distinct Senders (Union)** — total distinct senders feeding the
+  qualifying recipients, deduped across them (an inflated count vs a
+  healthy baseline is the concern).
 - **Total Inbound** — sum of all inbound dollars across the
   qualifying recipients.
 
 The full-width table below ranks recipients by distinct sender count
-descending. Each row carries the recipient account, its distinct
-sender count for the window, and the total inbound amount. The
-recipient pool is filtered to customer DDAs and merchant DDAs only
-— administrative sweeps and clearing transfers don't dominate the
-ranking.
+descending. Each row carries the recipient account (id, name and
+type), its distinct sender count for the window, the inbound-transfer
+count and the total inbound amount. The recipient pool is filtered to
+customer DDAs and merchant DDAs only — administrative sweeps and
+clearing transfers don't dominate the ranking.
 
 {% if vocab.demo.has_investigation_plants %}
 ??? example "Worked example: {{ vocab.fixture_name }}"
@@ -71,7 +71,7 @@ ranking.
 
 ## What it means
 
-Recipient Fanout is a **shape detector**, not a verdict. A high
+Recipient Fanout is a SHAPE DETECTOR, not a verdict. A high
 distinct-sender count is consistent with structuring but also with
 plenty of normal patterns:
 
@@ -82,13 +82,13 @@ plenty of normal patterns:
 - A church or non-profit DDA legitimately receives from many small
   donors.
 
-The investigator's job is to **rule those out** before treating the
+The investigator's job is to RULE THOSE OUT before treating the
 shape as suspicious. The ranking gives you the candidates; the
 context (account type, business line, prior history) tells you which
 ones to escalate.
 
 A clean fanout finding includes: the recipient's name + account ID,
-the time window, the distinct sender count, the total dollar amount,
+the time window, the distinct sender count, the total dollar amount
 and a one-line reason the shape is or isn't expected for that
 account.
 

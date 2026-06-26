@@ -14,7 +14,7 @@ L2-fed dashboards (L1 Reconciliation, L2 Flow Tracing,
 Investigation, Executives) work.
 
 The good news: it's mostly a column-rename. The contract is small
-(11 mandatory columns + a handful of conditional ones — see
+(12 mandatory columns + a handful of conditional ones — see
 [Schema_v6.md → ETL contract / minimum viable feed](../../Schema_v6.md#etl-contract-minimum-viable-feed)).
 The bad news: skip the wrong column and a downstream check goes
 silent. So this walkthrough covers the canonical projection plus
@@ -33,7 +33,7 @@ Two reference points:
 - **`docs/Schema_v6.md`** — column-level contract and per-column
   failure modes ("If you skip this, what dashboard breaks?").
 - **`common/l2/schema.py::emit_schema(l2_instance)`** — the source
-  of truth for the prefixed DDL. Every base table, view, and
+  of truth for the prefixed DDL. Every base table, view and
   matview your dashboards read is emitted here, all under the L2
   instance prefix. Call it from Python (or apply directly via
   `recon-gen schema apply --execute`) to see the rendered
@@ -52,25 +52,24 @@ from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.schema import emit_schema
 
 l2 = load_instance("tests/l2/{{ l2_instance_name }}.yaml")
-print(emit_schema(l2)[:4000])
+print(emit_schema(l2, prefix="{{ l2_instance_name }}")[:4000])
 ```
 
 The first `CREATE TABLE` block is `{{ l2_instance_name }}_transactions` itself
-— the column list, types, and constraints your projection has to
+— the column list, types and constraints your projection has to
 satisfy. The second is `{{ l2_instance_name }}_daily_balances`. Read both
 end-to-end before writing the projection; they're the contract.
 
-For an end-to-end mapping from `core_banking.gl_postings` →
-`{{ l2_instance_name }}_transactions`, see **Example 1** in `docs/Schema_v6.md`
-(the SQL block under "Populating customer DDA postings from core
-banking"). It's a real `INSERT INTO ... SELECT FROM` against a
+The end-to-end mapping from `core_banking.gl_postings` →
+`{{ l2_instance_name }}_transactions` is the `INSERT INTO ... SELECT FROM`
+in [Drilling in](#drilling-in) below — a real projection against a
 hypothetical core-banking source schema.
 
 ## What it means
 
 For every row your ETL writes, you're committing to a contract:
 
-1. **The 11 mandatory columns** (per [Schema_v6.md → minimum
+1. **The 12 mandatory columns** (per [Schema_v6.md → minimum
    viable feed](../../Schema_v6.md#etl-contract-minimum-viable-feed)) get
    the row visible on the dashboards at all.
 2. **`transfer_parent_id`** populated only for chained transfers
@@ -142,7 +141,7 @@ A few things to note about this projection:
   getting this sign right is what makes the drift check honest. If
   your upstream uses the opposite sign convention, flip it here, not
   later in a view — every downstream check assumes the v6 convention.
-  **Stored as integer cents** (Phase AO.1) — the projection above
+  Stored as integer cents (avoids float dust) — the projection above
   multiplies by 100 + casts to BIGINT at the ETL boundary; see
   [Schema_v6 → Money is stored as integer cents](../../Schema_v6.md#money-is-stored-as-integer-cents).
   Python ETLs should reach for `recon_gen.common.money.Cents`
@@ -153,7 +152,7 @@ A few things to note about this projection:
   `CASE WHEN p.signed_amount < 0 THEN 'Debit' ELSE 'Credit' END`
   shape above. The base table's CHECK pairs direction with money's
   sign (Debit ⇒ money ≤ 0, Credit ⇒ money ≥ 0), so the two columns
-  *must* agree or the row fails to land.
+  MUST agree or the row fails to land.
 - **`metadata`** carries `source` on every row from this projection
   (driven by the `JSON_OBJECT(... VALUE 'core_banking')` literal).
   That single key is enough to satisfy the Investigation
@@ -167,39 +166,41 @@ Once your projection is wired up:
    try to backfill 90 days on the first run.
 2. **Wire the companion daily_balances feed**
    ([How do I populate `{{ l2_instance_name }}_daily_balances` from my core banking system?](how-do-i-populate-daily-balances.md)).
-   Drift checks compare *stored* balance (daily_balances.money)
-   against *recomputed* (SUM amount_money) — without both feeds,
+   Drift checks compare STORED balance (daily_balances.money)
+   against RECOMPUTED (SUM amount_money) — without both feeds,
    the drift surface is meaningless.
 3. **Run the validation walkthrough**
    ([How do I prove my ETL is working before going live?](how-do-i-prove-my-etl-is-working.md))
-   — it walks you through the net-zero, drift-recompute, and
+   — it walks you through the net-zero, drift-recompute and
    parent-chain integrity checks you should run before declaring
    the load complete.
-3. **Open the L1 Reconciliation Dashboard's L1 Exceptions
+4. **Open the L1 Reconciliation Dashboard's L1 Exceptions
    sheet** — if the KPI reads 0 with no detail rows, your feed
    landed and the contract holds. If KPIs spike unexpectedly, see
    [What do I do when the demo passes but my prod data fails?](what-do-i-do-when-demo-passes-but-prod-fails.md)
-   for the symptom-organized debug recipes.
-4. **Iterate on metadata** — once the minimum feed is stable,
+   for the symptom-organized debug recipes. See it live:
+   https://recon-gen-spec.hotchkiss.io/
+5. **Iterate on metadata** — once the minimum feed is stable,
    layer in `transfer_parent_id` and the per-`rail_name`
    metadata keys per the
    [Metadata JSON columns](../../Schema_v6.md#metadata-json-columns)
    contract.
 
 If your upstream source isn't a `gl_postings` table — say it's a
-processor report, a Fed statement file, or a sweep-engine log —
-the same projection shape applies, but the inbound columns differ.
-Schema_v6.md's examples cover Fed-statement and processor-feed
-ingest; the same `INSERT INTO {{ l2_instance_name }}_transactions` pattern
-applies regardless of source.
+processor report, a Fed statement file or a sweep-engine log — the
+same projection shape applies, the inbound columns just differ. The
+same `INSERT INTO {{ l2_instance_name }}_transactions` pattern holds
+regardless of source; for the Fed-statement case (the one that sets
+`origin = 'ExternalForcePosted'`) see
+[How do I tag a force-posted external transfer correctly?](how-do-i-tag-a-force-posted-transfer.md).
 
 ## Related walkthroughs
 
 - [How do I populate `{{ l2_instance_name }}_daily_balances` from my core banking system?](how-do-i-populate-daily-balances.md) —
-  the **sibling walkthrough**. Drift checks need both feeds; ship
+  the SIBLING walkthrough. Drift checks need both feeds; ship
   them together.
 - [How do I prove my ETL is working before going live?](how-do-i-prove-my-etl-is-working.md) —
-  the **next step** after writing the projection. Validates the
+  the NEXT step after writing the projection. Validates the
   invariants the dashboards depend on.
 - [How do I tag a force-posted external transfer correctly?](how-do-i-tag-a-force-posted-transfer.md) —
   the canonical pattern for Fed-statement ingest, which is the one
@@ -210,5 +211,5 @@ applies regardless of source.
 - [Schema_v6 → ETL contract / minimum viable feed](../../Schema_v6.md#etl-contract-minimum-viable-feed) —
   the column-by-column day-1 minimum the projection must satisfy.
 - [Investigation: Where did this transfer originate?](../investigation/where-did-this-transfer-originate.md) —
-  a **downstream consumer** walkthrough: what an analyst does with
+  a DOWNSTREAM consumer walkthrough: what an analyst does with
   the `{{ l2_instance_name }}_transactions` rows your projection lands.

@@ -4,15 +4,15 @@
 
 ## The story
 
-Once your transactions feed is landing (see
-[How do I populate `{{ l2_instance_name }}_transactions` from my core banking system?](how-do-i-populate-transactions.md)),
-the dashboards still won't agree until the *stored* balance is
-populated too. `{{ l2_instance_name }}_daily_balances` carries one
-row per `(account_id, business_day_start)` — your core banking
-system's end-of-day stored figure. The L1 Drift check compares it
-against the recomputed `SUM(amount_money)` over your transactions;
-without daily_balances rows, every account looks like a fresh-zero
-opening balance and the drift surface is meaningless.
+A landing transactions feed isn't enough — the dashboards won't agree
+until the STORED balance lands too (see
+[How do I populate `{{ l2_instance_name }}_transactions` from my core banking system?](how-do-i-populate-transactions.md)).
+`{{ l2_instance_name }}_daily_balances` carries one row per
+`(account_id, business_day_start)`: your core banking system's
+end-of-day stored figure. The L1 Drift check compares it against the
+recomputed `SUM(amount_money)` over your transactions. No
+daily_balances rows means every account reads as a fresh-zero opening
+balance, and the drift surface means nothing.
 
 ## The question
 
@@ -32,12 +32,12 @@ Two reference points (the same pair as the transactions walkthrough):
   of truth for the prefixed DDL. The second `CREATE TABLE` block it
   emits is `{{ l2_instance_name }}_daily_balances`.
 
-For runnable INSERT examples (not just the projection shape but a
-self-contained SQL block you can adapt), look at
-**`recon-gen data etl-example`** — Patterns 8 and 9 cover the
-baseline daily-balance row and the per-day Limit Schedule override
-respectively. They use sentinel `-EXAMPLE` IDs so the SQL doesn't
-collide with your seeded rows.
+For runnable INSERT examples — not just the projection shape but a
+self-contained SQL block you can adapt — run
+**`recon-gen data etl-example`**. Pattern 8 covers the baseline
+daily-balance row, Pattern 9 the per-day Limit Schedule override.
+Both use sentinel `-EXAMPLE` IDs so the SQL doesn't collide with your
+seeded rows.
 
 ## What it means
 
@@ -50,7 +50,7 @@ For every row your ETL writes, you're committing to a contract:
    that wins the read; older rows stay for audit. **Pick the day
    boundary consistently with `posting`** in your transactions
    feed (see the gotchas section below).
-3. **`money`** is the *stored* end-of-day figure from your core
+3. **`money`** is the STORED end-of-day figure from your core
    system, in integer cents. The L1 Drift matview joins this
    against `SUM(amount_money)` from transactions for the same
    `(account_id, business_day_start)`. Drift = stored − computed.
@@ -60,7 +60,8 @@ For every row your ETL writes, you're committing to a contract:
    as `money`.
 5. **`metadata` JSON** — open container. Per-day Limit Schedule
    overrides go under `metadata.limits` (see Pattern 9 from the
-   etl-example output); scenario tags will live alongside per AV.5.
+   etl-example output); scenario tags are slated to live alongside
+   under a sibling key (a future per-day tagging feature).
 
 Everything else (`account_parent_role`, `supersedes`) is conditional
 — populate when the downstream check needs it. See [Schema_v6.md
@@ -106,10 +107,10 @@ A few things to note about this projection:
   groups transactions by their `posting`-derived business day and
   compares against the daily_balance row keyed on the same boundary.
   Day-boundary disagreement = false-positive drift on every row.
-- **`money`** is stored as integer cents, BIGINT (Phase AO.1) —
-  same convention as `transactions.amount_money`. CAN go negative
-  (overdraft is observable per the L1 Non-negative Stored Balance
-  SHOULD constraint). Python ETLs should reach for
+- **`money`** is stored as integer cents, BIGINT — same convention
+  as `transactions.amount_money`. CAN go negative (overdraft is
+  observable per the L1 Non-negative Stored Balance SHOULD
+  constraint). Python ETLs should reach for
   `recon_gen.common.money.Cents.from_dollars(...).value` instead of
   the inline `CAST(ROUND(x * 100) AS BIGINT)` shape — it rejects
   float-init Decimals that re-introduce float dust.
@@ -122,8 +123,8 @@ A few things to note about this projection:
   shape: `{"limits": {"<rail_name>": <cap_dollars>, ...}}`.
   Static caps come from the L2 YAML's `LimitSchedule` block;
   daily_balances.metadata only enters the picture for one-day
-  exceptions. AV.5 will write scenario tags under the same
-  `metadata` column — pick a sibling key like `"scenario_id"`,
+  exceptions. Scenario tags are slated to write under the same
+  `metadata` column later — pick a sibling key like `"scenario_id"`,
   don't smear it into the `limits` map.
 - **`account_*` denormalization** (name / role / scope /
   parent_role) is intentional — the same redundancy your
@@ -150,11 +151,11 @@ A few things to note about this projection:
   includes a query that surfaces day-boundary mismatch as
   recomputed-vs-stored drift.
 - **Sign confusion** — `money` is the stored end-of-day balance,
-  *signed* (negative on overdraft). It's NOT a magnitude. Don't
-  ABS it. Don't take `signed_amount`'s sign from the matching
-  transaction and stick it on `money` — they're independent
-  quantities. `money` is what your core banking system says the
-  account *is*; transactions tell you how it *got there*.
+  SIGNED (negative on overdraft). It's NOT a magnitude. Don't ABS
+  it. Don't take `amount_money`'s sign from the matching transaction
+  and stick it on `money` — they're independent quantities. `money`
+  is what your core banking system says the account IS; transactions
+  tell you how it GOT THERE.
 
 ## Next step
 
@@ -171,6 +172,7 @@ transactions projection:
    rounding bug in the dollars→cents conversion. Whole dollars or
    more ⇒ either a transaction is missing from the feed, or your
    day-boundary convention disagrees between the two feeds.
+   See it live: https://recon-gen-spec.hotchkiss.io/
 3. **Iterate** — populate `expected_eod_balance` /
    `metadata.limits` when downstream checks need them.
 
