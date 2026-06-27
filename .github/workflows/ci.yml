@@ -685,6 +685,35 @@ jobs:
             exit 1
           }
 
+  # DV.10 — the no-QuickSight regression. A boto3-free install (the [dev] +
+  # [prod] extras WITHOUT [quicksight]) must import clean and run the
+  # non-QS tests with the QS tests skipping (DV.6), not crashing. This is
+  # the "QuickSight is optional, not required" half of the v15 contract;
+  # the Layered runner above (with --extra quicksight) is the "still works"
+  # half.
+  no-quicksight-install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv (Python 3.14 per .python-version)
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          python-version: "3.14"
+
+      - name: Install WITHOUT the [quicksight] extra (no runtime boto3)
+        run: uv sync --frozen --extra dev --extra prod
+
+      - name: Prove boto3 is absent + the package imports anyway (DV.1)
+        run: |
+          set -e
+          .venv/bin/python -c "import importlib.util; assert importlib.util.find_spec('boto3') is None, 'boto3 leaked into the no-QS install'; print('runtime boto3 absent: OK')"
+          .venv/bin/python -c "import recon_gen, recon_gen.common.deploy, recon_gen.cli.json; print('package + deploy + cli import without boto3: OK')"
+
+      - name: A representative test slice passes without boto3
+        run: .venv/bin/python -m pytest tests/unit/test_models.py tests/unit/test_theme_presets.py tests/unit/test_typing_smells.py -q -p no:cacheprovider
+
   # Combine coverage data, render markdown + HTML reports, generate the
   # SVG badge, push to the `badges` branch. Merges the W.8b coverage job
   # and the prior coverage-badge job — there's only one source of
