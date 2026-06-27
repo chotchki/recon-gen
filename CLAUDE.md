@@ -2,7 +2,7 @@
 
 Independent validation tool for midsize financial institutions: layers double-entry accounting invariants on top of the institution's unique shape (accounts, rails, templates, chains, limit schedules) declared in an L2 YAML. Three runtime fronts off one shared core:
 
-- **AWS QuickSight** — four bundled apps (L1 Dashboard / L2 Flow Tracing / Investigation / Executives) emitted as JSON and deployed via boto3.
+- **AWS QuickSight** (OPTIONAL, BEING REMOVED) — four bundled apps (L1 Dashboard / L2 Flow Tracing / Investigation / Executives) emitted as JSON and deployed via boto3. boto3 now ships only with the `[quicksight]` extra (a plain `[prod]` install is QS-free); full removal lands in Phase DW. The self-hosted dashboards are the supported path.
 - **Self-hosted HTMX** (`recon-gen dashboards` / `recon-gen studio`) — same four apps via Starlette + Studio implementation tools (diagram, L2 editor, data-shaping panel). Offline iteration loop.
 - **Regulator-ready PDF** (`recon-gen audit apply`) — cryptographically fingerprinted, optionally pyHanko-signed. End-of-pipeline 4-way agreement test gates QS / self-hosted / PDF / direct-DB on every L1 invariant violation set.
 

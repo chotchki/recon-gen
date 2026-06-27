@@ -1,5 +1,7 @@
 # QuickSight quirks log
 
+> **QuickSight support is being REMOVED.** This renderer is now optional (the `[quicksight]` extra) and goes away in an upcoming release (Phase DW). MIGRATE NOW to the self-hosted dashboards (`recon-gen dashboards` / `recon-gen studio`) — the supported path, no AWS account.
+
 Bugs, undocumented behaviors and silent-failure modes we've hit
 while building the four shipped dashboards. Each entry captures the
 observed behavior, the user-visible symptom, the workaround we

@@ -1,5 +1,7 @@
 # How do I run my first deploy?
 
+> **QuickSight support is being REMOVED.** This walks the QuickSight deploy, now optional (the `[quicksight]` extra) and going away in an upcoming release (Phase DW). MIGRATE NOW to the self-hosted dashboards (`recon-gen dashboards` / `recon-gen studio`) — the supported path, no AWS account.
+
 *Customization walkthrough — Developer / Product Owner. Setup.*
 
 ## The story

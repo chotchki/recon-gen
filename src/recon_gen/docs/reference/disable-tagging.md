@@ -1,5 +1,7 @@
 # Disabling AWS resource tagging
 
+> **QuickSight support is being REMOVED.** Resource tagging applies only to the QuickSight deploy, now optional (the `[quicksight]` extra) and going away in an upcoming release (Phase DW). MIGRATE NOW to the self-hosted dashboards (`recon-gen dashboards` / `recon-gen studio`) — the supported path, no AWS account.
+
 !!! danger "This setting weakens cleanup safety. Read this page in full before opting in."
 
 The deploy pipeline tags every QuickSight resource it creates with
