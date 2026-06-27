@@ -1897,7 +1897,18 @@ class App:
         referenced = self.dataset_dependencies()
         return [d for d in self.datasets if d in referenced]
 
-    def emit_analysis(self) -> ModelAnalysis:
+    def validate(self) -> None:
+        """Run the full tree-validation walk — resolve auto-IDs, then
+        every structural invariant: dataset / calc-field / parameter /
+        filter-settability / drill-destination reference checks, the
+        Phase DB.2 App2-completeness gate, and the no-bare-string-columns
+        check. Raises on the first violation.
+
+        Public so non-QS renderers (App2) and tests can validate the tree
+        without going through the QS emitter; ``emit_analysis`` delegates
+        here. The emitter is being removed (DW phase), so the validation
+        walk lives on the App, not bundled inside emit.
+        """
         if self.analysis is None:
             raise ValueError(
                 "App has no Analysis — call set_analysis() first."
@@ -1918,6 +1929,10 @@ class App:
         )
         check_app2_parity(self)
         self._validate_no_bare_string_columns()
+
+    def emit_analysis(self) -> ModelAnalysis:
+        self.validate()
+        assert self.analysis is not None  # validate() raises if None
         return ModelAnalysis(
             AwsAccountId=self.cfg.aws.account_id,
             AnalysisId=self.cfg.aws.prefixed(self.analysis.analysis_id_suffix),
