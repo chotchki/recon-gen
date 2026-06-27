@@ -15,8 +15,10 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from tests._marks import inputs
-from tests.e2e._agreement import read_rendered_rows
+from tests.e2e._agreement import artifact_exists, read_rendered_rows
 
 
 _DIRECT = "tests/e2e/db/test_inv_direct.py::test_money_trail_direct_extract"
@@ -36,6 +38,17 @@ def _row_keys(layer: str, name: str) -> set[tuple[Any, ...]]:
 
 @inputs(_DIRECT, _APP2)
 def test_money_trail_agreement() -> None:
+    """L2-OPTIONAL (same skip discipline as `test_anomaly_agreement`):
+    money_trail needs a leaf-money chain role the L2 must declare. When
+    it doesn't, the producers skip (backlog #239) and there's nothing to
+    validate — skip rather than hard-fail. A producer FAILURE goes red
+    upstream and halts the chain first (see `_agreement.artifact_exists`).
+    """
+    if not artifact_exists("db", "money_trail_direct_meta"):
+        pytest.skip(
+            "money_trail producers skipped — the L2 doesn't declare the "
+            "chain role (backlog #239); nothing to cross-validate."
+        )
     direct_count = _read_meta(
         "db", "money_trail_direct_meta", "direct_count",
     )

@@ -16,8 +16,10 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from tests._marks import inputs
-from tests.e2e._agreement import read_rendered_rows
+from tests.e2e._agreement import artifact_exists, read_rendered_rows
 
 
 _DIRECT = "tests/e2e/db/test_inv_direct.py::test_anomaly_direct_extract"
@@ -44,7 +46,21 @@ def test_anomaly_agreement() -> None:
     The producers each asserted their own piece (spine == direct
     in the db producer; App2 ≥ expected in theirs); the validator
     confirms cross-renderer set equality.
+
+    L2-OPTIONAL: anomaly needs a (sender, recipient) leaf-money role
+    pair the L2 must declare. When the L2 doesn't (the producers
+    `pytest.skip` — backlog #239), there's nothing to validate, so
+    skip cleanly rather than hard-fail on the absent artifact. A real
+    producer FAILURE would have gone red in the db / app2 layer and
+    halted the chain before this validator ran (see
+    `_agreement.artifact_exists`).
     """
+    if not artifact_exists("db", "anomaly_direct_meta"):
+        pytest.skip(
+            "anomaly producers skipped — the L2 doesn't declare the "
+            "anomaly sender/recipient roles (backlog #239); nothing to "
+            "cross-validate."
+        )
     direct_count = _read_meta("db", "anomaly_direct_meta", "direct_count")
     app2_count = _read_meta("app2", "anomaly_app2_meta", "app2_count")
 

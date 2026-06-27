@@ -22,9 +22,9 @@ moving / renaming / deleting a producer SCREAMS at collection time
 instead of silently detaching the validator at runtime.
 
 **Important runner contract**: the validator can only run as part of
-`./run_tests.sh up_to=qs_browser` — that's the only invocation that
+`./run_tests.sh up_to=agreement` — that's the only invocation that
 collects all the producer tiers (db + app2) into one pytest run +
-satisfies `@inputs(...)` resolution. Bare `pytest tests/e2e/qs_browser/`
+satisfies `@inputs(...)` resolution. Bare `pytest tests/e2e/agreement/`
 fails at collection time because the producer nodeids in db/ and
 app2/ aren't in the collection.
 """

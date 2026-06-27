@@ -89,6 +89,28 @@ def write_rendered_rows(layer: str, name: str, rows: list[Any]) -> None:  # typi
     out.write_text(json.dumps(rows, indent=2, sort_keys=True))
 
 
+def artifact_exists(layer: str, name: str) -> bool:
+    """True iff the producer wrote this artifact.
+
+    DW.3 — lets an agreement validator distinguish "producer legitimately
+    skipped" from "producer ran". Used by the L2-OPTIONAL invariant
+    validators (anomaly / money_trail): those producers `pytest.skip`
+    when the L2 doesn't declare the roles the invariant needs, so their
+    artifact is simply absent. A validator that hard-failed on absence
+    would turn a legitimate "this invariant doesn't apply to this L2"
+    into a red gate.
+
+    Safe to skip on absence here (vs hiding a real producer failure): a
+    producer FAILURE goes red in its OWN layer (db / app2), which halts
+    the runner chain BEFORE the agreement layer ever runs. So by the time
+    a validator reads artifacts, a missing one can only mean the producer
+    skipped — never that it failed. The universal L1 invariants (drift /
+    overdraft / …) keep hard-failing on absence; only the L2-optional
+    inv invariants opt into skip-on-absence.
+    """
+    return _artifact_path(layer, name).exists()
+
+
 def read_rendered_rows(layer: str, name: str) -> list[Any]:  # typing-smell: ignore[explicit-any]: artifact payload — see module docstring
     """Consumer side: read the artifact a producer test wrote.
 

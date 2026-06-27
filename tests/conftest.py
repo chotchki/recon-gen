@@ -427,7 +427,7 @@ def pytest_addoption(parser: Any) -> None:  # typing-smell: ignore[explicit-any]
     group.addoption(
         "--tier", default=None,
         help="Run tests marked @tier(Tier.X) where X matches. "
-             "Choices: unit | db | app2 | qs_api | qs_browser.",
+             "Choices: unit | db | app2 | agreement | qs_api | qs_browser.",
     )
     group.addoption(
         "--dialect", default=None,
@@ -451,7 +451,7 @@ def pytest_addoption(parser: Any) -> None:  # typing-smell: ignore[explicit-any]
 # the `PytestUnknownMarkWarning` that fires for custom marks. Listing them
 # here keeps the marker authority in one place.
 _CB_MARK_DOCS = {
-    "tier": "Test tier (one of unit | db | app2 | qs_api | qs_browser). Required on every test.",
+    "tier": "Test tier (one of unit | db | app2 | agreement | qs_api | qs_browser). Required on every test.",
     "dialects": "DB dialects this test exercises (zero or more of pg | or | du).",
     "l2": "L2 forms this test exercises (zero or more of spec_example | sasquatch_pr | fuzz).",
     "needs": "Runtime deps (docker | playwright | aws_qs | oracledb_client).",

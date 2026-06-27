@@ -6,7 +6,7 @@ Invoked via the ``./run_tests.sh`` bash shim at repo root; the shim
 
 Verbs:
     up_to <layer>     Run the chain up to and including <layer>.
-                      Layers: unit | db | app2 | qs_api | qs_browser
+                      Layers: unit | db | app2 | agreement | qs_api | qs_browser
                       (pyright folds into unit via the conftest sessionstart
                       gate). DI phase — ``deploy`` retired as a chain
                       layer; the session-autouse ``qs_deployed`` fixture
@@ -81,9 +81,16 @@ LAYERS: Final[tuple[str, ...]] = (
     "unit",
     "db",
     "app2",
+    "agreement",
     "qs_api",
     "qs_browser",
 )
+# DW.3 — ``agreement`` sits AFTER app2 and BEFORE qs_api on purpose: it
+# reads the JSON artifacts the db + app2 layers wrote (the cross-renderer
+# high-watermark validators), so it needs neither AWS nor a browser. Its
+# slot before qs_api means ``up_to=agreement`` runs unit→db→app2→agreement
+# and stops short of the AWS-touching QS tiers — the supported gate now
+# that QuickSight is being removed.
 # DI phase — ``deploy`` retired as a chain layer. QS deploy is owned
 # by the session-autouse ``qs_deployed`` fixture in
 # ``tests/e2e/conftest.py``; the qs_api + qs_browser layers' pytest
@@ -124,6 +131,8 @@ _HANG_THRESHOLDS: Final[dict[str, int]] = {
     # DI phase — ``deploy`` layer retired; qs_api / qs_browser layers'
     # session-autouse ``qs_deployed`` fixture absorbs the ~30-60s
     # deploy wall into their own session window.
+    "agreement": 240,   # ~seconds: JSON-artifact reads + set comparisons,
+                        #           no DB / browser / AWS. db-like ceiling.
     "qs_api": 180,      # ~15s clean + ~60s qs_deployed fixture
     "qs_browser": 900,  # ~5-21m clean; QS embed loads + reruns dominate
 }
@@ -209,6 +218,11 @@ _LAYER_DEPS: Final[dict[str, frozenset[str]]] = {
     # only by design (audit §7.10 LOCKED — App2 = local-feedback gate;
     # QS = AWS-deploy parity cell at 6/7).
     "app2": frozenset({"docker"}),
+    # DW.3 — agreement reads artifacts on disk; it touches no AWS itself.
+    # `docker` is the TRANSITIVE chain dep: `up_to=agreement` runs db +
+    # app2 first, both of which need a container. Probing it here fails
+    # fast on a docker-down box instead of ~2 layers deep.
+    "agreement": frozenset({"docker"}),
     # CB.11.a.1+.2 (2026-06-01) — dropped `aws_rds_running` from
     # deploy/api/browser. Post-CB.12 the DB substrate is Docker (PG +
     # Oracle on the self-hosted runner / dev box), not RDS Aurora —
@@ -784,7 +798,9 @@ def _layer_command(
     # files are right there — no `find runs -name .coverage.* | xargs cp`
     # bespoke staging. The runs/<id>/ tree stays focused on triage
     # artifacts (cmd.json, stdout.log, timings.json).
-    _is_pytest_layer = layer in ("unit", "db", "app2", "qs_api", "qs_browser")
+    _is_pytest_layer = layer in (
+        "unit", "db", "app2", "agreement", "qs_api", "qs_browser",
+    )
     _cov_args: list[str] = (
         ["--cov=recon_gen", "--cov-report="]
         if opts.coverage and _is_pytest_layer
@@ -880,6 +896,37 @@ def _layer_command(
         # `tests/e2e/app2/` directory with NO `-m` filter — that hazard
         # does not apply here. Leave qs_browser at default `--dist=load`.
         cmd += ["--dist=loadgroup"]
+        return (cmd, env_addl)
+    if layer == "agreement":
+        # DW.3 — cross-renderer agreement validators. Pure JSON-artifact
+        # readers (no DB, no browser, no AWS): they compare what the db +
+        # app2 producers rendered into ``<run_dir>/{db,app2}/*.json``.
+        #
+        # Collect ``tests/e2e/db/`` + ``tests/e2e/app2/`` ALONGSIDE
+        # ``tests/e2e/agreement/`` so the validators' ``@inputs(...)``
+        # producer nodeids resolve at collection time (the conftest's
+        # collection-time check needs them present), then
+        # ``--tier=agreement`` deselects everything but the validators to
+        # RUN. The producers already ran in the earlier db + app2 layers
+        # and left their artifacts under the shared run dir; this layer
+        # only reads + asserts. Every heavyweight autouse fixture
+        # (qs_deployed / matview-refresh / pre-warm) gates on
+        # ``_session_needs_aws`` — False here, since the validators
+        # request no AWS fixtures — so no QS deploy, no DB contact fires.
+        # No ``--reruns`` (deterministic file reads), no browser
+        # page-timeout, no Oracle worker cap.
+        cmd = [
+            str(_VENV_BIN / "pytest"),
+            "tests/e2e/db/",
+            "tests/e2e/app2/",
+            "tests/e2e/agreement/",
+            "--tier=agreement",
+            "-q",
+        ]
+        if opts.only:
+            cmd += ["-k", opts.only]
+        cmd += _cov_args
+        cmd += ["-n", str(opts.parallel) if opts.parallel > 1 else "auto"]
         return (cmd, env_addl)
     # DI phase — ``deploy`` retired as a chain layer. The session-autouse
     # ``qs_deployed`` fixture in ``tests/e2e/conftest.py`` owns deploy;
@@ -4988,13 +5035,14 @@ def _infer_layer_from_nodeid(nodeid: str) -> str | None:
 
     Order of rules (first match wins) matches the design lock:
       1. tests/e2e/qs_browser/ → qs_browser
-      2. tests/e2e/qs_api/     → qs_api
-      3. tests/e2e/app2/       → app2
-      4. tests/e2e/db/         → db
-      5. tests/e2e/<root parametrized file> → qs_browser
-      6. tests/{unit,json,cli,docs,schema,l2}/ → unit
-      7. tests/{audit,data}/   → unit (safe-floor fallback)
-      8. otherwise → None
+      2. tests/e2e/agreement/  → agreement
+      3. tests/e2e/qs_api/     → qs_api
+      4. tests/e2e/app2/       → app2
+      5. tests/e2e/db/         → db
+      6. tests/e2e/<root parametrized file> → qs_browser
+      7. tests/{unit,json,cli,docs,schema,l2}/ → unit
+      8. tests/{audit,data}/   → unit (safe-floor fallback)
+      9. otherwise → None
     """
     if not nodeid:
         return None
@@ -5006,9 +5054,11 @@ def _infer_layer_from_nodeid(nodeid: str) -> str | None:
     # Absolute paths are operator error — reject by returning None.
     if file_path.startswith("/"):
         return None
-    # Rules 1-4: per-tier subdirs.
+    # Rules 1-5: per-tier subdirs.
     if file_path.startswith("tests/e2e/qs_browser/"):
         return "qs_browser"
+    if file_path.startswith("tests/e2e/agreement/"):
+        return "agreement"
     if file_path.startswith("tests/e2e/qs_api/"):
         return "qs_api"
     if file_path.startswith("tests/e2e/app2/"):

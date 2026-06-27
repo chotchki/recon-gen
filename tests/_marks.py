@@ -47,11 +47,19 @@ import pytest
 
 class Tier(StrEnum):
     """Test tier — required on every test, exactly one of:
-    `UNIT | DB | APP2 | QS_API | QS_BROWSER`."""
+    `UNIT | DB | APP2 | AGREEMENT | QS_API | QS_BROWSER`.
+
+    `AGREEMENT` (DW.3) is the high-watermark cross-renderer validator
+    tier — pure JSON-artifact readers that compare what the db + app2
+    producers rendered (scenario_plants ⊆ direct == App2 == PDF). It
+    needs no AWS, no browser, no DB of its own; it reads the artifacts
+    the earlier layers wrote under the shared run dir. (QS_API +
+    QS_BROWSER are the QuickSight tiers being removed in Phase DW.)"""
 
     UNIT = "unit"
     DB = "db"
     APP2 = "app2"
+    AGREEMENT = "agreement"
     QS_API = "qs_api"
     QS_BROWSER = "qs_browser"
 

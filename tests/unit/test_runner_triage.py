@@ -45,22 +45,29 @@ def test_infer_layer_qs_browser_subdir() -> None:
     ) == "qs_browser"
 
 
+def test_infer_layer_agreement_subdir() -> None:
+    """Rule 2 (DW.3): nodeids under tests/e2e/agreement/ -> agreement."""
+    assert r._infer_layer_from_nodeid(
+        "tests/e2e/agreement/test_inv_anomaly_agreement.py::test_anomaly_agreement"
+    ) == "agreement"
+
+
 def test_infer_layer_qs_api_subdir() -> None:
-    """Rule 2: nodeids under tests/e2e/qs_api/ -> qs_api."""
+    """Rule 3: nodeids under tests/e2e/qs_api/ -> qs_api."""
     assert r._infer_layer_from_nodeid(
         "tests/e2e/qs_api/test_describe_foo.py::test_y"
     ) == "qs_api"
 
 
 def test_infer_layer_app2_subdir() -> None:
-    """Rule 3: nodeids under tests/e2e/app2/ -> app2."""
+    """Rule 4: nodeids under tests/e2e/app2/ -> app2."""
     assert r._infer_layer_from_nodeid(
         "tests/e2e/app2/test_bv33_trainer.py::test_x"
     ) == "app2"
 
 
 def test_infer_layer_db_subdir() -> None:
-    """Rule 4: nodeids under tests/e2e/db/ -> db."""
+    """Rule 5: nodeids under tests/e2e/db/ -> db."""
     assert r._infer_layer_from_nodeid(
         "tests/e2e/db/test_dataset_sql_smoke.py::test_one"
     ) == "db"
@@ -614,7 +621,9 @@ def test_deploy_retired_from_layers_tuple() -> None:
     test instead of silently splitting the deploy code path.
     """
     assert "deploy" not in r.LAYERS
-    assert r.LAYERS == ("unit", "db", "app2", "qs_api", "qs_browser")
+    assert r.LAYERS == (
+        "unit", "db", "app2", "agreement", "qs_api", "qs_browser",
+    )
 
 
 def test_aws_touching_layers_starts_at_qs_api() -> None:
@@ -622,12 +631,14 @@ def test_aws_touching_layers_starts_at_qs_api() -> None:
 
     The qs_deployed fixture fires when a session's collected tests
     pull in AWS-dependent fixtures (qs_client / qs_driver / etc.) —
-    which only the qs_api + qs_browser tiers do. Db + app2 tiers
-    inherit tests/e2e/conftest.py but their fixture closures don't
-    touch AWS, so qs_deployed bails via _session_needs_aws.
+    which only the qs_api + qs_browser tiers do. Db + app2 tiers — and
+    the DW.3 ``agreement`` tier, a pure artifact reader — inherit
+    tests/e2e/conftest.py but their fixture closures don't touch AWS,
+    so qs_deployed bails via _session_needs_aws.
     """
     assert r.AWS_TOUCHING_LAYERS == ("qs_api", "qs_browser")
     assert "deploy" not in r.AWS_TOUCHING_LAYERS
+    assert "agreement" not in r.AWS_TOUCHING_LAYERS
 
 
 def test_layer_command_deploy_arm_removed(tmp_path: Path) -> None:
@@ -658,20 +669,34 @@ def test_is_aws_touching_layer_qs_api_and_later() -> None:
 def test_chain_through_qs_browser_skips_deploy() -> None:
     """``chain_through("qs_browser")`` no longer transits ``deploy``.
 
-    Concrete proof that ``up_to=qs_browser`` is a 5-layer chain
-    (not 6) post-DI. The qs_deployed fixture absorbs the deploy
-    work into the qs_api / qs_browser session at start.
+    Concrete proof that ``up_to=qs_browser`` is a 6-layer chain
+    post-DW.3 (the ``agreement`` tier slotted in before qs_api). The
+    qs_deployed fixture absorbs the deploy work into the qs_api /
+    qs_browser session at start.
     """
     chain = r.chain_through("qs_browser")
-    assert chain == ["unit", "db", "app2", "qs_api", "qs_browser"]
+    assert chain == [
+        "unit", "db", "app2", "agreement", "qs_api", "qs_browser",
+    ]
     assert "deploy" not in chain
 
 
-def test_chain_through_qs_api_is_4_layers() -> None:
-    """``up_to=qs_api`` runs the full chain through qs_api — 4 layers."""
+def test_chain_through_qs_api_is_5_layers() -> None:
+    """``up_to=qs_api`` runs the full chain through qs_api — 5 layers
+    post-DW.3 (``agreement`` precedes qs_api)."""
     chain = r.chain_through("qs_api")
-    assert chain == ["unit", "db", "app2", "qs_api"]
+    assert chain == ["unit", "db", "app2", "agreement", "qs_api"]
     assert "deploy" not in chain
+
+
+def test_chain_through_agreement_is_aws_free() -> None:
+    """``up_to=agreement`` stops short of the AWS-touching QS tiers —
+    the DW.3 design intent (the supported gate post-QuickSight)."""
+    chain = r.chain_through("agreement")
+    assert chain == ["unit", "db", "app2", "agreement"]
+    assert "qs_api" not in chain
+    assert "qs_browser" not in chain
+    assert not any(layer in r.AWS_TOUCHING_LAYERS for layer in chain)
 
 
 # ---------------------------------------------------------------------------
