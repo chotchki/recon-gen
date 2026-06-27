@@ -7,8 +7,8 @@ survived as whitespace (QS only honors ``<br/>``), and inline
 elements (they showed as literal bracket-paren syntax in the
 rendered text box).
 
-Walks the emitted analysis JSON for every shipped app, finds every
-SheetTextBox.Content string, asserts:
+Walks the tree of every shipped app, finds every ``TextBox.content``
+string on every sheet, asserts:
 
 1. No literal ``\\n\\n`` substring survives — paragraph breaks must
    be ``<br/><br/>``.
@@ -18,15 +18,20 @@ SheetTextBox.Content string, asserts:
 Either failure means a ``rt.body(some_string)`` call site needs to
 become ``rt.markdown(some_string)`` (or the input string needs to
 not contain those constructs at all).
+
+The content is sourced straight off the tree node — the same string
+the renderers consume — so the safety gate holds independent of any
+API-serialization path.
 """
 
 from __future__ import annotations
 
 import re
-from typing import Any, Iterator
+from typing import Iterator
 
 import pytest
 
+from recon_gen.common.tree import App
 from tests._test_helpers import make_test_config
 
 
@@ -38,27 +43,30 @@ _CFG = make_test_config()
 _UNCONVERTED_MARKDOWN_LINK = re.compile(r"\[([^\]]+?)\]\(([^)]+?)\)")
 
 
-def _all_text_box_contents(emitted: Any) -> Iterator[tuple[str, str]]:
-    """Walk the emitted analysis dict, yield ``(sheet_id, content)`` for
-    every SheetTextBox.
+def _all_text_box_contents(app: App) -> Iterator[tuple[str, str]]:
+    """Walk the built app's tree, yield ``(sheet_id, content)`` for
+    every ``TextBox`` on every sheet.
 
-    Uses the AWS API JSON shape (post-``to_aws_json`` /
-    ``_strip_nones``): ``Definition.Sheets[].TextBoxes[].Content``.
+    Sources from the tree node (``sheet.text_boxes[*].content``) — the
+    canonical string the renderers consume — rather than any serialized
+    payload. ``resolve_auto_ids`` has already run, so every sheet
+    carries its resolved ``sheet_id`` for the failure messages.
     """
-    definition = emitted.get("Definition", {})
-    for sheet in definition.get("Sheets", []):
-        sheet_id = sheet.get("SheetId", "<unknown>")
-        for tb in sheet.get("TextBoxes") or []:  # pyright: ignore[reportUnknownVariableType]: TextBox.to_aws_json dict shape
-            yield sheet_id, tb.get("Content", "")  # pyright: ignore[reportUnknownMemberType]: TextBox.to_aws_json dict shape
+    assert app.analysis is not None, f"{app.name} has no analysis"
+    for sheet in app.analysis.sheets:
+        for tb in sheet.text_boxes:
+            yield str(sheet.sheet_id), tb.content
 
 
-def _build_all_apps():
-    """Build all 4 shipped apps + emit each analysis to the AWS shape.
+def _build_all_apps() -> Iterator[tuple[str, App]]:
+    """Build all 4 shipped apps + resolve their tree auto-IDs.
 
-    Yields ``(app_name, emitted_analysis_dict)`` tuples. Lazy import
-    of each app's builder so a build failure in one app doesn't mask
-    failures in others (each shows up as its own pytest collection
-    error rather than a module-level ImportError).
+    Yields ``(app_name, app)`` tuples. Lazy import of each app's builder
+    so a build failure in one app doesn't mask failures in others (each
+    shows up as its own pytest collection error rather than a
+    module-level ImportError). ``resolve_auto_ids()`` fills in
+    tree-position-derived IDs (sheet ids included) without going through
+    any API-emit path.
     """
     from recon_gen.apps.l1_dashboard.app import build_l1_dashboard_app
     from recon_gen.apps.l2_flow_tracing.app import (
@@ -75,19 +83,19 @@ def _build_all_apps():
     ]
     for name, build in builders:
         app = build(_CFG)
-        emitted = app.emit_analysis().to_aws_json()
-        yield name, emitted
+        app.resolve_auto_ids()
+        yield name, app
 
 
-@pytest.mark.parametrize("app_name,emitted", list(_build_all_apps()))
+@pytest.mark.parametrize("app_name,app", list(_build_all_apps()))
 def test_no_unconverted_paragraph_break_in_text_box_content(
-    app_name: str, emitted: Any,
+    app_name: str, app: App,
 ) -> None:
     """Class regression: no ``\\n\\n`` (or longer run) survives in
     any rendered text box. Markdown convention paragraph breaks must
     become ``<br/><br/>`` via ``rt.markdown()``."""
     bad: list[str] = []
-    for sheet_id, content in _all_text_box_contents(emitted):
+    for sheet_id, content in _all_text_box_contents(app):
         if "\n\n" in content:
             preview = content[: content.index("\n\n")][-40:]
             bad.append(
@@ -102,16 +110,16 @@ def test_no_unconverted_paragraph_break_in_text_box_content(
     )
 
 
-@pytest.mark.parametrize("app_name,emitted", list(_build_all_apps()))
+@pytest.mark.parametrize("app_name,app", list(_build_all_apps()))
 def test_no_unconverted_markdown_link_in_text_box_content(
-    app_name: str, emitted: Any,
+    app_name: str, app: App,
 ) -> None:
     """Class regression: no ``[text](url)`` survives in any rendered
     text box. Markdown links must become QuickSight ``<a>`` elements
     via ``rt.markdown()`` (or ``rt.link()`` for one-off explicit
     construction)."""
     bad: list[str] = []
-    for sheet_id, content in _all_text_box_contents(emitted):
+    for sheet_id, content in _all_text_box_contents(app):
         match = _UNCONVERTED_MARKDOWN_LINK.search(content)
         if match:
             bad.append(
@@ -134,9 +142,9 @@ def test_no_unconverted_markdown_link_in_text_box_content(
 _UNCONVERTED_BOLD = re.compile(r"\*\*\S.*?\*\*")
 
 
-@pytest.mark.parametrize("app_name,emitted", list(_build_all_apps()))
+@pytest.mark.parametrize("app_name,app", list(_build_all_apps()))
 def test_no_unconverted_bold_in_text_box_content(
-    app_name: str, emitted: Any,
+    app_name: str, app: App,
 ) -> None:
     """Class regression (AO.R.3): no ``**bold**`` survives in any
     rendered text box. ``rt.markdown()`` converts it to ``<b>``; a
@@ -144,7 +152,7 @@ def test_no_unconverted_bold_in_text_box_content(
     operator-flagged L2FT/L1 panels rendered literal ``**`` before the
     parser learned bold/code/bullets)."""
     bad: list[str] = []
-    for sheet_id, content in _all_text_box_contents(emitted):
+    for sheet_id, content in _all_text_box_contents(app):
         match = _UNCONVERTED_BOLD.search(content)
         if match:
             bad.append(
@@ -166,9 +174,9 @@ def test_no_unconverted_bold_in_text_box_content(
 _LI_BLOCK = re.compile(r"<li\b[^>]*>(.*?)</li>", re.DOTALL)
 
 
-@pytest.mark.parametrize("app_name,emitted", list(_build_all_apps()))
+@pytest.mark.parametrize("app_name,app", list(_build_all_apps()))
 def test_no_br_inside_li_in_text_box_content(
-    app_name: str, emitted: Any,
+    app_name: str, app: App,
 ) -> None:
     """Class regression: no ``<br/>`` may appear inside an ``<li>``.
 
@@ -187,7 +195,7 @@ def test_no_br_inside_li_in_text_box_content(
     is the regression guard.
     """
     bad: list[str] = []
-    for sheet_id, content in _all_text_box_contents(emitted):
+    for sheet_id, content in _all_text_box_contents(app):
         for li_match in _LI_BLOCK.finditer(content):
             inner = li_match.group(1)
             if "<br/>" in inner or "<br />" in inner or "<br>" in inner:
