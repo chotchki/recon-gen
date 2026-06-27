@@ -179,6 +179,17 @@ def test_build_signature_l2_instance_is_kwarg_only() -> None:
 # -- Analysis + Dashboard registration ---------------------------------------
 
 
+def test_tree_validates() -> None:
+    """The full tree-validation walk passes on the L2 Flow Tracing app —
+    no orphan dataset / calc-field / parameter refs, no unsettable filter
+    params, no dangling drill targets, App2-parity holds, no bare-string
+    columns. Phase DW.1: was the analysis/dashboard emit success path
+    (the validators ran only at emit time); the walk now lives on
+    App.validate(), so the canary survives the emitter's removal."""
+    app = build_l2_flow_tracing_app(_CFG)
+    app.validate()  # raises on the first violation
+
+
 def test_analysis_registered_with_deployment_aware_name() -> None:
     """Z.C — the Analysis title surfaces ``cfg.aws.deployment_name`` so
     multi-deploy QS accounts are distinguishable in the UI."""
@@ -193,30 +204,25 @@ def test_dashboard_registered() -> None:
     assert app.dashboard is not None
 
 
-def test_emit_analysis_and_dashboard_succeed() -> None:
-    """Tree validation passes — no orphan refs / shape errors."""
-    app = build_l2_flow_tracing_app(_CFG)
-    analysis = app.emit_analysis()
-    dashboard = app.emit_dashboard()
-    assert analysis is not None
-    assert dashboard is not None
-
-
 def test_analysis_id_uses_deployment_prefix() -> None:
     """Z.C — `<deployment_name>-l2-flow-tracing-analysis`. Default
     deployment_name is whatever ``make_test_config`` defaulted to
-    (``recon-test``)."""
+    (``recon-test``). Tree-walk: the AnalysisId is
+    ``cfg.aws.prefixed(analysis_id_suffix)`` — reconstruct it without
+    emit."""
     app = build_l2_flow_tracing_app(_CFG)
-    analysis = app.emit_analysis()
-    assert analysis.AnalysisId == (
+    assert app.analysis is not None
+    analysis_id = app.cfg.aws.prefixed(app.analysis.analysis_id_suffix)
+    assert analysis_id == (
         f"{_CFG.aws.deployment_name}-l2-flow-tracing-analysis"
     )
 
 
 def test_dashboard_id_uses_deployment_prefix() -> None:
     app = build_l2_flow_tracing_app(_CFG)
-    dashboard = app.emit_dashboard()
-    assert dashboard.DashboardId == (
+    assert app.dashboard is not None
+    dashboard_id = app.cfg.aws.prefixed(app.dashboard.dashboard_id_suffix)
+    assert dashboard_id == (
         f"{_CFG.aws.deployment_name}-l2-flow-tracing"
     )
 
@@ -232,8 +238,10 @@ def test_per_deployment_prefix_isolates_resource_ids() -> None:
     b_app = build_l2_flow_tracing_app(
         cfg_b, l2_instance=load_instance(SASQUATCH_PR_YAML),
     )
-    a_id = a_app.emit_analysis().AnalysisId
-    b_id = b_app.emit_analysis().AnalysisId
+    assert a_app.analysis is not None
+    assert b_app.analysis is not None
+    a_id = a_app.cfg.aws.prefixed(a_app.analysis.analysis_id_suffix)
+    b_id = b_app.cfg.aws.prefixed(b_app.analysis.analysis_id_suffix)
     assert a_id != b_id
     assert "recon-spec" in a_id
     assert "recon-sasq" in b_id
