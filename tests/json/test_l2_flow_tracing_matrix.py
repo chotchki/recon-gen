@@ -28,9 +28,10 @@ What's checked across every L2 instance:
 - The metadata-driven dropdowns scale exactly with the L2's declared
   keys; an instance with 5 keys gets 5 dropdowns + 5 parameters; an
   instance with 28 gets 28 + 28.
-- ``emit_analysis()`` + ``emit_dashboard()`` both succeed (full tree
-  validation pass) — catches "L2 instance X has a shape that breaks
-  the tree validator" regressions early.
+- The tree resolves + validates clean for every L2 instance
+  (``resolve_auto_ids`` + the App validator walks) — catches "L2
+  instance X has a shape that breaks the tree validator" regressions
+  early, with no QuickSight emit in the loop (DW.1).
 
 Aurora deploy verification is M.3.10 — this file is unit-test only.
 """
@@ -162,23 +163,49 @@ def test_analysis_and_dashboard_ids_carry_deployment_prefix(
 ) -> None:
     """Mirror — analysis + dashboard IDs both use the same deployment
     prefix shape so deploys don't collide and cleanup-by-tag scopes
-    correctly."""
+    correctly. Tree-walk: the emitted IDs are
+    ``cfg.aws.prefixed(<suffix>)`` — reconstruct them without emit and
+    pin the full composed shape (prefix + the app's fixed suffix), which
+    stays invariant across L2 instances."""
     app = build_l2_flow_tracing_app(_CFG, l2_instance=l2_instance)
-    analysis = app.emit_analysis()
-    dashboard = app.emit_dashboard()
+    assert app.analysis is not None
+    assert app.dashboard is not None
     expected_prefix = f"{_CFG.aws.deployment_name}-"
-    assert analysis.AnalysisId.startswith(expected_prefix)
-    assert dashboard.DashboardId.startswith(expected_prefix)
+    analysis_id = app.cfg.aws.prefixed(app.analysis.analysis_id_suffix)
+    dashboard_id = app.cfg.aws.prefixed(app.dashboard.dashboard_id_suffix)
+    assert analysis_id.startswith(expected_prefix)
+    assert dashboard_id.startswith(expected_prefix)
+    assert analysis_id == f"{expected_prefix}l2-flow-tracing-analysis"
+    assert dashboard_id == f"{expected_prefix}l2-flow-tracing"
 
 
-def test_emit_analysis_and_dashboard_succeed(
+def test_tree_validates_for_every_l2_instance(
     l2_instance: L2Instance,
 ) -> None:
     """Full tree validation passes for every L2 instance — catches
-    'this YAML produces a shape the validator rejects' regressions."""
+    'this YAML produces a shape the validator rejects' regressions.
+
+    DW.1 — runs the exact validator suite the old QuickSight emit path
+    fired (ID resolution + dataset / calc-field / parameter /
+    filter-settability / drill-destination reference checks + the
+    App2-parity walk), minus the QuickSight model construction that
+    DW.8 deletes. A fuzz YAML whose shape the validators reject raises
+    here, same as it did through the emitter."""
+    from recon_gen.common.tree.app2_parity_registry import check_app2_parity
+
     app = build_l2_flow_tracing_app(_CFG, l2_instance=l2_instance)
-    assert app.emit_analysis() is not None
-    assert app.emit_dashboard() is not None
+    assert app.analysis is not None
+    assert app.dashboard is not None
+    # These are exactly the walks the old QS emit path ran before
+    # building the (being-deleted) QS model — no QuickSight serialization.
+    app.resolve_auto_ids()
+    app._validate_dataset_references()
+    app._validate_calc_field_references()
+    app._validate_parameter_references()
+    app._validate_filter_param_settability()
+    app._validate_drill_destinations()
+    app._validate_no_bare_string_columns()
+    check_app2_parity(app)
 
 
 # -- Metadata cascade — fixed shape per L2 (M.3.10c) ------------------------
