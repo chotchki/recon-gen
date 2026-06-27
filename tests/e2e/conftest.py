@@ -997,129 +997,77 @@ def _parametrized_dashboard_driver(
     request: pytest.FixtureRequest,
     *,
     cfg: Config,
-    region: str,
-    account_id: str,
-    dashboard_id: str,  # typing-smell: ignore[bare-str-id]: dashboard_id comes from callers as raw analyst string
     app: "App",
     short: str,
 ) -> Iterator[tuple["DashboardDriver", str]]:
-    if request.param == "qs":
-        import boto3
+    # DW.6 — app2-only. The historical `[qs, app2]` parametrize collapsed
+    # to `[app2]` when QuickSight was removed; App2 is the sole renderer.
+    # The test↔driver split STAYS ([[feedback_keep_test_driver_split]]):
+    # tests still speak `DashboardDriver` verbs through `App2Driver`,
+    # never raw Playwright. The fixtures keep a single-element
+    # `params=["app2"]` so the `[app2]` callspec id survives (any
+    # nodeid references stay valid).
+    if not cfg.db.url:
+        pytest.skip("no cfg.db.url — the app2 leg reads the live DB")
+    from tests.e2e._drivers import App2Driver
+    from tests.e2e._harness_html2 import make_live_db_fetchers_for_app
 
-        from tests.e2e._drivers._lifecycle import qs_driver_or_none
-
-        qs = boto3.client("quicksight", region_name=region)  # pyright: ignore[reportUnknownMemberType]: boto3.client dynamic: third-party stub or test scaffolding cascade
-        try:
-            qs.describe_dashboard(
-                AwsAccountId=account_id, DashboardId=dashboard_id,
-            )
-        except qs.exceptions.ResourceNotFoundException:
-            pytest.skip(
-                f"dashboard {dashboard_id!r} not deployed in "
-                f"{account_id}/{region} — deploy it first"
-            )
-        # AA.H.12 — shared lifecycle: get_user_arn gate + QsEmbedDriver
-        # embed + AA.H.10 capture-hook. Skip-on-None policy because
-        # the [qs, app2] parametrize already covers the App2 leg
-        # separately; the qs branch needs a real QS embed.
-        #
-        # DB.3 follow-up — pass a tall (1600, 4000) viewport for the
-        # QS leg so full_page screenshots actually capture the whole
-        # sheet. QS embed uses internal scroll containers, so
-        # ``page.screenshot(full_page=True)`` only captures the
-        # viewport-visible region (unlike App2's HTML page which
-        # scroll-stitches). Without the tall viewport, cold-read
-        # parity captures clipped below-the-fold visuals (operator
-        # caught this on L2FT Chains where the table ran 30 rows in
-        # App2 but only the header rendered in the QS snap).
-        with qs_driver_or_none(
-            request, cfg=cfg, account_id=account_id, region=region,
-            viewport=(1600, 4000),
-        ) as driver:
-            if driver is None:
-                pytest.skip("RECON_E2E_USER_ARN unavailable — cannot derive QS user ARN")
-            yield driver, dashboard_id
-    else:  # app2
-        if not cfg.db.url:
-            pytest.skip(
-                "no cfg.db.url — the app2 leg reads the same DB "
-                "the deployed dashboard does"
-            )
-        from tests.e2e._drivers import App2Driver
-        from tests.e2e._harness_html2 import make_live_db_fetchers_for_app
-
-        assert app.analysis is not None
-        data_fetcher, options_search_fetcher = make_live_db_fetchers_for_app(
-            tree_app=app, cfg=cfg,
-        )
-        with App2Driver.serving(
-            cfg=cfg,
-            tree_app=app, sheet=app.analysis.sheets[0],
-            data_fetcher=data_fetcher, options_search_fetcher=options_search_fetcher,
-            dashboard_id=short, dashboard_title=f"{short} (live)",
-        ) as driver:
-            yield driver, short
-            # AA.H.6 — see QS branch above.
-            _maybe_capture_on_failure(request, driver)
+    assert app.analysis is not None
+    data_fetcher, options_search_fetcher = make_live_db_fetchers_for_app(
+        tree_app=app, cfg=cfg,
+    )
+    with App2Driver.serving(
+        cfg=cfg,
+        tree_app=app, sheet=app.analysis.sheets[0],
+        data_fetcher=data_fetcher, options_search_fetcher=options_search_fetcher,
+        dashboard_id=short, dashboard_title=f"{short} (live)",
+    ) as driver:
+        yield driver, short
+        # AA.H.6 — failure-capture hook (screenshot/dom/console/etc.).
+        _maybe_capture_on_failure(request, driver)
 
 
-@pytest.fixture(params=["qs", "app2"])
+@pytest.fixture(params=["app2"])
 def l1_dashboard_driver(
     request: pytest.FixtureRequest,
     cfg: Config,
-    region: str,
-    account_id: str,
-    l1_dashboard_id: str,
     l1_app: "App",
 ) -> Iterator[tuple["DashboardDriver", str]]:
     yield from _parametrized_dashboard_driver(
-        request, cfg=cfg, region=region, account_id=account_id,
-        dashboard_id=l1_dashboard_id, app=l1_app, short="l1",
+        request, cfg=cfg, app=l1_app, short="l1",
     )
 
 
-@pytest.fixture(params=["qs", "app2"])
+@pytest.fixture(params=["app2"])
 def inv_dashboard_driver(
     request: pytest.FixtureRequest,
     cfg: Config,
-    region: str,
-    account_id: str,
-    inv_dashboard_id: str,
     inv_app: "App",
 ) -> Iterator[tuple["DashboardDriver", str]]:
     yield from _parametrized_dashboard_driver(
-        request, cfg=cfg, region=region, account_id=account_id,
-        dashboard_id=inv_dashboard_id, app=inv_app, short="inv",
+        request, cfg=cfg, app=inv_app, short="inv",
     )
 
 
-@pytest.fixture(params=["qs", "app2"])
+@pytest.fixture(params=["app2"])
 def exec_dashboard_driver(
     request: pytest.FixtureRequest,
     cfg: Config,
-    region: str,
-    account_id: str,
-    exec_dashboard_id: str,
     exec_app: "App",
 ) -> Iterator[tuple["DashboardDriver", str]]:
     yield from _parametrized_dashboard_driver(
-        request, cfg=cfg, region=region, account_id=account_id,
-        dashboard_id=exec_dashboard_id, app=exec_app, short="exec",
+        request, cfg=cfg, app=exec_app, short="exec",
     )
 
 
-@pytest.fixture(params=["qs", "app2"])
+@pytest.fixture(params=["app2"])
 def l2ft_dashboard_driver(
     request: pytest.FixtureRequest,
     cfg: Config,
-    region: str,
-    account_id: str,
-    l2ft_dashboard_id: str,
     l2ft_app: "App",
 ) -> Iterator[tuple["DashboardDriver", str]]:
     yield from _parametrized_dashboard_driver(
-        request, cfg=cfg, region=region, account_id=account_id,
-        dashboard_id=l2ft_dashboard_id, app=l2ft_app, short="l2ft",
+        request, cfg=cfg, app=l2ft_app, short="l2ft",
     )
 
 
