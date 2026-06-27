@@ -347,6 +347,11 @@ def qs_client(region: str) -> "QuickSightClient":
     every dashboard-definition consumer cascades into reportUnknown*
     noise.
     """
+    import importlib.util
+    if importlib.util.find_spec("boto3") is None:
+        pytest.skip(  # DV.6 — QS needs the optional [quicksight] extra
+            "boto3 not installed — QuickSight tests need recon-gen[quicksight]"
+        )
     import boto3
     return boto3.client("quicksight", region_name=region)  # pyright: ignore[reportUnknownMemberType]: boto3.client dynamic service overload
 
@@ -371,6 +376,11 @@ def qs_driver(
     test when QS is unavailable (single-renderer tests can't run
     without it).
     """
+    import importlib.util
+    if importlib.util.find_spec("boto3") is None:
+        pytest.skip(  # DV.6 — QS needs the optional [quicksight] extra
+            "boto3 not installed — QuickSight tests need recon-gen[quicksight]"
+        )
     from tests.e2e._drivers._lifecycle import qs_driver_or_none
 
     with qs_driver_or_none(
@@ -676,6 +686,13 @@ def qs_deployed(  # pyright: ignore[reportUnusedFunction]: pytest autouse fixtur
     if RECON_GEN_SKIP_QS_DEPLOY.get_or_none():
         return
     if not _session_needs_aws(request.session):
+        return
+    # DV.6 — boto3 ships only with the optional [quicksight] extra. On a
+    # no-QS install the deploy can't run, so return cleanly: the session's
+    # non-QS tiers pass and the [qs] params skip via the qs_driver gate.
+    # QS is opt-in now, so this is the designed skip, not a POLICY-2 defer.
+    import importlib.util
+    if importlib.util.find_spec("boto3") is None:
         return
 
     # xdist rendezvous — mirrors ``_install_pgcrypto_under_filelock``
