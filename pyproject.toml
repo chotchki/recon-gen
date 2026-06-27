@@ -66,19 +66,31 @@ Changelog = "https://github.com/chotchki/recon-gen/blob/main/RELEASE_NOTES.md"
 # (operators always wanted "production run" or "dev run" or "e2e run").
 # Net effect: simpler install, one knob per persona. Specific dep
 # annotations preserved in the prod-bucket below.
-prod = [
-    # ETL Engineer / Integrator running a production App2 deploy +
-    # any QS deploy via `json apply --execute` get every runtime dep
-    # under one extras name. Subset usable for QS-only deploys (boto3
-    # + audit) just installs a bit extra — net win on operator
-    # complexity. Set studio_enabled=false in cfg for dashboards-only
-    # prod App2; the markdown dep stays installed but inert.
-    #
-    # AWS deploy + cleanup (was [deploy]). botocore[crt] pulls awscrt
-    # for the SSO credential provider; absent it boto3 trips
-    # MissingDependencyException when operators use `aws sso login`.
+#
+# DV.3 (Phase DV, v15) — QuickSight is now an OPT-IN extra, not a
+# baseline prod dep. boto3 is lazy-imported (common/deploy.py) so the
+# package imports cleanly without it; `pip install recon-gen[quicksight]`
+# is the opt-in that pulls the AWS SDK for `json apply --execute`
+# deploys. botocore[crt] pulls awscrt for the SSO credential provider;
+# absent it boto3 trips MissingDependencyException when operators use
+# `aws sso login`. The pin lives HERE — [dev] / [e2e] self-reference it.
+quicksight = [
     "boto3>=1.34",
     "botocore[crt]>=1.34",
+]
+prod = [
+    # ETL Engineer / Integrator running a production App2 deploy gets
+    # every NON-AWS runtime dep under one extras name (App2 + PDF +
+    # DB). QuickSight deploy via `json apply --execute` additionally
+    # needs the opt-in `[quicksight]` extra (DV.4) — boto3 is no longer
+    # baseline. Set studio_enabled=false in cfg for dashboards-only
+    # prod App2; the markdown dep stays installed but inert.
+    #
+    # DV.4 (Phase DV, v15) — boto3 + botocore[crt] MOVED OUT to the
+    # opt-in `[quicksight]` extra. `pip install recon-gen[prod]` now
+    # resolves with ZERO AWS SDK (App2 + PDF + DB only); operators who
+    # deploy to QuickSight install `recon-gen[prod,quicksight]`.
+    #
     # App2 runtime — Starlette + uvicorn + multipart (HTMX form POST
     # parsing) + httpx (TestClient + outbound). The browser-side
     # JS/CSS ships inside the wheel — App2 needs no internet at
@@ -175,16 +187,17 @@ dev = [
     # time — passes on re-run) auto-retries before halting the chain. A
     # test that's broken (not flaky) fails 3× → still halts.
     "pytest-rerunfailures>=14.0",
-    "boto3>=1.34",
-    # botocore[crt] pulls awscrt — required for the SSO / login
-    # credential provider, which trips MissingDependencyException at
-    # boto3 client init when developers use AWS SSO / `aws sso login`.
-    "botocore[crt]>=1.34",
+    # DV.4 — boto3 + botocore[crt] live in the opt-in `[quicksight]`
+    # extra now; self-reference so the runtime pin lives in one place.
+    # The QS unit/typing tests still exercise boto3 while QS code exists.
+    "recon-gen[quicksight]",
     # BE.7.B (2026-05-26) — `sts` + `s3` added on top of the existing
     # `quicksight,rds` so pyright can resolve the full surface tests/
     # touches via boto3-stubs. The stubs only help once test-side
     # fixtures are also annotated (the test fixtures' `-> dict`
-    # returns erase the TypedDict at the consumer boundary).
+    # returns erase the TypedDict at the consumer boundary). Type stubs
+    # are independent of the runtime SDK — kept in [dev] (not folded
+    # into [quicksight]) while QS code exists.
     "boto3-stubs[quicksight,rds,sts,s3]>=1.34",
     # Y.2.gate.b.2.impl — Docker-backed local DB containers.
     # PG (b.2.impl.schema) + Oracle (b.2.impl.oracle). Oracle's
@@ -271,9 +284,9 @@ dev = [
 e2e = [
     "pytest>=7.0",
     "pytest-xdist>=3.5",
-    "boto3>=1.34",
-    # See [dev] — botocore[crt] adds awscrt for the SSO login path.
-    "botocore[crt]>=1.34",
+    # DV.4 — boto3 + botocore[crt] live in the opt-in `[quicksight]`
+    # extra now; self-reference so the runtime pin lives in one place.
+    "recon-gen[quicksight]",
     "playwright>=1.60",
     # X.2.u.3 — the browser e2e suite is now parametrized over
     # [qs, app2]: App2Driver serves the bundled HTMX renderer in-process

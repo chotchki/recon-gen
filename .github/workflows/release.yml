@@ -335,19 +335,11 @@ jobs:
       - name: Build sdist + wheel
         run: .venv/bin/python -m build
 
-      - name: Sync shim version + recon-gen pin to ${TAG} (AC.F.1 lockstep)
-        # AA.A.996.release-fix, 2026-05-18 — CI is the authoritative bumper;
-        # this step rewrites the shim's in-tree version from ${TAG} so
-        # manual lockstep can no longer drift.
-        run: |
-          TAG="${GITHUB_REF_NAME#v}"
-          sed -i "s/^version = .*/version = \"${TAG}\"/" quicksight-gen-shim/pyproject.toml
-          sed -i "s/^    \"recon-gen==.*/    \"recon-gen==${TAG}\",/" quicksight-gen-shim/pyproject.toml
-          echo "--- shim pyproject.toml after sync ---"
-          grep -E '^(version|    "recon-gen==)' quicksight-gen-shim/pyproject.toml
-
-      - name: Build quicksight-gen shim (AC.F.1 — PyPI deprecation shim)
-        run: .venv/bin/python -m build --outdir dist/ quicksight-gen-shim/
+      # DV.7 (Phase DV, v15) — DROPPED the `quicksight-gen` deprecation
+      # shim publish (the "Sync shim version" sed step + the
+      # "Build quicksight-gen shim" build step). The legacy rename shim
+      # is long past its drop window; only the recon-gen wheel publishes
+      # now. The publish jobs below glob `dist/*` and need no edit.
 
       - name: Verify long description renders on PyPI
         run: .venv/bin/twine check dist/*
@@ -392,7 +384,7 @@ jobs:
         run: |
           python -m venv /tmp/qs-smoke
           /tmp/qs-smoke/bin/pip install --upgrade pip
-          /tmp/qs-smoke/bin/pip install dist/*.whl pytest pytest-cov boto3-stubs[quicksight] psycopg2-binary
+          /tmp/qs-smoke/bin/pip install dist/*.whl pytest pytest-cov psycopg2-binary
 
       - name: Verify CLI version flag
         run: |
