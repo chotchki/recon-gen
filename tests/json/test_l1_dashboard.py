@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import inspect
 from pathlib import Path
-from typing import Any
 
 from click.testing import CliRunner
 
@@ -1981,35 +1980,27 @@ def test_daily_statement_drills_to_transactions() -> None:
 
 
 def test_drill_emission_navigation_plus_set_parameters() -> None:
-    """M.2b.7: every drill emits BOTH a NavigationOperation (target
-    sheet) and a SetParametersOperation (writes + auto-reset). End-to-
-    end check via to_aws_json walk."""
+    """M.2b.7: every drill carries BOTH a navigation target (→
+    NavigationOperation) and param writes (→ SetParametersOperation +
+    auto-reset). Tree-walk over every visual's actions — no emit."""
+    from recon_gen.common.tree import Drill
     app = build_l1_dashboard_app(_CFG)
-    j: dict[str, Any] = app.emit_analysis().to_aws_json()
-    drill_count = 0
-    definition: dict[str, Any] = j["Definition"]
-    sheets: list[dict[str, Any]] = definition["Sheets"]
-    for sheet in sheets:
-        visuals: list[dict[str, Any]] = sheet.get("Visuals") or []
-        for visual in visuals:
-            for _kind, body in visual.items():
-                if not isinstance(body, dict):
-                    continue
-                # body narrowed to dict via isinstance.
-                body_d: dict[str, Any] = body  # type: ignore[assignment]: third-party stub or test scaffolding cascade
-                actions: list[dict[str, Any]] = body_d.get("Actions") or []
-                for action in actions:
-                    ops: list[dict[str, Any]] = (
-                        action.get("ActionOperations") or []
-                    )
-                    op_kinds = {next(iter(op.keys())) for op in ops}
-                    assert "NavigationOperation" in op_kinds, (
-                        f"action {action['Name']!r} missing nav op"
-                    )
-                    assert "SetParametersOperation" in op_kinds, (
-                        f"action {action['Name']!r} missing set-params op"
-                    )
-                    drill_count += 1
+    assert app.analysis is not None, f"{app.name} has no analysis"
+    app.resolve_auto_ids()
+    drills = [
+        a
+        for sheet in app.analysis.sheets
+        for visual in sheet.visuals
+        for a in _visual_actions(visual)
+        if isinstance(a, Drill)
+    ]
+    for drill in drills:
+        assert isinstance(drill.target_sheet, Sheet), (
+            f"drill {drill.name!r} has an unresolved navigation target"
+        )
+        assert drill.writes, (
+            f"drill {drill.name!r} carries no param writes (set-params op)"
+        )
     # Drill source sites: Today's Exc (2), Drift (2), Overdraft (1),
     # Limit Breach (1), Pending Aging (1), Unbundled Aging (1), Daily
     # Statement (1) + Phase DA wires (Posting Ledger / Transactions Audit
@@ -2017,8 +2008,8 @@ def test_drill_emission_navigation_plus_set_parameters() -> None:
     # self-filter on the Transactions Audit (Filter-to only = 1) = 13.
     # (No right-click Clear — the DR.6 Transaction ID dropdown owns the
     # show-all affordance.)
-    assert drill_count == 13, (
-        f"expected 13 drills total, saw {drill_count}"
+    assert len(drills) == 13, (
+        f"expected 13 drills total, saw {len(drills)}"
     )
 
 
@@ -2027,8 +2018,9 @@ def test_drill_emission_navigation_plus_set_parameters() -> None:
 
 def test_analysis_emits_with_expected_id_suffix() -> None:
     app = build_l1_dashboard_app(_CFG)
-    analysis = app.emit_analysis()
-    assert analysis.AnalysisId.endswith("-l1-dashboard-analysis")
+    assert app.analysis is not None
+    analysis_id = app.cfg.aws.prefixed(app.analysis.analysis_id_suffix)
+    assert analysis_id.endswith("-l1-dashboard-analysis")
 
 
 def test_dashboard_emits_with_expected_id_suffix() -> None:
@@ -2038,12 +2030,14 @@ def test_dashboard_emits_with_expected_id_suffix() -> None:
     previously two-segment `<resource_prefix>-<l2_prefix>` per M.2d.3,
     auto-stamped from the L2 yaml). With the test cfg's default
     deployment_name=`recon-test`, the full DashboardId is
-    `recon-test-l1-dashboard`.
+    `recon-test-l1-dashboard`. Tree-walk: the DashboardId is
+    `cfg.aws.prefixed(dashboard_id_suffix)` — reconstruct it without emit.
     """
     app = build_l1_dashboard_app(_CFG)
-    dashboard = app.emit_dashboard()
-    assert dashboard.DashboardId.endswith("-l1-dashboard")
-    assert dashboard.DashboardId == f"{_CFG.aws.deployment_name}-l1-dashboard"
+    assert app.dashboard is not None
+    dashboard_id = app.cfg.aws.prefixed(app.dashboard.dashboard_id_suffix)
+    assert dashboard_id.endswith("-l1-dashboard")
+    assert dashboard_id == f"{_CFG.aws.deployment_name}-l1-dashboard"
 
 
 # -- CLI smoke (M.2a.9) ------------------------------------------------------
@@ -2509,30 +2503,29 @@ def test_y2g_drift_dropdowns_bridge_to_both_drift_datasets() -> None:
 
 
 def test_l1_dataset_emit_matches_dashboard_declarations() -> None:
-    """Every dataset L1 emits (`App.datasets`) must appear in the dashboard's
-    `DataSetIdentifierDeclarations`. The qs_api structural test
-    (`tests/e2e/qs_api/test_l1_dashboard_structure.py::test_all_datasets_declared`)
-    enforces the same shape against a live deploy, but the unit-tier gate
-    catches it in ~3s instead of ~25min of CI burn.
+    """Every dataset L1 declares (`App.datasets`) must be referenced by
+    some visual/filter/control in the tree, and vice versa — the dashboard
+    emits `DataSetIdentifierDeclarations` from exactly
+    `App.datasets ∩ dataset_dependencies()`, so a declared-but-unbound
+    dataset is an orphan and a referenced-but-undeclared one is a dangling
+    ref. Walk the tree directly (`dataset_dependencies()`) — no emit. (The
+    raw dependency set catches BOTH directions; the old emit-walk compared
+    against the pre-filtered declaration list, so its `missing` branch was
+    vacuous — this version makes it real.)
 
     Same bug shape has bitten three CI cycles in a row (CQ.5: Templates,
     70213648: MetadataKeys, 3bad0844: ChainParents) — L1 imports a shared
     picker dataset, registers it in `_l1_datasets`, but no visual binds
-    `datasets[KEY]`, so the dashboard's `DataSetIdentifierDeclarations`
-    never includes it. The fix is always the same: drop the unused import
-    + emit-list entry. This gate keeps the iteration loop cheap."""
+    `datasets[KEY]`, so it never reaches the dashboard's declarations. The
+    fix is always the same: drop the unused import + emit-list entry. This
+    unit-tier gate keeps the iteration loop cheap (~3s)."""
     app = build_l1_dashboard_app(_CFG)
     declared = {ds.identifier for ds in app.datasets}
-    dash = app.emit_dashboard()
-    dash_json = dash.to_aws_json()
-    decls = {
-        d["Identifier"]
-        for d in dash_json["Definition"]["DataSetIdentifierDeclarations"]
-    }
-    extra = declared - decls
-    missing = decls - declared
+    referenced = {ds.identifier for ds in app.dataset_dependencies()}
+    extra = declared - referenced
+    missing = referenced - declared
     assert not extra, (
-        f"L1 datasets emitted but never bound to a visual/filter: {sorted(extra)}. "
+        f"L1 datasets declared but never bound to a visual/filter: {sorted(extra)}. "
         f"Drop them from build_all_l1_dashboard_datasets + _l1_datasets, "
         f"or wire a visual that references datasets[KEY]."
     )
