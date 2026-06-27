@@ -1,3 +1,3 @@
-"""Programmatic generator for AWS QuickSight + HTMX-rendered dashboards + audit PDFs."""
+"""Programmatic generator for self-hosted HTMX dashboards + audit PDFs (AWS QuickSight optional, deprecated)."""
 
-__version__ = "14.7.0"
+__version__ = "15.0.0"
