@@ -114,7 +114,7 @@ Source lives in `src/recon_gen/docs/` (shipped with the wheel — extract with `
 
 ### Install from PyPI
 
-For consumers — using a pre-existing QuickSight datasource ARN:
+The base package — the self-hosted dashboards, DuckDB demo mode and the docs, with no AWS SDK pulled in:
 
 ```bash
 pip install recon-gen
@@ -132,7 +132,7 @@ For demo mode against DuckDB (no extra install — DuckDB ships as a pure-Python
 pip install recon-gen
 ```
 
-> The package was renamed from `quicksight-gen` to `recon-gen` in v11.0.0. `pip install quicksight-gen` still resolves via a meta-package shim (being retired VERY soon™ — switch to `recon-gen`).
+> The package was renamed from `quicksight-gen` to `recon-gen` in v11.0.0. The `quicksight-gen` shim stopped publishing at v15 — `pip install quicksight-gen` now pulls only the last pre-v15 shim (which pins an older `recon-gen`), so switch to `recon-gen` directly.
 
 ### Setup from source
 
