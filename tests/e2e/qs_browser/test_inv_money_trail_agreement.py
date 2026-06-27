@@ -1,27 +1,26 @@
-"""CB.5 stage 2 — high-watermark validator for L2 money_trail agreement.
+"""DW.3 — high-watermark validator for L2 money_trail agreement.
 
-Reads the 3 producer artifacts and asserts:
+Reads the 2 producer artifacts and asserts:
 
-    spine == direct_matview(root) == App2(root) == QS(root)
+    spine == direct_matview(root) == App2(root)
 
 Same shape as `test_inv_anomaly_agreement.py`; per-invariant
 projection lives in the producer.
+
+(QS was the third leg until DW.3; with QuickSight removed, direct-DB
+is the truth anchor and App2 the corroborator.)
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-
-
-
-from tests._marks import inputs  # noqa: E402
-from tests.e2e._agreement import read_rendered_rows  # noqa: E402
+from tests._marks import inputs
+from tests.e2e._agreement import read_rendered_rows
 
 
 _DIRECT = "tests/e2e/db/test_inv_direct.py::test_money_trail_direct_extract"
 _APP2 = "tests/e2e/app2/test_inv_money_trail_app2.py::test_money_trail_app2_extract"
-_QS = "tests/e2e/qs_browser/test_inv_money_trail_qs.py::test_money_trail_qs_extract"
 
 
 def _read_meta(layer: str, name: str, key: str) -> Any:
@@ -35,30 +34,19 @@ def _row_keys(layer: str, name: str) -> set[tuple[Any, ...]]:
     return {tuple(row["natural_key"]) for row in rows if "natural_key" in row}
 
 
-@inputs(_DIRECT, _APP2, _QS)
-def test_money_trail_three_way_agreement() -> None:
+@inputs(_DIRECT, _APP2)
+def test_money_trail_agreement() -> None:
     direct_count = _read_meta(
         "db", "money_trail_direct_meta", "direct_count",
     )
     app2_count = _read_meta(
         "app2", "money_trail_app2_meta", "app2_count",
     )
-    qs_available = _read_meta(
-        "qs_browser", "money_trail_qs_meta", "qs_available",
-    )
-    qs_count = _read_meta(
-        "qs_browser", "money_trail_qs_meta", "qs_count",
-    )
 
     assert direct_count == app2_count, (
         f"money_trail count direct/app2 disagree: "
         f"direct={direct_count} app2={app2_count}"
     )
-    if qs_available:
-        assert qs_count == direct_count, (
-            f"money_trail count direct/qs disagree: "
-            f"direct={direct_count} qs={qs_count}"
-        )
 
     direct_keys = _row_keys("db", "money_trail_direct_rows")
     app2_keys = _row_keys("app2", "money_trail_app2_rows")
@@ -67,10 +55,3 @@ def test_money_trail_three_way_agreement() -> None:
         f"  direct-only: {sorted(direct_keys - app2_keys)[:5]}\n"
         f"  app2-only: {sorted(app2_keys - direct_keys)[:5]}"
     )
-    if qs_available:
-        qs_keys = _row_keys("qs_browser", "money_trail_qs_rows")
-        assert direct_keys == qs_keys, (
-            f"money_trail row-identity disagreement direct/qs:\n"
-            f"  direct-only: {sorted(direct_keys - qs_keys)[:5]}\n"
-            f"  qs-only: {sorted(qs_keys - direct_keys)[:5]}"
-        )
