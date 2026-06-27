@@ -15,14 +15,23 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import boto3
 import click
-from botocore.exceptions import ClientError
 
 from recon_gen.common.config import Config
 
 if TYPE_CHECKING:
+    from botocore.exceptions import ClientError
     from mypy_boto3_quicksight.client import QuickSightClient
+else:
+    # DV.1 — boto3 / botocore ship only with the optional [quicksight] extra
+    # and are only needed to actually deploy. Import ClientError lazily so
+    # ``import recon_gen.common.deploy`` succeeds without the extra (mirrors
+    # cleanup.py); fall back to Exception when absent. The deploy() entry
+    # guards boto3 itself, so the placeholder is never used for a real catch.
+    try:
+        from botocore.exceptions import ClientError
+    except ModuleNotFoundError:
+        ClientError = Exception
 
 
 POLL_INTERVAL_SECONDS = 5
@@ -385,6 +394,8 @@ def deploy(cfg: Config, out_dir: Path, app_names: list[str]) -> int:
     Theme / datasets / datasource are shared across apps and deployed
     from whatever is present in ``out_dir``.
     """
+    import boto3  # DV.1 — lazy: present only with the [quicksight] extra
+
     # BF.1.S2: boto3.client overloaded signature picks the right service
     # client at runtime; ``boto3-stubs[quicksight]`` provides the per-service
     # overload but pyright still surfaces the umbrella signature as
