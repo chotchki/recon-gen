@@ -187,10 +187,12 @@ dev = [
     # time — passes on re-run) auto-retries before halting the chain. A
     # test that's broken (not flaky) fails 3× → still halts.
     "pytest-rerunfailures>=14.0",
-    # DV.4 — boto3 + botocore[crt] live in the opt-in `[quicksight]`
-    # extra now; self-reference so the runtime pin lives in one place.
-    # The QS unit/typing tests still exercise boto3 while QS code exists.
-    "recon-gen[quicksight]",
+    # DV.4 — [dev] carries NO runtime boto3, so a no-QS regression install
+    # (`uv sync --extra dev` WITHOUT `[quicksight]`) is boto3-free and the QS
+    # tests skip cleanly (DV.6). To RUN the QS tests, add `--extra quicksight`
+    # (CI's Layered runner does). The boto3 runtime pin lives only in the
+    # `[quicksight]` extra. Type stubs below are independent of the runtime
+    # SDK — kept here so pyright resolves the QS surface.
     # BE.7.B (2026-05-26) — `sts` + `s3` added on top of the existing
     # `quicksight,rds` so pyright can resolve the full surface tests/
     # touches via boto3-stubs. The stubs only help once test-side
@@ -284,9 +286,9 @@ dev = [
 e2e = [
     "pytest>=7.0",
     "pytest-xdist>=3.5",
-    # DV.4 — boto3 + botocore[crt] live in the opt-in `[quicksight]`
-    # extra now; self-reference so the runtime pin lives in one place.
-    "recon-gen[quicksight]",
+    # DV.4 — [e2e] carries NO runtime boto3; add `--extra quicksight` to run
+    # the QS browser/api tests (else they skip cleanly, DV.6). boto3's runtime
+    # pin lives only in the `[quicksight]` extra.
     "playwright>=1.60",
     # X.2.u.3 — the browser e2e suite is now parametrized over
     # [qs, app2]: App2Driver serves the bundled HTMX renderer in-process

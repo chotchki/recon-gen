@@ -1592,9 +1592,7 @@ dependencies = [
 dev = [
     { name = "acme" },
     { name = "bcrypt" },
-    { name = "boto3" },
     { name = "boto3-stubs", extra = ["quicksight", "rds", "s3", "sts"] },
-    { name = "botocore", extra = ["crt"] },
     { name = "build" },
     { name = "cryptography" },
     { name = "dnspython" },
@@ -1619,8 +1617,6 @@ dev = [
     { name = "uvicorn", extra = ["standard"] },
 ]
 e2e = [
-    { name = "boto3" },
-    { name = "botocore", extra = ["crt"] },
     { name = "httpx" },
     { name = "markdown" },
     { name = "playwright" },
@@ -1712,8 +1708,6 @@ requires-dist = [
     { name = "python-multipart", marker = "extra == 'e2e'", specifier = ">=0.0.18" },
     { name = "python-multipart", marker = "extra == 'prod'", specifier = ">=0.0.18" },
     { name = "pyyaml", specifier = ">=6.0" },
-    { name = "recon-gen", extras = ["quicksight"], marker = "extra == 'dev'" },
-    { name = "recon-gen", extras = ["quicksight"], marker = "extra == 'e2e'" },
     { name = "reportlab", marker = "extra == 'dev'", specifier = ">=4.0" },
     { name = "reportlab", marker = "extra == 'prod'", specifier = ">=4.0" },
     { name = "requests", marker = "extra == 'dev'", specifier = ">=2.31" },

@@ -87,11 +87,12 @@ jobs:
           python-version: "3.14"
 
       - name: Install dependencies (uv sync from uv.lock)
-        # `--extra dev --extra prod` matches the broadest extras any
-        # layer exercises (unit needs dev/pyright + playwright; db/app2
-        # need prod for the seed + App2 server). Playwright + boto3-stubs
-        # + pytest-xdist all live in [dev].
-        run: uv sync --frozen --extra dev --extra prod
+        # `--extra dev --extra prod` covers what the layers exercise (unit
+        # needs dev/pyright + playwright; db/app2 need prod for the seed +
+        # App2 server). `--extra quicksight` (DV.4) adds the runtime boto3 so
+        # the qs_browser / qs_api legs RUN — without it the QS tests skip
+        # cleanly (DV.6). Playwright + boto3-stubs + pytest-xdist live in [dev].
+        run: uv sync --frozen --extra dev --extra prod --extra quicksight
 
       - name: Install Playwright WebKit browser
         # WebKit system libs are pre-installed on the runner, so
