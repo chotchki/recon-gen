@@ -669,7 +669,13 @@ def _resolve_dialect_nested(value: Any) -> Dialect:  # typing-smell: ignore[expl
 def _build_aws_nested(raw: dict[str, Any], path: Path) -> AwsConfig:  # typing-smell: ignore[explicit-any]: heterogeneous YAML payload
     block_raw = raw.get("aws")
     if not isinstance(block_raw, dict):
-        raise MissingFieldError(f"{path}: required block 'aws:' is absent")
+        # DV.5 — the aws: block is OPTIONAL. A cfg with no AWS keys is valid
+        # for every non-QuickSight surface (dashboards / studio / audit /
+        # schema / data / docs / json emit). The QS deploy / clean / probe
+        # verbs validate aws.account_id / region / deployment_name at
+        # invocation (cli/json.py::_require_quicksight) and fail there with a
+        # set-the-aws-cfg hint.
+        return AwsConfig()
     block = cast(dict[str, Any], block_raw)
     for key in ("account_id", "region", "deployment_name"):
         if key not in block:

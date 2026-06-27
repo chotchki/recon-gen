@@ -20,6 +20,7 @@ from __future__ import annotations
 import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import click
 
@@ -32,6 +33,32 @@ from recon_gen.cli._helpers import (
     output_option,
     resolve_l2_for_demo,
 )
+
+if TYPE_CHECKING:
+    from recon_gen.common.config import Config
+
+
+def _require_quicksight(cfg: Config) -> None:
+    """DV.2 / DV.5 — the QuickSight deploy / clean / probe paths need the
+    optional ``[quicksight]`` extra (boto3) AND the ``aws:`` cfg fields
+    (account_id / region / deployment_name). Fail with an actionable message
+    instead of a raw error surfacing deep in a deploy."""
+    import importlib.util
+
+    if importlib.util.find_spec("boto3") is None:
+        raise click.UsageError(
+            "QuickSight deploy / clean / probe need the optional extra. "
+            "Install it with:  pip install recon-gen[quicksight]"
+        )
+    missing = [
+        f"aws.{k}" for k in ("account_id", "region", "deployment_name")
+        if not getattr(cfg.aws, k)
+    ]
+    if missing:
+        raise click.UsageError(
+            f"QuickSight deploy / clean / probe need {', '.join(missing)} set "
+            f"in the cfg's aws: block (it's optional for non-QS use)."
+        )
 
 
 @click.group()
@@ -134,6 +161,7 @@ def json_apply(
         )
         return
 
+    _require_quicksight(cfg)  # DV.2/DV.5 — fail fast if the extra or aws cfg is absent
     from recon_gen.common.deploy import deploy
 
     click.echo(f"\nDeploying to AWS QuickSight...")
@@ -185,6 +213,7 @@ def json_clean(
     from recon_gen.common.cleanup import run_cleanup
 
     cfg = load_config(config)
+    _require_quicksight(cfg)  # DV.2/DV.5 — clean enumerates QS resources via boto3
     # ``--execute`` semantics: opt in to actually delete (skip
     # confirmation prompt; the flag itself is the confirmation).
     exit_code = run_cleanup(
@@ -251,6 +280,7 @@ def json_probe(config: str, output_dir: str) -> None:
     from recon_gen.common.probe import probe_dashboard, format_report
 
     cfg = load_config(config)
+    _require_quicksight(cfg)  # DV.2/DV.5 — probe drives a deployed QS dashboard via boto3
     for app_name in APPS:
         did = _dashboard_id_for_app(app_name, output_dir)
         click.echo(
