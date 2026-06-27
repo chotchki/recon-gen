@@ -59,6 +59,12 @@ def _require_quicksight(cfg: Config) -> None:
             f"QuickSight deploy / clean / probe need {', '.join(missing)} set "
             f"in the cfg's aws: block (it's optional for non-QS use)."
         )
+    click.echo(  # DV.9 — deprecation notice on every QS invocation
+        "Note: the QuickSight renderer is DEPRECATED and slated for removal. "
+        "The self-hosted dashboards (recon-gen dashboards / studio) are the "
+        "supported path going forward.",
+        err=True,
+    )
 
 
 @click.group()

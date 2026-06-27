@@ -12,6 +12,43 @@
 > `--help`) against the code. The v14.6.0 → v13.14.4 entries below predate that
 > pass and are left as written.
 
+## v15.0.0 — QuickSight is now optional and DEPRECATED (removal is next)
+
+Major. QuickSight support is on its way OUT, and the reason is cost. AWS now charges a
+flat [$250 / account / month infrastructure fee](https://aws.amazon.com/quick/pricing/)
+the moment you cross into the Professional tier (on top of $20–40 / user / month), and is
+pushing the product HARD — the forced rebrand to "Amazon Quick", a GenAI agent-hour
+upsell. That recurring, creeping AWS overhead doesn't fit an independent, offline-first
+validation tool. This release makes it opt-in and a no-AWS-keys install
+the default; the NEXT release (Phase DW) removes the QuickSight renderer entirely. If you deploy to QuickSight, this is your migration window — move
+to the self-hosted dashboards (`recon-gen dashboards` / `recon-gen studio`) now. They
+render the same four apps from the same core, offline, with no AWS subscription.
+
+### Deprecated — QuickSight, removal scheduled (Phase DW)
+
+- The QuickSight renderer is DEPRECATED. Support will be REMOVED in the next release.
+  The self-hosted HTMX dashboards are the supported path; the regulator-ready PDF is
+  unchanged.
+- Every `recon-gen json apply --execute` / `clean` / `probe` now prints a deprecation
+  notice naming the replacement.
+
+### Changed — QuickSight is opt-in, AWS is no longer required
+
+- boto3 moved OUT of `[prod]` into a new `[quicksight]` extra. A plain
+  `pip install recon-gen[prod]` resolves with ZERO AWS SDK — App2 + PDF + DB only.
+  `import recon_gen` works without boto3 (the deploy path lazy-imports it).
+- The `aws:` cfg block is now OPTIONAL. A config with no AWS keys runs every
+  non-QuickSight surface (dashboards, studio, audit, schema, data, docs and json
+  emit). The QuickSight verbs validate the aws fields at invocation and fail with an
+  install-the-extra + set-the-cfg hint.
+- The QuickSight test legs skip cleanly when boto3 is absent — a no-QuickSight install
+  passes the unit / db / app2 / PDF tiers with the QS tests skipped.
+
+### Removed
+
+- The legacy `quicksight-gen` PyPI shim is no longer published. `recon-gen` is the
+  only published package.
+
 ## v14.7.0 — Reader-facing docs in the operator's voice + physical-column terminology
 
 Minor. Two big strokes plus the held-over Supersession Audit (drafted as the

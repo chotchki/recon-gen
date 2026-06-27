@@ -9,9 +9,11 @@ There are four extras: `[prod]`, `[dev]`, `[e2e]` and `[quicksight]`.
 > **QuickSight support is being REMOVED.** boto3 — and the AWS
 > QuickSight deploy it powers — now lives behind the optional
 > `[quicksight]` extra, no longer in `[prod]`. That renderer goes away
-> in an upcoming release (Phase DW). MIGRATE NOW to the self-hosted
-> dashboards (`recon-gen dashboards` / `recon-gen studio`) — the
-> supported path, no AWS account.
+> in an upcoming release (Phase DW) — AWS's flat
+> [$250 / account / month infrastructure fee](https://aws.amazon.com/quick/pricing/)
+> (Professional tier and up) doesn't fit an offline-first tool. MIGRATE
+> NOW to the self-hosted dashboards (`recon-gen dashboards` /
+> `recon-gen studio`) — the supported path, no AWS account.
 
 The bare install stays tiny on purpose — Click + PyYAML + the Graphviz
 Python wrapper + DuckDB — so anyone who just wants to emit JSON for

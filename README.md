@@ -72,7 +72,7 @@ Database backends — **PostgreSQL 17+** and **Oracle 19c+** for the on-prem / c
 
 Multiple runtime environments — pick what your auditors and analysts already trust:
 
-> **QuickSight support is being REMOVED.** The AWS QuickSight renderer is now optional (the `[quicksight]` extra) and goes away in an upcoming release. MIGRATE NOW to the self-hosted dashboards — the same four apps, no AWS account.
+> **QuickSight support is being REMOVED.** AWS now charges a flat **$250 / account / month [infrastructure fee](https://aws.amazon.com/quick/pricing/)** the moment you cross into the Professional tier (on top of $20–40 / user / month), and it keeps pushing the product HARDER — the forced rebrand to "Amazon Quick", the GenAI agent-hour upsell. That recurring, creeping AWS overhead doesn't fit an independent, offline-first validation tool. The QuickSight renderer is now optional (the `[quicksight]` extra) and goes away in an upcoming release. MIGRATE NOW to the self-hosted dashboards — the same four apps, no AWS account.
 
 - **Self-hosted HTMX web app** — the same dashboards with NO AWS dependency, so it runs offline. For sensitive deployments that can't reach external SaaS. The supported path.
 - **AWS QuickSight** — managed BI you embed in your own portal; permissions follow the QS user. OPTIONAL (the `[quicksight]` extra; a plain install is QS-free) and BEING REMOVED in an upcoming release as AWS keeps changing their pricing.
@@ -110,7 +110,7 @@ Source lives in `src/recon_gen/docs/` (shipped with the wheel — extract with `
 - Python 3.14+
 - A PostgreSQL 17+ / Oracle 19c+ / DuckDB database URL for demo mode (PG and Oracle use SQL/JSON path syntax — `JSON_VALUE` / `JSON_QUERY` / `JSON_EXISTS`; DuckDB uses `json_extract_string`)
 - ONLY if you opt into the QuickSight target (the optional `[quicksight]` extra, BEING REMOVED — see above; the self-hosted dashboards need no AWS account): an AWS account with QuickSight Enterprise enabled, plus either a pre-existing QuickSight datasource ARN or the demo DB URL above
-  - **WARNING:** If Amazon Q is enabled OR you have **PRO** accounts you will be assessed a $250/month infrastructure charge that is NOT prorated. See [my blog](https://hotchkiss.io/blog/death-by-papercut-using-quicksight) for details.
+  - **WARNING:** the Professional and Enterprise tiers carry a flat **$250 / account / month infrastructure fee** (NOT prorated) on top of the $20–40 / user / month seat — see [AWS's own pricing](https://aws.amazon.com/quick/pricing/). This is a big reason QuickSight is being removed.
 
 ### Install from PyPI
 
