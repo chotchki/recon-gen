@@ -269,9 +269,11 @@ def _build_app_for_screenshots(app_slug: str, cfg, l2_instance):  # type: ignore
     mod = importlib.import_module(mod_path)
     builder = getattr(mod, fn_name)
     app = builder(cfg, l2_instance=l2_instance)
-    # emit_analysis() resolves auto-IDs on the tree so sheet objects
-    # match what was deployed.
-    app.emit_analysis()
+    # resolve_auto_ids() materializes the tree's auto-IDs so sheet
+    # objects match what was deployed — the only side effect this
+    # screenshot path needs. (The QS emitter is being removed in the
+    # DW phase, so depend on the narrow primitive directly.)
+    app.resolve_auto_ids()
     return app
 
 
