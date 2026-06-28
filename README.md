@@ -74,6 +74,8 @@ Two runtime surfaces — pick what your auditors and analysts already trust:
 - **Self-hosted HTMX web app** — the four apps as dashboards you run yourself, offline, no external service in the loop. For sensitive deployments that can't reach external SaaS.
 - **Auditor-ready PDF audit report** — printable and cryptographically fingerprinted (optionally pyHanko-signed). Same source data as the dashboards, and an end-of-pipeline 3-way agreement test (against the underlying sql) gates that they stay in agreement.
 
+There was a third surface — an AWS QuickSight renderer — through v15.x. It's gone now, removed for cost-risk reasons, NOT because QuickSight is wrong (for an org already living in an AWS portal it's a fine call). If you need it, pin `recon-gen==15.x` with the `[quicksight]` extra; the v15 release notes and the [QuickSight quirks reference](https://chotchki.github.io/recon-gen/reference/quicksight-quirks/) carry the migration details.
+
 ## How it's tested
 
 You can't ship a reconciliation tool on "trust me." This tool ships with:

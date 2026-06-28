@@ -12,6 +12,53 @@
 > `--help`) against the code. The v14.6.0 → v13.14.4 entries below predate that
 > pass and are left as written.
 
+## v16.0.0 — QuickSight removed: fully local, no AWS
+
+Major. The deprecation in v15 lands. The AWS QuickSight renderer is GONE — the boto3
+deploy, the `to_aws_json` emitter, the `json` CLI group, the `qs_api` / `qs_browser`
+test tiers, the `[quicksight]` extra, the QS-centric docs. What's left is what was always
+the point: the self-hosted HTMX dashboards (`recon-gen dashboards` / `recon-gen studio`)
+and the regulator-ready audit PDF (`recon-gen audit apply`), running fully local — no AWS
+account, no cloud subscription, no externally-reachable anything.
+
+We didn't leave because QuickSight is wrong. For an org already living in an AWS portal —
+managed BI, embed-in-the-console, no self-host appetite — it's a fine call. We left
+because THIS is an independent-validation tool for midsize institutions, and that mission
+can't carry QuickSight's recurring AWS cost-risk (the flat $250/account/month
+Professional-tier fee, the GenBI upsell, the forced "Amazon Quick" rebrand — a surprise
+cloud bill is exactly the kind of thing that sinks the value proposition). The
+self-hosted renderer does the same job offline, on hardware you already own or in the
+cloud provider of your choice, which is now 100% your call and not our standing coverage
+burden.
+
+**Escape hatch.** QuickSight shipped through v15.x. If you need it, pin `recon-gen==15.x`
+with the `[quicksight]` extra — the renderer, the deploy path, and the deps are all intact
+there. The [QuickSight quirks reference](https://chotchki.github.io/recon-gen/reference/quicksight-quirks/)
+stays published as the record for anyone on that pin. v15 keeps its loud deprecation tone;
+this release is the graceful exit.
+
+### Removed
+
+- The QuickSight renderer — the boto3 deploy pipeline, `to_aws_json` + the entire AWS-QS-API
+  emit graph (~120 dataclasses, `common/models.py` went 1402 → 141 lines), the
+  `datasource` / `cleanup` / `probe` modules, the `json` CLI group, the `qs_api` + `qs_browser`
+  e2e tiers + `QsEmbedDriver`.
+- The `[quicksight]` extra (boto3 + botocore[crt]) and `boto3-stubs` from `[dev]`. There is
+  ZERO AWS SDK anywhere in the dependency graph now; a `no-boto3` lint keeps it that way.
+- The whole AWS footprint — the CI OIDC role + credentials, the `_aw` RDS-target test
+  variants + the RDS stop/start lifecycle, the nightly cost-sweep, and the `hotchkiss.io`
+  QuickSight-to-Docker port-forward (an externally-reachable hole into the home network,
+  now closed).
+
+### Changed
+
+- The layered test chain is `unit → db → app2 → app2_browser → agreement`, agreement
+  terminal — the final cross-renderer cross-check, fully AWS-free. CI runs `up_to=agreement`.
+- The end-of-pipeline agreement gate is 3-way (scenario plants ⊆ direct-DB matview recompute
+  == App2, == PDF for drift). QuickSight was a third corroborator, never the truth anchor, so
+  dropping it loses no coverage.
+- The App2 self-hosted renderer is now THE renderer, not a parity backstop for QuickSight.
+
 ## v15.0.0 — QuickSight is now optional and DEPRECATED (removal is next)
 
 Major. QuickSight support is on its way OUT, and the reason is cost. AWS now charges a
