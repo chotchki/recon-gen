@@ -46,7 +46,7 @@ from recon_gen.common.ids import VisualId
 from recon_gen.common.l2 import default_l2_instance
 from recon_gen.common.spine._emit_helpers import DEFAULT_PREFIX
 from tests._test_helpers import make_test_config
-from tests.e2e._drivers import App2Driver, DashboardDriver, skips_if_unsupported
+from tests.e2e._drivers import App2Driver, DashboardDriver
 
 
 _DASHBOARD_ID = "l1"
@@ -430,30 +430,3 @@ def test_metadata_panel_row_with_empty_metadata_shows_empty_state(
         f"{open_count} open on sheet {sheet_name!r}"
     )
     driver.close_metadata_panel()
-
-
-# QS leg — placeholder param exists so the test file documents the
-# protocol's App2-only scope at runtime. Driving the QS driver
-# raises NotImplementedError per operator lock 7; `skips_if_unsupported`
-# converts that to a clean skip. No QS leg fires data (no qs_driver
-# fixture is used) — this is the "renderer-agnostic test with one
-# renderer skipping" shape the protocol's `dialect` field documents.
-def test_metadata_popup_qs_leg_skips() -> None:
-    """The QS embed driver raises ``NotImplementedError`` from every
-    metadata-popup verb (operator lock 7). Exercises the protocol's
-    skip-path so a future "let's enable it on QS too" change has one
-    place to flip + this test starts running."""
-    from tests.e2e._drivers import QsEmbedDriver  # noqa: PLC0415
-
-    # We don't need a real embed — the verb raises before touching
-    # the page. Construct a thin instance directly.
-    driver = QsEmbedDriver.__new__(QsEmbedDriver)
-    with skips_if_unsupported():
-        driver.open_metadata_panel("anything", 0)
-    # If we get here the verb didn't raise — that's the regression
-    # signal (operator lock 7 lifted unintentionally).
-    pytest.fail(
-        "QsEmbedDriver.open_metadata_panel didn't raise — operator "
-        "lock 7 (metadata popup is App2-only) may have been lifted "
-        "without updating this test."
-    )

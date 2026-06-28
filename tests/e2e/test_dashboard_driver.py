@@ -2,24 +2,17 @@
 protocol, proving a single test body reads cleanly through the driver
 (no Playwright in the test).
 
-Two legs:
+The ``driver`` fixture (App 2) drives the bundled *smoke app* — no DB,
+no AWS — exercising the renderer through ``App2Driver``.
 
-- The ``driver`` fixture (App 2 only) drives the bundled *smoke app* —
-  no DB, no AWS — exercising every renderer through ``App2Driver``.
-- The ``qs_driver`` fixture (QuickSight only) drives a *deployed*
-  dashboard through ``QsEmbedDriver``, proving the QS facade works
-  against a live embed. (Needs a live QuickSight account +
-  ``RECON_E2E_USER_ARN`` — skips cleanly without.)
-
-X.2.q.3 will fold a real app (L1) onto a single ``@parametrize(["qs",
-"app2"])`` fixture so one body verifies both renderers. Gated by
-(DJ.1 retired the prior RECON_GEN_E2E gate — e2e tests collect by default) and
-skips cleanly without Playwright.
+DW.6 (2026-06-27) — QuickSight removed; the prior QS leg (``qs_driver``
++ ``QsEmbedDriver``, deployed-dashboard embed) is gone. App2 is the sole
+renderer. e2e tests collect by default (DJ.1 retired the RECON_GEN_E2E
+gate) and skip cleanly without Playwright.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, cast
 
 from collections.abc import Iterator
@@ -29,16 +22,8 @@ import pytest
 
 playwright_sync_api = pytest.importorskip("playwright.sync_api")
 
-from recon_gen.apps.l1_dashboard.app import _DRIFT_NAME
-from recon_gen.common.sheets.app_info import (
-    APP_INFO_MATVIEW_STATUS_TITLE,
-    APP_INFO_SHEET_NAME,
-)
 from tests._marks import Need, Tier, needs, tier
-from tests.e2e._drivers import App2Driver, DashboardDriver, QsEmbedDriver
-
-# `qs_driver` lives in conftest.py — shared with the other QS browser
-# e2e tests (X.2.q.3).
+from tests.e2e._drivers import App2Driver, DashboardDriver
 
 
 pytestmark = [
@@ -200,54 +185,3 @@ def test_app2_goto_sheet(driver: DashboardDriver) -> None:
     assert "Money Trail — Chain Sankey" in driver.visual_titles()
     driver.goto_sheet("Showcase")
     assert "Account Balances" in driver.visual_titles()
-
-
-# -- QuickSight leg ----------------------------------------------------------
-#
-# Drives a *deployed* L1 dashboard through QsEmbedDriver — proves the QS
-# facade (open / goto_sheet / visual_titles / wait_loaded / screenshot)
-# works against a live embed. The L1 dashboard's deployed DashboardId
-# derives from cfg + the targeted L2 instance via the shared e2e
-# `l1_dashboard_id` fixture (conftest). No assertion on a *specific*
-# visual title — a stale deploy may have renamed one; the point is the
-# verbs work, returning plain Python.
-
-@pytest.mark.e2e
-@pytest.mark.browser
-def test_qs_l1_dashboard_drift_sheet_lists_visuals(
-    qs_driver: QsEmbedDriver, l1_dashboard_id: str,
-) -> None:
-    qs_driver.open(l1_dashboard_id, sheet=_DRIFT_NAME)
-    titles = qs_driver.visual_titles()
-    assert titles, f"L1 dashboard {l1_dashboard_id!r} {_DRIFT_NAME} sheet rendered no visual titles"
-    # Exercise wait_loaded against whatever rendered — must not raise.
-    qs_driver.wait_loaded(titles[0])
-
-
-@pytest.mark.e2e
-@pytest.mark.browser
-def test_qs_l1_dashboard_screenshot(
-    qs_driver: QsEmbedDriver, l1_dashboard_id: str, tmp_path: Path,
-) -> None:
-    qs_driver.open(l1_dashboard_id)
-    png = qs_driver.screenshot(tmp_path / "l1_initial.png")
-    assert png[:8] == b"\x89PNG\r\n\x1a\n"
-    assert (tmp_path / "l1_initial.png").exists()
-
-
-@pytest.mark.e2e
-@pytest.mark.browser
-def test_qs_table_rows_well_formed(
-    qs_driver: QsEmbedDriver, l1_dashboard_id: str,
-) -> None:
-    """QsEmbedDriver.table_rows reads a deployed table as header-keyed
-    dicts. Data is whatever's seeded against the deployed dashboard's DB
-    — assert structure; if rows came back, their keys are the column
-    headers and the dicts are non-empty."""
-    qs_driver.open(l1_dashboard_id, sheet=APP_INFO_SHEET_NAME)
-    qs_driver.wait_loaded(APP_INFO_MATVIEW_STATUS_TITLE)
-    rows = qs_driver.table_rows(APP_INFO_MATVIEW_STATUS_TITLE)
-    assert isinstance(rows, list)
-    if rows:
-        assert all(isinstance(r, dict) and r for r in rows)
-        assert all(isinstance(k, str) and k for k in rows[0])

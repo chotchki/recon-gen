@@ -62,11 +62,10 @@ _SNAP_ROOT = (
 def _snap(driver: "DashboardDriver", sheet_slug: str, short: str) -> None:
     """Write the driver's current page to
     ``<repo>/docs/audits/db_3_parity_verify/<sheet>/<renderer>.png``.
-    ``short`` is the dashboard-id stub from the parametrized fixture
-    (``"qs"`` / ``"app2"`` after the driver class name resolves)."""
-    renderer = (
-        "qs" if driver.__class__.__name__ == "QsEmbedDriver" else "app2"
-    )
+    Post-DW.6 App2 is the sole renderer, so the capture lands under
+    ``app2.png``."""
+    del short  # dashboard-id stub; renderer slug is fixed post-DW.6
+    renderer = "app2"
     out_dir = _SNAP_ROOT / sheet_slug
     out_dir.mkdir(parents=True, exist_ok=True)
     out = out_dir / f"{renderer}.png"

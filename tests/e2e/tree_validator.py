@@ -17,13 +17,13 @@ Usage:
 
     from tests.e2e.tree_validator import TreeValidator
 
-    def test_investigation_dashboard_matches_tree(inv_app, qs_driver):
-        qs_driver.open(inv_dashboard_id)
-        TreeValidator(inv_app, qs_driver).validate_structure()
+    def test_investigation_dashboard_matches_tree(inv_app, driver):
+        driver.open(inv_dashboard_id)
+        TreeValidator(inv_app, driver).validate_structure()
 
 X.2.q.3 — speaks the ``DashboardDriver`` protocol (``goto_sheet`` /
 ``wait_loaded`` / ``visual_titles`` / ``filter_labels``), not Playwright
-directly; the QS-vs-App2 mechanics are sealed in the driver.
+directly; the renderer mechanics are sealed in the driver (App2 post-DW).
 """
 
 from __future__ import annotations

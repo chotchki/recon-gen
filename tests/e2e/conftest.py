@@ -49,7 +49,7 @@ if TYPE_CHECKING:
 
     from recon_gen.common.l2 import L2Instance
     from recon_gen.common.tree import App
-    from tests.e2e._drivers import DashboardDriver, QsEmbedDriver
+    from tests.e2e._drivers import DashboardDriver
 
 
 #: Fixture names that imply an AWS dependency. If NONE of the
@@ -62,7 +62,7 @@ if TYPE_CHECKING:
 #: `test_bv33c_full_registry_walk_sqlite` wasted ~90s/run on these
 #: leaks before its actual test logic fired.
 _AWS_DEPENDENT_FIXTURE_NAMES: frozenset[str] = frozenset({
-    "qs_client", "qs_driver", "qs_user_arn", "account_id",
+    "qs_client", "qs_user_arn", "account_id",
     "l1_dashboard_id", "inv_dashboard_id", "exec_dashboard_id",
     "l2ft_dashboard_id",
 })
@@ -354,41 +354,6 @@ def qs_client(region: str) -> "QuickSightClient":
         )
     import boto3
     return boto3.client("quicksight", region_name=region)  # pyright: ignore[reportUnknownMemberType]: boto3.client dynamic service overload
-
-
-@pytest.fixture
-def qs_driver(
-    request: pytest.FixtureRequest,
-    cfg: Config,
-    region: str,
-    account_id: str,
-) -> Iterator["QsEmbedDriver"]:
-    """X.2.q — ``QsEmbedDriver`` over a fresh WebKit page, for browser
-    e2e tests that drive a deployed QuickSight dashboard through the
-    ``DashboardDriver`` protocol (``open(dashboard_id)`` mints the embed
-    URL). Skips cleanly when ``RECON_E2E_USER_ARN`` is unset (the runner
-    derives it from ``cfg.auth.aws.profile``; export it for a direct
-    ``pytest`` run). Function-scoped — embed URLs are single-use.
-
-    AA.H.12 — thin wrapper around ``qs_driver_or_none`` (the shared
-    lifecycle primitive that bundles get_user_arn gate + embed +
-    capture hook). This fixture's only distinguishing policy: skip the
-    test when QS is unavailable (single-renderer tests can't run
-    without it).
-    """
-    import importlib.util
-    if importlib.util.find_spec("boto3") is None:
-        pytest.skip(  # DV.6 — QS needs the optional [quicksight] extra
-            "boto3 not installed — QuickSight tests need recon-gen[quicksight]"
-        )
-    from tests.e2e._drivers._lifecycle import qs_driver_or_none
-
-    with qs_driver_or_none(
-        request, cfg=cfg, account_id=account_id, region=region,
-    ) as driver:
-        if driver is None:
-            pytest.skip("RECON_E2E_USER_ARN unavailable — cannot derive QS user ARN")
-        yield driver
 
 
 def _resolve_test_l2_instance() -> "L2Instance":
@@ -985,11 +950,9 @@ def l2ft_app(cfg: Config) -> "App":
 # in ~1–2 s, acceptable. See docs/audits/x_2_u_parametrized_driver_spike.md.
 
 
-# AA.H.10 — moved to tests/e2e/_capture.py so the QS-driver
-# fixtures (qs_driver here, _parametrized_dashboard_driver here) can
-# all import a single hook. Originally lived inline here and was
-# wired only into _parametrized_dashboard_driver — qs_driver
-# silently dropped failure-capture artifacts.
+# AA.H.10 — failure-capture hook lives in tests/e2e/_capture.py so the
+# driver fixtures can import a single shared hook.
+# ``_parametrized_dashboard_driver`` wires it post-yield.
 from tests.e2e._capture import maybe_capture_on_failure as _maybe_capture_on_failure  # noqa: E402
 
 
