@@ -167,6 +167,21 @@ class Drill:
 
     _AUTO_KIND: ClassVar[str] = "drill"
 
+    def resolve_source_shapes(self) -> None:
+        """Resolve every write source's K.2 shape (field_id + ColumnShape),
+        raising if a calc-field source lacks a ``shape`` tag or a real
+        column's shape can't be derived from the contract. Pure
+        validation — the resolved values are discarded.
+
+        ``App.validate()`` calls this so the drill-source-shape invariant
+        holds on EVERY renderer. It used to live only inside ``emit()``
+        (the QS path); post-DW the emitter is gone, so the check moved to
+        the validation walk where App2 picks it up too. Requires
+        ``resolve_auto_ids()`` to have run first (the source leaf's
+        field_id must be assigned)."""
+        for _param, source in self.writes:
+            _resolve_drill_source(source)
+
     def emit(self) -> VisualCustomAction:
         assert not isinstance(self.action_id, _AutoSentinel), (
             "action_id wasn't resolved — App.resolve_auto_ids() must run."

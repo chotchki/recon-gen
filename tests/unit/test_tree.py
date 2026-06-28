@@ -26,7 +26,6 @@ from recon_gen.common.tree import (
     KPI,
     Analysis,
     App,
-    BarChart,
     CalcField,
     CategoryFilter,
     Dataset,
@@ -38,10 +37,7 @@ from recon_gen.common.tree import (
     Measure,
     auto_id,
     NumericRangeFilter,
-    ParameterBound,
-    Sankey,
     Sheet,
-    StaticBound,
     StringParam,
     Table,
     TimeRangeFilter,
@@ -67,63 +63,6 @@ _TEST_CFG = make_test_config()
 # Sheet
 # ---------------------------------------------------------------------------
 
-class TestSheet:
-    def test_emits_minimal_sheet_definition(self):
-        sheet = Sheet(
-            sheet_id=SheetId("sheet-test"),
-            name="Test",
-            title="Test Sheet",
-            description="Test sheet for unit tests.",
-        )
-        emitted = sheet.emit()
-        assert emitted.SheetId == "sheet-test"
-        assert emitted.Name == "Test"
-        assert emitted.Title == "Test Sheet"
-        assert emitted.Description == "Test sheet for unit tests."
-        assert emitted.ContentType == "INTERACTIVE"
-        assert emitted.Visuals is None
-        assert emitted.ParameterControls is None
-        assert emitted.FilterControls == []  # explicit empty for L.1.6 forward-compat
-
-    def test_layout_row_emits_visuals_in_order(self):
-        sheet = Sheet(
-            sheet_id=SheetId("sheet-test"),
-            name="Test", title="Test", description="test",
-        )
-        row = sheet.layout.row(height=6)
-        row.add_kpi(width=12, visual_id=VisualId("v-a"), title="A", subtitle="t")
-        row.add_kpi(width=12, visual_id=VisualId("v-b"), title="B", subtitle="t")
-        emitted = sheet.emit()
-        assert emitted.Visuals is not None
-        visual_ids: list[str] = []
-        for v in emitted.Visuals:
-            assert v.KPIVisual is not None
-            visual_ids.append(v.KPIVisual.VisualId)
-        assert visual_ids == ["v-a", "v-b"]
-
-    def test_emit_layout_references_visual_id_at_emit_time(self):
-        """GridSlot stores an object ref; ElementId resolves to the
-        referenced visual's id at emit time. Locked decision: object
-        refs over string IDs."""
-        sheet = Sheet(
-            sheet_id=SheetId("sheet-test"),
-            name="Test", title="Test", description="test",
-        )
-        sheet.layout.row(height=18).add_kpi(
-            width=36, visual_id=VisualId("v-the-one"), title="One",
-                subtitle="t",
-        )
-        emitted = sheet.emit()
-        assert emitted.Layouts is not None
-        layout = emitted.Layouts[0]
-        assert layout.Configuration.GridLayout is not None
-        elements = layout.Configuration.GridLayout.Elements
-        assert len(elements) == 1
-        assert elements[0].ElementId == "v-the-one"
-        assert elements[0].ElementType == "VISUAL"
-        assert elements[0].ColumnSpan == 36
-
-
 # ---------------------------------------------------------------------------
 # Analysis
 # ---------------------------------------------------------------------------
@@ -140,28 +79,6 @@ class TestAnalysis:
                 sheet_id=SheetId("sheet-dup"),
                 name="B", title="B", description="test",
             ))
-
-    def test_emit_definition_carries_sheets(self):
-        analysis = Analysis(analysis_id_suffix="test-analysis", name="Test")
-        analysis.add_sheet(Sheet(
-            sheet_id=SheetId("sheet-1"),
-            name="A", title="A", description="test",
-        ))
-        analysis.add_sheet(Sheet(
-            sheet_id=SheetId("sheet-2"),
-            name="B", title="B", description="test",
-        ))
-        defn = analysis.emit_definition(datasets=[])
-        assert defn.Sheets is not None
-        assert [s.SheetId for s in defn.Sheets] == ["sheet-1", "sheet-2"]
-
-    def test_emit_definition_emits_dataset_declarations_from_dataset_refs(self):
-        analysis = Analysis(analysis_id_suffix="test-analysis", name="Test")
-        defn = analysis.emit_definition(datasets=[_DS_FOO])
-        assert len(defn.DataSetIdentifierDeclarations) == 1
-        assert defn.DataSetIdentifierDeclarations[0].Identifier == "ds-foo"
-        assert defn.DataSetIdentifierDeclarations[0].DataSetArn == _DS_FOO.arn
-
 
 # ---------------------------------------------------------------------------
 # App
@@ -184,22 +101,10 @@ class TestApp:
         )
         return app
 
-    def test_emit_analysis_builds_model_analysis(self):
-        app = self._make_app_with_one_sheet()
-        analysis = app.emit_analysis()
-        assert analysis.AwsAccountId == "111122223333"
-        assert analysis.AnalysisId.startswith("recon-test-")
-        assert analysis.AnalysisId.endswith("test-analysis")
-        assert analysis.Name == "Test Analysis"
-        assert analysis.ThemeArn  # non-empty
-        assert analysis.Definition is not None
-        assert analysis.Definition.Sheets is not None
-        assert len(analysis.Definition.Sheets) == 1
-
-    def test_emit_analysis_without_analysis_raises(self):
+    def test_validate_without_analysis_raises(self):
         app = App(name="test-app", cfg=_TEST_CFG, allow_bare_strings=True)
         with pytest.raises(ValueError, match="set_analysis"):
-            app.emit_analysis()
+            app.validate()
 
     # L.1.21 — analysis-mismatch test deleted: app.create_dashboard()
     # uses the App's already-set analysis by construction, so the
@@ -213,87 +118,14 @@ class TestApp:
         )
         assert ret is app.dashboard
 
-    def test_emit_dashboard_builds_model_dashboard(self):
-        app = self._make_app_with_one_sheet()
-        app.create_dashboard(
-            dashboard_id_suffix="test-dashboard",
-            name="Test Dashboard",
-        )
-        dashboard = app.emit_dashboard()
-        assert dashboard.AwsAccountId == "111122223333"
-        assert dashboard.DashboardId.startswith("recon-test-")
-        assert dashboard.DashboardId.endswith("test-dashboard")
-        assert dashboard.Name == "Test Dashboard"
-        assert dashboard.Definition is not None
-        assert dashboard.Definition.Sheets is not None
-        # Same definition shape as the Analysis's
-        assert len(dashboard.Definition.Sheets) == 1
-
-    def test_emit_dashboard_without_dashboard_raises(self):
-        app = self._make_app_with_one_sheet()
-        with pytest.raises(ValueError, match="create_dashboard"):
-            app.emit_dashboard()
-
-    def test_emit_analysis_round_trips_through_to_aws_json(self):
-        """The whole point — tree-built models.Analysis serializes
-        cleanly through the existing to_aws_json path."""
-        app = self._make_app_with_one_sheet()
-        analysis = app.emit_analysis()
-        j = analysis.to_aws_json()
-        assert j["AwsAccountId"] == "111122223333"
-        assert j["AnalysisId"].endswith("test-analysis")
-        assert "Definition" in j
-        assert len(j["Definition"]["Sheets"]) == 1
-        assert j["Definition"]["Sheets"][0]["SheetId"] == "sheet-1"
-
-
 # ---------------------------------------------------------------------------
 # L.1.3 — Field-well wrappers (Dim, Measure)
 # ---------------------------------------------------------------------------
 
 class TestDim:
-    def test_categorical_default(self):
-        dim = Dim(dataset=_DS_FOO, field_id="f-1", column="col_a")
-        emitted = dim.emit()
-        assert emitted.CategoricalDimensionField is not None
-        assert emitted.CategoricalDimensionField.FieldId == "f-1"
-        assert emitted.CategoricalDimensionField.Column.ColumnName == "col_a"
-        assert emitted.CategoricalDimensionField.Column.DataSetIdentifier == "ds-foo"
-
-    def test_date_factory(self):
-        dim = Dim.date(dataset=_DS_FOO, field_id="f-d", column="posted_at")
-        emitted = dim.emit()
-        assert emitted.DateDimensionField is not None
-        assert emitted.CategoricalDimensionField is None
-
-    def test_numerical_factory(self):
-        dim = Dim.numerical(dataset=_DS_FOO, field_id="f-n", column="depth")
-        emitted = dim.emit()
-        assert emitted.NumericalDimensionField is not None
-
     # Q.1.a.7 — currency=True on a numerical Dim emits the same USD
     # CurrencyDisplayFormatConfiguration that Measure.currency uses, so
     # row-level money columns in tables format consistently with KPIs.
-    def test_numerical_currency_flag_emits_usd_format_configuration(self):
-        dim = Dim.numerical(
-            dataset=_DS_FOO, field_id="f-money", column="amount", currency=True,
-        )
-        emitted = dim.emit()
-        ndf = emitted.NumericalDimensionField
-        assert ndf is not None
-        assert ndf.FormatConfiguration is not None
-        inner_fc = ndf.FormatConfiguration.FormatConfiguration
-        assert inner_fc is not None
-        cur = inner_fc.CurrencyDisplayFormatConfiguration
-        assert cur is not None
-        assert cur.Symbol == "USD"
-
-    def test_numerical_currency_default_off(self):
-        dim = Dim.numerical(dataset=_DS_FOO, field_id="f-d", column="depth")
-        ndf = dim.emit().NumericalDimensionField
-        assert ndf is not None
-        assert ndf.FormatConfiguration is None
-
     def test_currency_rejects_categorical_dim(self):
         # Money never makes sense on a categorical or date axis — wiring
         # currency=True on a non-numerical Dim is a typo, not an
@@ -307,85 +139,9 @@ class TestDim:
 
 
 class TestMeasure:
-    def test_sum_emits_numerical_field(self):
-        m = Measure.sum(dataset=_DS_FOO, field_id="f-1", column="amount")
-        emitted = m.emit()
-        assert emitted.NumericalMeasureField is not None
-        assert emitted.NumericalMeasureField.AggregationFunction is not None
-        assert emitted.NumericalMeasureField.AggregationFunction.SimpleNumericalAggregation == "SUM"
-
-    def test_max_min_average(self):
-        for kind, expected in [("max", "MAX"), ("min", "MIN"), ("average", "AVERAGE")]:
-            m = getattr(Measure, kind)(dataset=_DS, field_id=f"f-{kind}", column="amount")
-            emitted = m.emit()
-            assert emitted.NumericalMeasureField is not None
-            assert emitted.NumericalMeasureField.AggregationFunction is not None
-            assert emitted.NumericalMeasureField.AggregationFunction.SimpleNumericalAggregation == expected
-
-    def test_count_emits_numerical_sum_over_row_one_calc_field(self):
-        # BL.1 — kind="count" emits NumericalMeasureField(SUM) over the
-        # auto-registered ``_row_one_<dataset_id>`` CalcField (literal
-        # ``1`` per row). The original CategoricalMeasureField(COUNT)
-        # wire silently rendered DISTINCT when QS saw the column as a
-        # Dim elsewhere on the same visual; SUM-over-1 is a pure row
-        # count with no quirky distinct behavior.
-        m = Measure.count(dataset=_DS_FOO, field_id="f-1", column="account_id")
-        emitted = m.emit()
-        assert emitted.CategoricalMeasureField is None
-        nmf = emitted.NumericalMeasureField
-        assert nmf is not None
-        assert nmf.AggregationFunction is not None
-        assert nmf.AggregationFunction.SimpleNumericalAggregation == "SUM"
-        # The Column ref points at the row-one CalcField, not the
-        # original column. ``App.resolve_auto_ids`` registers the
-        # matching CalcField on the Analysis.
-        from recon_gen.common.tree.fields import row_one_calc_name
-        assert nmf.Column.ColumnName == row_one_calc_name(_DS_FOO)
-        assert nmf.Column.DataSetIdentifier == _DS_FOO.identifier
-
-    def test_distinct_count_emits_categorical_field(self):
-        m = Measure.distinct_count(dataset=_DS_FOO, field_id="f-1", column="account_id")
-        emitted = m.emit()
-        assert emitted.CategoricalMeasureField is not None
-        assert emitted.CategoricalMeasureField.AggregationFunction == "DISTINCT_COUNT"
-
     # Q.1.a — currency=True wires a USD CurrencyDisplayFormatConfiguration
     # onto the underlying NumericalMeasureField. Default (no flag) emits no
     # FormatConfiguration at all so existing measures stay byte-identical.
-    def test_currency_flag_emits_usd_format_configuration(self):
-        m = Measure.sum(dataset=_DS_FOO, field_id="f-1", column="amount", currency=True)
-        emitted = m.emit()
-        nmf = emitted.NumericalMeasureField
-        assert nmf is not None
-        fc = nmf.FormatConfiguration
-        assert fc is not None
-        assert fc.FormatConfiguration is not None
-        currency_cfg = fc.FormatConfiguration.CurrencyDisplayFormatConfiguration
-        assert currency_cfg is not None
-        assert currency_cfg.Symbol == "USD"
-        assert currency_cfg.DecimalPlacesConfiguration is not None
-        assert currency_cfg.DecimalPlacesConfiguration.DecimalPlaces == 2
-        assert currency_cfg.SeparatorConfiguration is not None
-        assert currency_cfg.SeparatorConfiguration.ThousandsSeparator is not None
-        assert currency_cfg.SeparatorConfiguration.ThousandsSeparator.Symbol == "COMMA"
-
-    def test_currency_default_off_leaves_format_configuration_unset(self):
-        m = Measure.sum(dataset=_DS_FOO, field_id="f-1", column="amount")
-        emitted = m.emit()
-        assert emitted.NumericalMeasureField is not None
-        assert emitted.NumericalMeasureField.FormatConfiguration is None
-
-    def test_currency_works_on_max_min_average(self):
-        for kind in ("max", "min", "average"):
-            m = getattr(Measure, kind)(
-                dataset=_DS_FOO, field_id=f"f-{kind}", column="amount", currency=True,
-            )
-            emitted = m.emit()
-            assert emitted.NumericalMeasureField is not None
-            assert (
-                emitted.NumericalMeasureField.FormatConfiguration is not None
-            ), f"{kind} should support currency=True"
-
     def test_currency_rejects_count_aggregations(self):
         """count / distinct_count are categorical (return row counts,
         never money) — currency=True is an author bug, fail loud."""
@@ -461,23 +217,6 @@ class TestMeasure:
 # ---------------------------------------------------------------------------
 
 class TestKPIVisual:
-    def test_emits_kpi_visual(self):
-        kpi = KPI(
-            visual_id=VisualId("v-kpi"),
-            title="Total",
-            subtitle="Sum of amounts",
-            values=[Measure.sum(_DS_FOO, "amount", field_id="f-val")],
-        )
-        emitted = kpi.emit()
-        assert emitted.KPIVisual is not None
-        assert emitted.KPIVisual.VisualId == "v-kpi"
-        assert emitted.KPIVisual.Title is not None
-        assert emitted.KPIVisual.Title.FormatText is not None
-        assert emitted.KPIVisual.Title.FormatText["PlainText"] == "Total"
-        assert emitted.KPIVisual.Subtitle is not None
-        assert emitted.KPIVisual.Subtitle.FormatText is not None
-        assert emitted.KPIVisual.Subtitle.FormatText["PlainText"] == "Sum of amounts"
-
     def test_subtitle_required_non_blank(self):
         # b.15.invariant.sheet-description: subtitle is required + non-blank.
         # The constructor catches both omission (TypeError from the
@@ -493,57 +232,6 @@ class TestKPIVisual:
     def test_satisfies_visual_like_protocol(self):
         kpi = KPI(visual_id=VisualId("v-kpi"), title="Test", subtitle="t")
         assert isinstance(kpi, VisualLike)
-
-    def test_bk_2_value_zero_indicator_emits_qs_conditional_formatting(self):
-        """BK.2 — single-value KPI with KPIValueZeroIndicator emits a
-        ``KPIVisual.ConditionalFormatting`` block carrying TWO
-        ConditionalFormattingOptions entries: CHECKMARK + green for
-        ``{field_id} = 0``, X + red for ``{field_id} <> 0``. Pinning the
-        icon-first ordering + the icon enum values + the WCAG-AA hex
-        colors against a future refactor that re-orders or re-themes
-        the indicator and silently swaps the load-bearing icon channel
-        for colorblind users."""
-        from recon_gen.common.tree import KPIValueZeroIndicator
-        from recon_gen.apps.l1_dashboard.app import _DRIFT_NAME
-        kpi = KPI(
-            visual_id=VisualId("v-kpi"),
-            title=_DRIFT_NAME,
-            subtitle="Healthy = $0",
-            values=[Measure.max(_DS_FOO, "drift", field_id="f-drift")],
-            value_zero_indicator=KPIValueZeroIndicator(),
-        )
-        emitted = kpi.emit()
-        assert emitted.KPIVisual is not None
-        cf = emitted.KPIVisual.ConditionalFormatting
-        assert cf is not None
-        options = cf["ConditionalFormattingOptions"]
-        assert len(options) == 2
-
-        # Healthy first — zero → CHECKMARK + WCAG-AA green. Constants
-        # imported from production so a future re-theme of the indicator
-        # fires this test loudly instead of asserting the stale colour.
-        from recon_gen.common.tree.visuals import (
-            _KPI_BROKEN_COLOR_HEX,
-            _KPI_BROKEN_ICON_QS,
-            _KPI_HEALTHY_COLOR_HEX,
-            _KPI_HEALTHY_ICON_QS,
-        )
-        # Expression must reference the COLUMN name (not the field_id)
-        # AND wrap it with the lowercase aggregation function name —
-        # QS's deploy probe (2026-05-29) successively rejected:
-        #   field_id refs   → "Didn't find field <uuid>"
-        #   bare column ref → "Aggregation Function can not be null"
-        # So a max() KPI emits ``max({drift}) = 0``.
-        healthy = options[0]["PrimaryValue"]["Icon"]["CustomCondition"]
-        assert healthy["Expression"] == "max({drift}) = 0"
-        assert healthy["IconOptions"]["Icon"] == _KPI_HEALTHY_ICON_QS
-        assert healthy["Color"] == _KPI_HEALTHY_COLOR_HEX
-
-        # Broken — non-zero → X + WCAG-AA red.
-        broken = options[1]["PrimaryValue"]["Icon"]["CustomCondition"]
-        assert broken["Expression"] == "max({drift}) <> 0"
-        assert broken["IconOptions"]["Icon"] == _KPI_BROKEN_ICON_QS
-        assert broken["Color"] == _KPI_BROKEN_COLOR_HEX
 
     def test_bk_2_value_zero_indicator_rejects_multi_value_kpis(self):
         """BK.2 — the binary zero indicator is only meaningful for a
@@ -591,48 +279,6 @@ class TestKPIVisual:
             f"hex fails CreateAnalysis."
         )
 
-    def test_bk_9_value_sign_indicator_emits_qs_conditional_formatting(self):
-        """BK.9 — single-value KPI with KPIValueSignIndicator emits a
-        sign-aware ConditionalFormatting pair: ARROW_UP + green-700
-        when the aggregated value >= 0 (inflow / healthy direction),
-        ARROW_DOWN + red-700 when < 0 (outflow). Same three QS shape
-        gotchas as BK.2 apply (uppercase hex, column-name expression
-        refs, aggregation-fn wrap). The boundary is at zero: zero
-        itself is treated as inflow (operator-friendly default for
-        "balanced book" KPIs)."""
-        from recon_gen.common.tree import KPIValueSignIndicator
-        from recon_gen.common.tree.visuals import (
-            _KPI_INFLOW_COLOR_HEX,
-            _KPI_INFLOW_ICON_QS,
-            _KPI_OUTFLOW_COLOR_HEX,
-            _KPI_OUTFLOW_ICON_QS,
-        )
-        kpi = KPI(
-            visual_id=VisualId("v-kpi"),
-            title="Net Money Moved",
-            subtitle="Direction = sign of the period sum",
-            values=[Measure.sum(_DS_FOO, "net_amount", field_id="f-net")],
-            value_sign_indicator=KPIValueSignIndicator(),
-        )
-        emitted = kpi.emit()
-        assert emitted.KPIVisual is not None
-        cf = emitted.KPIVisual.ConditionalFormatting
-        assert cf is not None
-        options = cf["ConditionalFormattingOptions"]
-        assert len(options) == 2
-
-        # Inflow side — value >= 0 → ARROW_UP + green.
-        up = options[0]["PrimaryValue"]["Icon"]["CustomCondition"]
-        assert up["Expression"] == "sum({net_amount}) >= 0"
-        assert up["IconOptions"]["Icon"] == _KPI_INFLOW_ICON_QS
-        assert up["Color"] == _KPI_INFLOW_COLOR_HEX
-
-        # Outflow side — value < 0 → ARROW_DOWN + red.
-        down = options[1]["PrimaryValue"]["Icon"]["CustomCondition"]
-        assert down["Expression"] == "sum({net_amount}) < 0"
-        assert down["IconOptions"]["Icon"] == _KPI_OUTFLOW_ICON_QS
-        assert down["Color"] == _KPI_OUTFLOW_COLOR_HEX
-
     def test_bk_9_value_sign_indicator_blocks_mixed_indicators(self):
         """BK.2 + BK.9 — both indicators on the same KPI raises at
         construction. They emit competing ConditionalFormattingOptions
@@ -650,74 +296,6 @@ class TestKPIVisual:
                 value_zero_indicator=KPIValueZeroIndicator(),
                 value_sign_indicator=KPIValueSignIndicator(),
             )
-
-    def test_bk_2_value_zero_indicator_off_by_default_emits_no_cf(self):
-        """BK.2 — KPIs without ``value_zero_indicator`` (the default)
-        must NOT emit a ``ConditionalFormatting`` block. The QS
-        ``KPIVisual`` field is optional; emitting an empty / unintended
-        CF block would change the visual's QS shape silently."""
-        kpi = KPI(
-            visual_id=VisualId("v-kpi"),
-            title="Total",
-            subtitle="Sum of amounts",
-            values=[Measure.sum(_DS_FOO, "amount", field_id="f-val")],
-        )
-        emitted = kpi.emit()
-        assert emitted.KPIVisual is not None
-        assert emitted.KPIVisual.ConditionalFormatting is None
-
-    def test_cf_x_value_threshold_banding_emits_three_band_cf(self):
-        """CF.X-infra — single-value KPI with KPIValueThresholdBanding
-        emits a 3-band ConditionalFormatting set: X + red-700 when
-        value >= red_at, EXCLAMATION_CIRCLE + amber-700 when
-        amber_at <= value < red_at, CHECKMARK + green-700 when
-        value < amber_at. Options are ordered MOST-RESTRICTIVE-FIRST
-        so amber doesn't shadow red and green only fires when
-        nothing else matched. Same three QS shape gotchas as BK.2
-        (uppercase hex, column-name expression refs, aggregation-fn
-        wrap)."""
-        from recon_gen.common.tree import KPIValueThresholdBanding
-        from recon_gen.common.tree.visuals import (
-            _KPI_AMBER_COLOR_HEX,
-            _KPI_AMBER_ICON_QS,
-            _KPI_BROKEN_COLOR_HEX,
-            _KPI_BROKEN_ICON_QS,
-            _KPI_HEALTHY_COLOR_HEX,
-            _KPI_HEALTHY_ICON_QS,
-        )
-        kpi = KPI(
-            visual_id=VisualId("v-kpi"),
-            title="Open Exceptions",
-            subtitle="Program-health rollup; amber=1 / red=20",
-            values=[Measure.sum(_DS_FOO, "total_open_count", field_id="f-toc")],
-            value_threshold_banding=KPIValueThresholdBanding(
-                amber_at=1, red_at=20,
-            ),
-        )
-        emitted = kpi.emit()
-        assert emitted.KPIVisual is not None
-        cf = emitted.KPIVisual.ConditionalFormatting
-        assert cf is not None
-        options = cf["ConditionalFormattingOptions"]
-        assert len(options) == 3
-
-        # RED — most restrictive first.
-        red = options[0]["PrimaryValue"]["Icon"]["CustomCondition"]
-        assert red["Expression"] == "sum({total_open_count}) >= 20"
-        assert red["IconOptions"]["Icon"] == _KPI_BROKEN_ICON_QS
-        assert red["Color"] == _KPI_BROKEN_COLOR_HEX
-
-        # AMBER — middle band.
-        amber = options[1]["PrimaryValue"]["Icon"]["CustomCondition"]
-        assert amber["Expression"] == "sum({total_open_count}) >= 1"
-        assert amber["IconOptions"]["Icon"] == _KPI_AMBER_ICON_QS
-        assert amber["Color"] == _KPI_AMBER_COLOR_HEX
-
-        # GREEN — fall-through.
-        green = options[2]["PrimaryValue"]["Icon"]["CustomCondition"]
-        assert green["Expression"] == "sum({total_open_count}) < 1"
-        assert green["IconOptions"]["Icon"] == _KPI_HEALTHY_ICON_QS
-        assert green["Color"] == _KPI_HEALTHY_COLOR_HEX
 
     def test_cf_x_value_threshold_banding_rejects_red_le_amber(self):
         """CF.X-infra — red_at must be strictly greater than amber_at.
@@ -751,43 +329,6 @@ class TestKPIVisual:
 
 
 class TestTableVisual:
-    def test_emits_table_with_group_by_and_values(self):
-        table = Table(
-            visual_id=VisualId("v-tbl"),
-            title="Detail",
-            group_by=[
-                Dim(dataset=_DS, field_id="f-id", column="id"),
-                Dim(dataset=_DS, field_id="f-name", column="name"),
-            ],
-            values=[Measure.sum(dataset=_DS, field_id="f-amt", column="amount")],
-                subtitle="t",
-        )
-        emitted = table.emit()
-        assert emitted.TableVisual is not None
-        assert emitted.TableVisual.ChartConfiguration is not None
-        assert emitted.TableVisual.ChartConfiguration.FieldWells is not None
-        wells = emitted.TableVisual.ChartConfiguration.FieldWells.TableAggregatedFieldWells
-        assert wells is not None
-        assert wells.GroupBy is not None
-        assert len(wells.GroupBy) == 2
-        assert wells.Values is not None
-        assert len(wells.Values) == 1
-
-    def test_sort_by(self):
-        table = Table(
-            visual_id=VisualId("v-tbl"),
-            title="Detail",
-            sort_by=("f-amt", "DESC"),
-                subtitle="t",
-        )
-        emitted = table.emit()
-        assert emitted.TableVisual is not None
-        assert emitted.TableVisual.ChartConfiguration is not None
-        sort = emitted.TableVisual.ChartConfiguration.SortConfiguration
-        assert sort is not None
-        assert sort["RowSort"][0]["FieldSort"]["FieldId"] == "f-amt"
-        assert sort["RowSort"][0]["FieldSort"]["Direction"] == "DESC"
-
     def test_metadata_popup_defaults_false(self):
         """CY.4 — ``metadata_popup`` defaults to False so the existing
         Tables don't suddenly demand a ``metadata`` contract column."""
@@ -989,206 +530,10 @@ class TestTableVisual:
         assert len(table.conditional_formatting) == 1
 
 
-class TestBarChartVisual:
-    def test_emits_bar_with_category_and_values(self):
-        bar = BarChart(
-            visual_id=VisualId("v-bar"),
-            title="By Bucket",
-            category=[Dim(dataset=_DS, field_id="f-bucket", column="z_bucket")],
-            values=[Measure.count(dataset=_DS, field_id="f-cnt", column="recipient_id")],
-                subtitle="t",
-        )
-        emitted = bar.emit()
-        assert emitted.BarChartVisual is not None
-        assert emitted.BarChartVisual.ChartConfiguration is not None
-        assert emitted.BarChartVisual.ChartConfiguration.FieldWells is not None
-        wells = emitted.BarChartVisual.ChartConfiguration.FieldWells.BarChartAggregatedFieldWells
-        assert wells is not None
-        assert wells.Category is not None
-        assert len(wells.Category) == 1
-        assert wells.Values is not None
-        assert len(wells.Values) == 1
-
-    def test_bq_5_log_scale_emits_value_axis_logarithmic_block(self):
-        """BQ.5 — when ``log_scale=True``, BarChart emits the
-        five-level QS path ValueAxis → DataOptions → NumericAxisOptions
-        → Scale → Logarithmic. Without all five wrappers QS rejects
-        the analysis at deploy time (the QS-schema spike caught this
-        on the v11.24.x BK.2 conditional-formatting probe — same
-        deeply-nested wrapping pattern)."""
-        bar = BarChart(
-            visual_id=VisualId("v-bar-log"),
-            title="Log Bars",
-            category=[Dim(dataset=_DS, field_id="f-bucket", column="z_bucket")],
-            values=[Measure.count(dataset=_DS, field_id="f-cnt", column="recipient_id")],
-            subtitle="t",
-            log_scale=True,
-        )
-        cfg = bar.emit().BarChartVisual.ChartConfiguration  # type: ignore[union-attr]: BarChart.emit() always sets BarChartVisual; pyright sees the wider Visual union
-        assert cfg is not None
-        axis = cfg.ValueAxis
-        assert axis is not None, (
-            "ValueAxis must be set when log_scale=True; QS-side log "
-            "scale lives ONLY inside the ValueAxis sub-tree."
-        )
-        assert axis.DataOptions is not None
-        assert axis.DataOptions.NumericAxisOptions is not None
-        scale = axis.DataOptions.NumericAxisOptions.Scale
-        assert scale is not None
-        assert scale.Logarithmic is not None, (
-            "Scale.Logarithmic must be set (not Linear) when log_scale=True. "
-            "Linear is QS's default — leaving Logarithmic unset would silently "
-            "render as linear."
-        )
-        assert scale.Linear is None, (
-            "Both Linear and Logarithmic set is rejected by QS as an "
-            "invalid discriminated-union state — exactly one wins."
-        )
-
-    def test_db3_count_value_label_apply_to_matches_row_one_calc_name(self):
-        """DB.3 follow-up — for ``count()`` measures, ``Measure.emit()``
-        rewrites the field-well's ``ColumnName`` to the dataset's
-        ``_row_one_*`` literal-1 calc field (BL.1). The
-        ``ValueLabelOptions.AxisLabelOptions[0].ApplyTo.Column.ColumnName``
-        must mirror that rewrite — otherwise QS sees a mismatch
-        against the well and silently drops the ``CustomLabel``,
-        leaking the raw ``_row_one_<dataset>_ds (Sum)`` onto the
-        QS-side value axis instead of the configured override.
-
-        Caught on QS Pending Aging + L2 Exceptions cold-read snaps
-        (operator flagged "qs pending aging looks broken")."""
-        from recon_gen.common.tree.fields import row_one_calc_name
-
-        bar = BarChart(
-            visual_id=VisualId("v-bar-count-label"),
-            title="Stuck Pending by Age Bucket",
-            category=[Dim(dataset=_DS, field_id="f-bucket", column="z_bucket")],
-            values=[Measure.count(dataset=_DS, field_id="f-cnt", column="recipient_id")],
-            value_label="Transactions",  # typing-smell: ignore[no-inline-production-constants]: test of the ApplyTo mirroring contract — the literal value doesn't matter, only that ApplyTo.Column matches the count()-rewritten well; importing _TRANSACTIONS_NAME would tie the test to L1's labeling unnecessarily
-            subtitle="t",
-        )
-        cfg = bar.emit().BarChartVisual.ChartConfiguration  # type: ignore[union-attr]: BarChart.emit() always sets BarChartVisual; pyright sees the wider Visual union
-        assert cfg is not None
-        vlo = cfg.ValueLabelOptions
-        assert vlo is not None and vlo.AxisLabelOptions is not None
-        apply_to = vlo.AxisLabelOptions[0].ApplyTo
-        assert apply_to is not None
-        # The override target must reference the SAME column the field
-        # well points at — the literal-1 calc field, not the
-        # count()'s source column.
-        assert apply_to.Column.ColumnName == row_one_calc_name(_DS), (
-            f"ApplyTo.Column.ColumnName must be {row_one_calc_name(_DS)!r} "
-            f"to match the count()-rewritten field well; got "
-            f"{apply_to.Column.ColumnName!r}. QS silently drops the "
-            "CustomLabel on mismatch and leaks the _row_one_* name."
-        )
-
-    def test_bq_5_no_log_scale_leaves_value_axis_unset(self):
-        """BQ.5 — default ``log_scale=False`` (every existing BarChart's
-        shape pre-BQ.5) MUST leave ``ValueAxis`` None so QS's linear
-        default still applies. Setting an empty ValueAxis would
-        regress every existing chart — pin the default."""
-        bar = BarChart(
-            visual_id=VisualId("v-bar-default"),
-            title="Default Bars",
-            category=[Dim(dataset=_DS, field_id="f-bucket", column="z_bucket")],
-            values=[Measure.count(dataset=_DS, field_id="f-cnt", column="recipient_id")],
-            subtitle="t",
-        )
-        cfg = bar.emit().BarChartVisual.ChartConfiguration  # type: ignore[union-attr]: BarChart.emit() always sets BarChartVisual; pyright sees the wider Visual union
-        assert cfg is not None
-        assert cfg.ValueAxis is None
-
-
-class TestSankeyVisual:
-    def test_emits_sankey_with_source_target_weight(self):
-        sankey = Sankey(
-            visual_id=VisualId("v-sankey"),
-            title="Flow",
-            source=Dim(dataset=_DS, field_id="f-src", column="source_display"),
-            target=Dim(dataset=_DS, field_id="f-tgt", column="target_display"),
-            weight=Measure.sum(dataset=_DS, field_id="f-wt", column="hop_amount"),
-            items_limit=50,
-                subtitle="t",
-        )
-        emitted = sankey.emit()
-        assert emitted.SankeyDiagramVisual is not None
-        assert emitted.SankeyDiagramVisual.ChartConfiguration is not None
-        assert emitted.SankeyDiagramVisual.ChartConfiguration.FieldWells is not None
-        wells = emitted.SankeyDiagramVisual.ChartConfiguration.FieldWells.SankeyDiagramAggregatedFieldWells
-        assert wells is not None
-        assert wells.Source is not None
-        assert len(wells.Source) == 1
-        source_cat = wells.Source[0].CategoricalDimensionField
-        assert source_cat is not None
-        assert source_cat.Column.ColumnName == "source_display"
-        assert wells.Destination is not None
-        assert len(wells.Destination) == 1
-        dest_cat = wells.Destination[0].CategoricalDimensionField
-        assert dest_cat is not None
-        assert dest_cat.Column.ColumnName == "target_display"
-        assert wells.Weight is not None
-        assert len(wells.Weight) == 1
-
-    def test_weight_drives_sort_desc(self):
-        sankey = Sankey(
-            visual_id=VisualId("v-sankey"),
-            title="Flow",
-            weight=Measure.sum(dataset=_DS, field_id="f-wt", column="hop_amount"),
-                subtitle="t",
-        )
-        emitted = sankey.emit()
-        assert emitted.SankeyDiagramVisual is not None
-        assert emitted.SankeyDiagramVisual.ChartConfiguration is not None
-        sort = emitted.SankeyDiagramVisual.ChartConfiguration.SortConfiguration
-        assert sort is not None
-        assert sort.WeightSort is not None
-        assert sort.WeightSort[0]["FieldSort"]["FieldId"] == "f-wt"
-        assert sort.WeightSort[0]["FieldSort"]["Direction"] == "DESC"
-
-    def test_items_limit_caps_both_sides(self):
-        sankey = Sankey(
-            visual_id=VisualId("v-sankey"),
-            title="Flow",
-            items_limit=25,
-                subtitle="t",
-        )
-        emitted = sankey.emit()
-        assert emitted.SankeyDiagramVisual is not None
-        assert emitted.SankeyDiagramVisual.ChartConfiguration is not None
-        sort = emitted.SankeyDiagramVisual.ChartConfiguration.SortConfiguration
-        assert sort is not None
-        assert sort.SourceItemsLimit is not None
-        assert sort.SourceItemsLimit["ItemsLimit"] == 25
-        assert sort.DestinationItemsLimit is not None
-        assert sort.DestinationItemsLimit["ItemsLimit"] == 25
-        assert sort.SourceItemsLimit["OtherCategories"] == "INCLUDE"
-
-
 class TestSheetAcceptsTypedVisuals:
     """Layout DSL constructors return typed visual subtypes (KPI / Table
     / BarChart / Sankey) — generic `add_*` preserves the concrete
     subtype, the visual is registered + placed atomically."""
-
-    def test_add_kpi(self):
-        sheet = Sheet(
-            sheet_id=SheetId("sheet-test"),
-            name="Test", title="Test", description="test",
-        )
-        sheet.layout.row(height=6).add_kpi(
-            width=12,
-            visual_id=VisualId("v-kpi"),
-            title="Total",
-            values=[Measure.sum(_DS, "amount", field_id="f")],
-                subtitle="t",
-        )
-        emitted = sheet.emit()
-        assert emitted.Visuals is not None
-        assert emitted.Visuals[0].KPIVisual is not None
-        assert emitted.Visuals[0].KPIVisual.VisualId == "v-kpi"
-        assert emitted.Layouts is not None
-        assert emitted.Layouts[0].Configuration.GridLayout is not None
-        assert emitted.Layouts[0].Configuration.GridLayout.Elements[0].ElementId == "v-kpi"
 
     def test_layout_add_kpi_returns_concrete_subtype(self):
         """Layout DSL preserves the caller's concrete subtype — the
@@ -1211,69 +556,7 @@ class TestSheetAcceptsTypedVisuals:
 # L.1.4 — Parameter declarations
 # ---------------------------------------------------------------------------
 
-class TestStringParam:
-    def test_emits_single_valued_string_param(self):
-        p = StringParam(
-            name=ParameterName("pTest"),
-            default=["default-value"],
-        )
-        emitted = p.emit()
-        assert emitted.StringParameterDeclaration is not None
-        assert emitted.StringParameterDeclaration.Name == "pTest"
-        assert emitted.StringParameterDeclaration.ParameterValueType == "SINGLE_VALUED"
-        assert emitted.StringParameterDeclaration.DefaultValues == {"StaticValues": ["default-value"]}
-
-    def test_no_default_emits_empty_static_values(self):
-        """No-default pattern matches the existing
-        ``DefaultValues={"StaticValues": []}`` shape used by the
-        K.4.5 chain-root + K.4.8 anchor parameters (which rely on
-        the SelectAll=HIDDEN dropdown to land on first row)."""
-        p = StringParam(name=ParameterName("pNoDefault"))
-        emitted = p.emit()
-        assert emitted.StringParameterDeclaration is not None
-        assert emitted.StringParameterDeclaration.DefaultValues == {"StaticValues": []}
-
-    def test_multi_valued(self):
-        p = StringParam(
-            name=ParameterName("pMulti"),
-            default=["a", "b"],
-            multi_valued=True,
-        )
-        emitted = p.emit()
-        assert emitted.StringParameterDeclaration is not None
-        assert emitted.StringParameterDeclaration.ParameterValueType == "MULTI_VALUED"
-
-
-class TestIntegerParam:
-    def test_emits_integer_param_with_default(self):
-        p = IntegerParam(
-            name=ParameterName("pSigma"),
-            default=[2],
-        )
-        emitted = p.emit()
-        assert emitted.IntegerParameterDeclaration is not None
-        assert emitted.IntegerParameterDeclaration.Name == "pSigma"
-        assert emitted.IntegerParameterDeclaration.DefaultValues == {"StaticValues": [2]}
-
-
 class TestDateTimeParam:
-    def test_emits_datetime_param_with_rolling_default(self):
-        """RollingDate pattern — same shape as AR's pArDsBalanceDate
-        (P_AR_DS_BALANCE_DATE) which uses ``truncDate('DD', now())``
-        for "today"."""
-        p = DateTimeParam(
-            name=ParameterName("pDate"),
-            time_granularity="DAY",
-            default=DateTimeDefaultValues(
-                RollingDate={"Expression": "truncDate('DD', now())"},
-            ),
-        )
-        emitted = p.emit()
-        assert emitted.DateTimeParameterDeclaration is not None
-        assert emitted.DateTimeParameterDeclaration.TimeGranularity == "DAY"
-        assert emitted.DateTimeParameterDeclaration.DefaultValues is not None
-        assert emitted.DateTimeParameterDeclaration.DefaultValues.RollingDate is not None
-
     def test_accepts_none_time_granularity(self):
         # time_granularity is optional; default is required (M.4.4.10d).
         p = DateTimeParam(
@@ -1299,33 +582,6 @@ class TestAnalysisAddParameter:
         analysis.add_parameter(IntegerParam(name=ParameterName("pDup"), default=[1]))
         with pytest.raises(ValueError, match="already declared"):
             analysis.add_parameter(StringParam(name=ParameterName("pDup")))
-
-    def test_emit_definition_carries_parameter_declarations(self):
-        analysis = Analysis(analysis_id_suffix="test", name="Test")
-        analysis.add_parameter(IntegerParam(
-            name=ParameterName("pSigma"), default=[2],
-        ))
-        analysis.add_parameter(StringParam(
-            name=ParameterName("pAnchor"),
-        ))
-        defn = analysis.emit_definition(datasets=[])
-        assert defn.ParameterDeclarations is not None
-        names: list[str] = []
-        for pd in defn.ParameterDeclarations:
-            if pd.IntegerParameterDeclaration:
-                names.append(pd.IntegerParameterDeclaration.Name)
-            elif pd.StringParameterDeclaration:
-                names.append(pd.StringParameterDeclaration.Name)
-        assert names == ["pSigma", "pAnchor"]
-
-    def test_no_parameters_emits_none(self):
-        """Analysis without any parameter declarations passes None to
-        models.AnalysisDefinition (preserving the existing pattern that
-        omits empty fields)."""
-        analysis = Analysis(analysis_id_suffix="test", name="Test")
-        defn = analysis.emit_definition(datasets=[])
-        assert defn.ParameterDeclarations is None
-
 
 # ---------------------------------------------------------------------------
 # L.1.5 — FilterGroup with object-ref scope + scope-on-same-sheet validation
@@ -1386,41 +642,6 @@ class TestFilterGroupScope:
         assert ret is fg  # chains
         assert len(fg._scope_entries) == 1
 
-    def test_scope_visuals_emits_selected_visuals_configuration(self):
-        sheet, [v1, v2] = self._make_sheet_with_visuals(
-            "sheet-test", "v-1", "v-2",
-        )
-        fg = FilterGroup(
-            filter_group_id=FilterGroupId("fg-test"),
-            filters=[_category_filter("f-1", _DS_FOO, "col_a")],
-        )
-        sheet.scope(fg, [v1, v2])
-        emitted = fg.emit()
-        assert emitted.ScopeConfiguration.SelectedSheets is not None
-        configs = emitted.ScopeConfiguration.SelectedSheets.SheetVisualScopingConfigurations
-        assert configs is not None
-        assert len(configs) == 1
-        assert configs[0].SheetId == "sheet-test"
-        assert configs[0].Scope == "SELECTED_VISUALS"
-        assert configs[0].VisualIds == ["v-1", "v-2"]
-
-    def test_scope_sheet_emits_all_visuals_configuration(self):
-        sheet, _ = self._make_sheet_with_visuals(
-            "sheet-test", "v-1", "v-2",
-        )
-        fg = FilterGroup(
-            filter_group_id=FilterGroupId("fg-test"),
-            filters=[_category_filter("f-1", _DS_FOO, "col_a")],
-        )
-        fg.scope_sheet(sheet)
-        emitted = fg.emit()
-        assert emitted.ScopeConfiguration.SelectedSheets is not None
-        configs = emitted.ScopeConfiguration.SelectedSheets.SheetVisualScopingConfigurations
-        assert configs is not None
-        assert configs[0].SheetId == "sheet-test"
-        assert configs[0].Scope == "ALL_VISUALS"
-        assert configs[0].VisualIds is None
-
     def test_emit_without_scope_raises(self):
         """A FilterGroup with no scope configured wouldn't apply to
         anything at deploy — fail loud at construction rather than
@@ -1431,62 +652,6 @@ class TestFilterGroupScope:
         )
         with pytest.raises(ValueError, match="has no scope"):
             fg.emit()
-
-    def test_multiple_scope_entries(self):
-        """A FilterGroup can scope to (visual subset on sheet A) plus
-        (all visuals on sheet B). Each entry emits its own
-        SheetVisualScopingConfiguration."""
-        sheet_a, [v_a1, _v_a2] = self._make_sheet_with_visuals(
-            "sheet-a", "v-a1", "v-a2",
-        )
-        sheet_b, _ = self._make_sheet_with_visuals(
-            "sheet-b", "v-b1",
-        )
-        fg = FilterGroup(
-            filter_group_id=FilterGroupId("fg-multi"),
-            filters=[_category_filter("f-1", _DS_FOO, "col_a")],
-        )
-        sheet_a.scope(fg, [v_a1])
-        fg.scope_sheet(sheet_b)
-        emitted = fg.emit()
-        assert emitted.ScopeConfiguration.SelectedSheets is not None
-        configs = emitted.ScopeConfiguration.SelectedSheets.SheetVisualScopingConfigurations
-        assert configs is not None
-        assert len(configs) == 2
-        assert configs[0].SheetId == "sheet-a"
-        assert configs[0].Scope == "SELECTED_VISUALS"
-        assert configs[0].VisualIds == ["v-a1"]
-        assert configs[1].SheetId == "sheet-b"
-        assert configs[1].Scope == "ALL_VISUALS"
-
-    def test_emit_carries_filters_through(self):
-        """Each typed FilterLike's emit() runs at FilterGroup.emit() time —
-        the emitted Filters list contains the corresponding models.Filter
-        instances, not the typed wrappers themselves."""
-        sheet, _ = self._make_sheet_with_visuals("sheet-test", "v-1")
-        f = _category_filter("f-1", _DS_FOO, "col_a")
-        fg = FilterGroup(
-            filter_group_id=FilterGroupId("fg-test"),
-            filters=[f],
-        )
-        fg.scope_sheet(sheet)
-        emitted = fg.emit()
-        assert len(emitted.Filters) == 1
-        emitted_filter = emitted.Filters[0]
-        assert emitted_filter.CategoryFilter is not None
-        assert emitted_filter.CategoryFilter.FilterId == "f-1"
-
-    def test_disabled_filter_group(self):
-        sheet, _ = self._make_sheet_with_visuals("sheet-test", "v-1")
-        fg = FilterGroup(
-            filter_group_id=FilterGroupId("fg-test"),
-            filters=[_category_filter("f-1", _DS_FOO, "col_a")],
-            enabled=False,
-        )
-        fg.scope_sheet(sheet)
-        emitted = fg.emit()
-        assert emitted.Status == "DISABLED"
-
 
 class TestAnalysisAddFilterGroup:
     def test_add_filter_group_returns_ref(self):
@@ -1518,35 +683,9 @@ class TestAnalysisAddFilterGroup:
                 filters=[_category_filter("f-2", _DS_FOO, "col_b")],
             ))
 
-    def test_emit_definition_carries_filter_groups(self):
-        analysis = Analysis(analysis_id_suffix="test", name="Test")
-        sheet = analysis.add_sheet(Sheet(
-            sheet_id=SheetId("sheet-test"),
-            name="Test", title="Test", description="test",
-        ))
-        kpi = sheet.layout.row(height=6).add_kpi(
-            width=12, visual_id=VisualId("v-1"), title="Test",
-                subtitle="t",
-        )
-        fg = analysis.add_filter_group(FilterGroup(
-            filter_group_id=FilterGroupId("fg-test"),
-            filters=[_category_filter("f-1", _DS_FOO, "col_a")],
-        ))
-        sheet.scope(fg, [kpi])
-        defn = analysis.emit_definition(datasets=[])
-        assert defn.FilterGroups is not None
-        assert len(defn.FilterGroups) == 1
-        assert defn.FilterGroups[0].FilterGroupId == "fg-test"
-
-    def test_no_filter_groups_emits_none(self):
-        analysis = Analysis(analysis_id_suffix="test", name="Test")
-        defn = analysis.emit_definition(datasets=[])
-        assert defn.FilterGroups is None
-
-
 class TestFilterGroupCompositionWithApp:
     """Cross-check: the wrong-sheet bug class is caught even when
-    FilterGroups go through the full App.emit_analysis path.
+    FilterGroups go through the full App.validate path.
 
     The L.1.5 check-in moment — the load-bearing object-ref scope
     validation works end-to-end."""
@@ -1581,49 +720,6 @@ class TestFilterGroupCompositionWithApp:
 # ---------------------------------------------------------------------------
 
 class TestTypedCategoryFilter:
-    def test_with_values_emits_filter_list_configuration(self):
-        f = CategoryFilter.with_values(
-            filter_id="f-1",
-            dataset=_DS_FOO,
-            column="col_a",
-            values=["yes", "maybe"],
-        )
-        emitted = f.emit()
-        assert emitted.CategoryFilter is not None
-        assert emitted.CategoryFilter.FilterId == "f-1"
-        assert emitted.CategoryFilter.Column.DataSetIdentifier == "ds-foo"
-        assert emitted.CategoryFilter.Column.ColumnName == "col_a"
-        config = emitted.CategoryFilter.Configuration.FilterListConfiguration
-        assert config is not None
-        assert config["MatchOperator"] == "CONTAINS"
-        assert config["CategoryValues"] == ["yes", "maybe"]
-
-    def test_with_parameter_emits_custom_filter_configuration(self):
-        anchor = StringParam(name=ParameterName("pAnchor"))
-        f = CategoryFilter.with_parameter(
-            filter_id="f-1", dataset=_DS, column="col_a",
-            parameter=anchor,
-        )
-        emitted = f.emit()
-        assert emitted.CategoryFilter is not None
-        config = emitted.CategoryFilter.Configuration.CustomFilterConfiguration
-        assert config is not None
-        # with_parameter defaults match_operator to EQUALS — dropdowns
-        # writing into a parameter typically narrow to a single value.
-        assert config["MatchOperator"] == "EQUALS"
-        assert config["ParameterName"] == "pAnchor"
-
-    def test_match_operator_is_configurable(self):
-        f = CategoryFilter.with_values(
-            filter_id="f-1", dataset=_DS, column="col_a",
-            values=["a"], match_operator="EQUALS",
-        )
-        emitted = f.emit()
-        assert emitted.CategoryFilter is not None
-        config = emitted.CategoryFilter.Configuration.FilterListConfiguration
-        assert config is not None
-        assert config["MatchOperator"] == "EQUALS"
-
     def test_satisfies_filter_like_protocol(self):
         f = CategoryFilter.with_values(
             filter_id="f-1", dataset=_DS, column="col_a", values=["x"],
@@ -1637,59 +733,10 @@ class TestTypedCategoryFilter:
 
 
 class TestTypedNumericRangeFilter:
-    def test_static_bounds(self):
-        f = NumericRangeFilter(
-            filter_id="f-1",
-            dataset=_DS,
-            column="amount",
-            minimum=StaticBound(10.0),
-            maximum=StaticBound(1000.0),
-        )
-        emitted = f.emit()
-        assert emitted.NumericRangeFilter is not None
-        assert emitted.NumericRangeFilter.RangeMinimum is not None
-        assert emitted.NumericRangeFilter.RangeMinimum.StaticValue == 10.0
-        assert emitted.NumericRangeFilter.RangeMaximum is not None
-        assert emitted.NumericRangeFilter.RangeMaximum.StaticValue == 1000.0
-        assert emitted.NumericRangeFilter.RangeMinimum.Parameter is None
-
-    def test_parameter_bound_minimum(self):
-        """The wiring catches "filter bound to a parameter that doesn't
-        exist" — pass an actual ParameterDecl object, the type checker
-        guarantees it has a .name. emit() reads param.name to populate
-        NumericRangeFilterValue.Parameter."""
-        sigma = IntegerParam(
-            name=ParameterName("pSigma"), default=[2],
-        )
-        f = NumericRangeFilter(
-            filter_id="f-sigma",
-            dataset=_DS,
-            column="z_score",
-            minimum=ParameterBound(sigma),
-        )
-        emitted = f.emit()
-        assert emitted.NumericRangeFilter is not None
-        assert emitted.NumericRangeFilter.RangeMinimum is not None
-        assert emitted.NumericRangeFilter.RangeMinimum.Parameter == "pSigma"
-        assert emitted.NumericRangeFilter.RangeMinimum.StaticValue is None
-        assert emitted.NumericRangeFilter.RangeMaximum is None
-
     # L.1.22 — `test_both_minimum_value_and_parameter_rejected` and
     # `test_both_maximum_value_and_parameter_rejected` deleted: each
     # `Bound` variant carries exactly one piece of data (a value OR a
     # parameter), so both-set cases are structurally impossible.
-
-    def test_no_bounds_emits_filter_with_no_range(self):
-        """A NumericRangeFilter with no min/max is unusual but allowed
-        (matches the existing model behaviour where RangeMinimum /
-        RangeMaximum are optional)."""
-        f = NumericRangeFilter(
-            filter_id="f-1", dataset=_DS, column="amount",
-        )
-        emitted = f.emit()
-        assert emitted.NumericRangeFilter is not None
-        assert emitted.NumericRangeFilter.RangeMinimum is None
-        assert emitted.NumericRangeFilter.RangeMaximum is None
 
     def test_satisfies_filter_like_protocol(self):
         f = NumericRangeFilter(
@@ -1699,118 +746,17 @@ class TestTypedNumericRangeFilter:
 
 
 class TestTypedTimeRangeFilter:
-    def test_emits_with_min_max_passthrough(self):
-        f = TimeRangeFilter(
-            filter_id="f-1",
-            dataset=_DS,
-            column="posted_at",
-            minimum={"StaticValue": "2026-01-01T00:00:00"},
-            maximum={"StaticValue": "2026-12-31T23:59:59"},
-            time_granularity="DAY",
-        )
-        emitted = f.emit()
-        assert emitted.TimeRangeFilter is not None
-        assert emitted.TimeRangeFilter.RangeMinimumValue == {"StaticValue": "2026-01-01T00:00:00"}
-        assert emitted.TimeRangeFilter.TimeGranularity == "DAY"
-
     def test_satisfies_filter_like_protocol(self):
         f = TimeRangeFilter(
             filter_id="f-1", dataset=_DS, column="posted_at",
         )
         assert isinstance(f, FilterLike)
 
-class TestFullEmitRoundTripWithTypedFilters:
-    """Replaces the placeholder above; threads through App.emit_analysis
-    to confirm typed Filter wrappers serialize cleanly end-to-end."""
-
-    def test_full_emit_round_trip(self):
-        app = App(name="test", cfg=_TEST_CFG, allow_bare_strings=True)
-        app.add_dataset(_DS_FOO)
-        analysis = app.set_analysis(Analysis(
-            analysis_id_suffix="test", name="Test",
-        ))
-        sigma = analysis.add_parameter(IntegerParam(
-            name=ParameterName("pSigma"), default=[2],
-        ))
-        sheet = analysis.add_sheet(Sheet(
-            sheet_id=SheetId("sheet-test"),
-            name="Test", title="Test", description="test",
-        ))
-        kpi = sheet.layout.row(height=6).add_kpi(
-            width=12, visual_id=VisualId("v-test"), title="Test",
-            values=[Measure.sum(_DS_FOO, "amount", field_id="f-val")],
-                subtitle="t",
-        )
-        fg = analysis.add_filter_group(FilterGroup(
-            filter_group_id=FilterGroupId("fg-sigma"),
-            filters=[
-                NumericRangeFilter(
-                    filter_id="f-sigma",
-                    dataset=_DS_FOO,
-                    column="z_score",
-                    minimum=ParameterBound(sigma),
-                ),
-            ],
-        ))
-        sheet.scope(fg, [kpi])
-        m = app.emit_analysis()
-        j = m.to_aws_json()
-        fg_json = j["Definition"]["FilterGroups"][0]
-        nrf = fg_json["Filters"][0]["NumericRangeFilter"]
-        assert nrf["FilterId"] == "f-sigma"
-        assert nrf["Column"]["ColumnName"] == "z_score"
-        assert nrf["RangeMinimum"]["Parameter"] == "pSigma"
-        # Static values not emitted when unset.
-        assert "StaticValue" not in nrf["RangeMinimum"]
-
-
-    def test_scoping_configuration_round_trips(self):
-        """End-to-end: tree → FilterGroup with scope → App.emit_analysis →
-        models.Analysis.to_aws_json carries the scoping configuration
-        through to the emitted JSON. Carried over from the L.1.5
-        composition tests; lives here now alongside the typed-filter
-        round-trip."""
-        app = App(name="test", cfg=_TEST_CFG, allow_bare_strings=True)
-        app.add_dataset(_DS_FOO)
-        analysis = app.set_analysis(Analysis(
-            analysis_id_suffix="test", name="Test",
-        ))
-        sheet = analysis.add_sheet(Sheet(
-            sheet_id=SheetId("sheet-test"),
-            name="Test", title="Test", description="test",
-        ))
-        kpi = sheet.layout.row(height=6).add_kpi(
-            width=12, visual_id=VisualId("v-test"), title="Test",
-            values=[Measure.sum(_DS_FOO, "amount", field_id="f-val")],
-                subtitle="t",
-        )
-        fg = analysis.add_filter_group(FilterGroup(
-            filter_group_id=FilterGroupId("fg-scoped"),
-            filters=[_category_filter("f-1", _DS_FOO, "col_a")],
-        ))
-        sheet.scope(fg, [kpi])
-        m = app.emit_analysis()
-        j = m.to_aws_json()
-        fgs = j["Definition"]["FilterGroups"]
-        assert len(fgs) == 1
-        assert fgs[0]["FilterGroupId"] == "fg-scoped"
-        configs = fgs[0]["ScopeConfiguration"]["SelectedSheets"]["SheetVisualScopingConfigurations"]
-        assert configs[0]["SheetId"] == "sheet-test"
-        assert configs[0]["Scope"] == "SELECTED_VISUALS"
-        assert configs[0]["VisualIds"] == ["v-test"]
-
-
 # ---------------------------------------------------------------------------
 # L.1.7 — Dataset tree nodes + dependency graph
 # ---------------------------------------------------------------------------
 
 class TestDataset:
-    def test_emit_declaration(self):
-        ds = Dataset(identifier="ds-foo", arn="arn:aws:quicksight:::dataset/foo")
-        decl = ds.emit_declaration()
-        assert decl.Identifier == "ds-foo"
-        assert decl.DataSetArn == "arn:aws:quicksight:::dataset/foo"
-
     def test_dataset_is_hashable(self):
         """Dataset is the dependency-graph KEY — must be hashable so
         visuals/filters' refs can be collected into set[Dataset]."""
@@ -1818,25 +764,6 @@ class TestDataset:
         b = Dataset(identifier="b", arn="arn:b")
         s = {a, b, a}
         assert len(s) == 2
-
-    def test_dim_carries_dataset_ref(self):
-        """Hard-switch confirmation: Dim's dataset is the Dataset object,
-        not the identifier string."""
-        ds = Dataset(identifier="ds-foo", arn="arn:foo")
-        dim = Dim(dataset=ds, field_id="f-1", column="col_a")
-        assert dim.dataset is ds
-        # emit() reads the identifier off the Dataset
-        emitted_dim = dim.emit()
-        assert emitted_dim.CategoricalDimensionField is not None
-        assert emitted_dim.CategoricalDimensionField.Column.DataSetIdentifier == "ds-foo"
-
-    def test_measure_carries_dataset_ref(self):
-        ds = Dataset(identifier="ds-foo", arn="arn:foo")
-        m = Measure.sum(ds, "amount", field_id="f")
-        assert m.dataset is ds
-        emitted_m = m.emit()
-        assert emitted_m.NumericalMeasureField is not None
-        assert emitted_m.NumericalMeasureField.Column.DataSetIdentifier == "ds-foo"
 
     def test_getitem_unknown_column_raises(self):
         """L.1.18 — ``ds["typo"]`` against a contract-registered Dataset
@@ -1926,9 +853,9 @@ class TestAppDatasetDependencies:
         # Dependency comes via the filter group, not the visual.
         assert app.dataset_dependencies() == {_DS_FOO}
 
-    def test_emit_analysis_rejects_unregistered_dataset(self):
+    def test_validate_rejects_unregistered_dataset(self):
         """The load-bearing validation: if a visual or filter references
-        a Dataset that wasn't registered on the App, emit_analysis raises
+        a Dataset that wasn't registered on the App, validate() raises
         with the offending identifier(s)."""
         app = App(name="test", cfg=_TEST_CFG, allow_bare_strings=True)
         # _DS_FOO is NOT registered on this app
@@ -1942,45 +869,7 @@ class TestAppDatasetDependencies:
                 subtitle="t",
         )
         with pytest.raises(ValueError, match="references unregistered datasets"):
-            app.emit_analysis()
-
-    def test_emit_analysis_includes_only_referenced_datasets(self):
-        """Selective-by-construction: registered-but-unreferenced datasets
-        DO NOT show up in the emitted DataSetIdentifierDeclarations.
-        Catches dataset bloat at the deploy boundary."""
-        app = App(name="test", cfg=_TEST_CFG, allow_bare_strings=True)
-        app.add_dataset(_DS_FOO)
-        app.add_dataset(_DS_ANOMALIES)  # registered but unreferenced
-        analysis = app.set_analysis(Analysis(analysis_id_suffix="t", name="T"))
-        sheet = analysis.add_sheet(Sheet(
-            sheet_id=SheetId("s"), name="S", title="S", description="test",
-        ))
-        sheet.layout.row(height=6).add_kpi(
-            width=12, visual_id=VisualId("v"), title="V",
-            values=[Measure.sum(_DS_FOO, "amount", field_id="f-val")],
-                subtitle="t",
-        )
-        m = app.emit_analysis()
-        decls = m.Definition.DataSetIdentifierDeclarations
-        identifiers = {d.Identifier for d in decls}
-        assert identifiers == {"ds-foo"}
-        assert "ds-anomalies" not in identifiers
-
-    def test_emit_dashboard_validates_references_too(self):
-        app = App(name="test", cfg=_TEST_CFG, allow_bare_strings=True)
-        analysis = app.set_analysis(Analysis(analysis_id_suffix="t", name="T"))
-        sheet = analysis.add_sheet(Sheet(
-            sheet_id=SheetId("s"), name="S", title="S", description="test",
-        ))
-        sheet.layout.row(height=6).add_kpi(
-            width=12, visual_id=VisualId("v"), title="V",
-            values=[Measure.sum(_DS_FOO, "amount", field_id="f-val")],
-                subtitle="t",
-        )
-        app.create_dashboard(dashboard_id_suffix="d", name="D")
-        with pytest.raises(ValueError, match="references unregistered datasets"):
-            app.emit_dashboard()
-
+            app.validate()
 
 class TestValidateFilterParamSettability:
     """Catches the v8.3.3 Daily Statement bug class at App.emit time:
@@ -2031,28 +920,20 @@ class TestValidateFilterParamSettability:
         sheet renders blank."""
         app = self._scaffold(with_default=False, with_control=False)
         with pytest.raises(ValueError, match="unsettable"):
-            app.emit_analysis()
+            app.validate()
 
     def test_param_with_control_passes(self):
         """A dropdown — even just a static-values one — gives the
         analyst a way to pick. Settable, no error."""
         app = self._scaffold(with_default=False, with_control=True)
-        app.emit_analysis()  # doesn't raise
+        app.validate()  # doesn't raise
 
     def test_param_with_default_only_passes(self):
         """Drill-target params (set programmatically by Drill writes,
         no UI control) lean on a default sentinel — that's a valid
         settable shape."""
         app = self._scaffold(with_default=True, with_control=False)
-        app.emit_analysis()  # doesn't raise
-
-    def test_dashboard_emit_validates_too(self):
-        """The validator runs on emit_dashboard the same way."""
-        app = self._scaffold(with_default=False, with_control=False)
-        app.create_dashboard(dashboard_id_suffix="d", name="D")
-        with pytest.raises(ValueError, match="unsettable"):
-            app.emit_dashboard()
-
+        app.validate()  # doesn't raise
 
 # ---------------------------------------------------------------------------
 # L.1.8 — CalcField tree nodes
@@ -2073,74 +954,10 @@ def _make_is_anchor() -> CalcField:
 
 
 class TestCalcField:
-    def test_emit_returns_dict(self):
-        cf = CalcField(
-            name="my_calc", dataset=_DS_FOO, expression="1 + 1",
-        )
-        d = cf.emit()
-        assert d == {
-            "Name": "my_calc",
-            "DataSetIdentifier": "ds-foo",
-            "Expression": "1 + 1",
-        }
-
     def test_calc_field_is_hashable(self):
         a = CalcField(name="a", dataset=_DS_FOO, expression="1")
         b = CalcField(name="b", dataset=_DS_FOO, expression="2")
         assert len({a, b, a}) == 2
-
-
-class TestColumnRefAcceptsCalcField:
-    """Dim / Measure / CategoryFilter / NumericRangeFilter / TimeRangeFilter
-    accept either a string column name OR a CalcField object ref. The
-    CalcField ref carries the calc-field identity through the type
-    checker — typos at the wiring site become compile-time errors
-    (or test-time failures via the unregistered-calc-field check)."""
-
-    def test_dim_accepts_calc_field(self):
-        cf = _make_is_anchor()
-        dim = Dim(dataset=_DS_FOO, field_id="f-1", column=cf)
-        # emit reads name off the calc field
-        emitted = dim.emit()
-        assert emitted.CategoricalDimensionField is not None
-        assert emitted.CategoricalDimensionField.Column.ColumnName == "is_anchor_edge"
-        assert dim.calc_field() is cf
-
-    def test_dim_accepts_bare_string(self):
-        dim = Dim(dataset=_DS_FOO, field_id="f-1", column="real_column")
-        emitted = dim.emit()
-        assert emitted.CategoricalDimensionField is not None
-        assert emitted.CategoricalDimensionField.Column.ColumnName == "real_column"
-        assert dim.calc_field() is None
-
-    def test_measure_accepts_calc_field(self):
-        # BL.1 — kind="count" now emits NumericalMeasureField(SUM)
-        # over a row-one CalcField (literal 1 per row) regardless of
-        # the source column. The original column ref (CalcField or
-        # real column) is still preserved on the Measure (via
-        # ``m.calc_field()``) for the dependency walk — the CalcField
-        # ref is what registers the underlying dataset as a dep — but
-        # the emitted wire uses the literal-1 CalcField, not the
-        # source column.
-        from recon_gen.common.tree.fields import row_one_calc_name
-        cf = _make_is_anchor()
-        m = Measure.count(_DS_FOO, cf, field_id="f-1")
-        emitted = m.emit()
-        assert emitted.CategoricalMeasureField is None
-        nmf = emitted.NumericalMeasureField
-        assert nmf is not None
-        assert nmf.Column.ColumnName == row_one_calc_name(_DS_FOO)
-        assert m.calc_field() is cf  # source ref preserved on Measure
-
-    def test_category_filter_accepts_calc_field(self):
-        cf = _make_is_anchor()
-        f = CategoryFilter.with_values(
-            filter_id="f-1", dataset=_DS_FOO, column=cf, values=["yes"],
-        )
-        emitted = f.emit()
-        assert emitted.CategoryFilter is not None
-        assert emitted.CategoryFilter.Column.ColumnName == "is_anchor_edge"
-        assert f.calc_field() is cf
 
 
 class TestAnalysisAddCalcField:
@@ -2160,25 +977,6 @@ class TestAnalysisAddCalcField:
             analysis.add_calc_field(CalcField(
                 name="dup", dataset=_DS_FOO, expression="2",
             ))
-
-    def test_emit_definition_carries_calc_fields(self):
-        analysis = Analysis(analysis_id_suffix="t", name="T")
-        analysis.add_calc_field(CalcField(
-            name="cf-1", dataset=_DS_FOO, expression="x",
-        ))
-        analysis.add_calc_field(CalcField(
-            name="cf-2", dataset=_DS_FOO, expression="y",
-        ))
-        defn = analysis.emit_definition(datasets=[_DS_FOO])
-        assert defn.CalculatedFields is not None
-        assert len(defn.CalculatedFields) == 2
-        assert defn.CalculatedFields[0]["Name"] == "cf-1"
-
-    def test_no_calc_fields_emits_none(self):
-        analysis = Analysis(analysis_id_suffix="t", name="T")
-        defn = analysis.emit_definition(datasets=[])
-        assert defn.CalculatedFields is None
-
 
 class TestAppCalcFieldDependencies:
     """The L.1.8 dependency-graph extension: walk the tree to find
@@ -2227,9 +1025,9 @@ class TestAppCalcFieldDependencies:
         sheet.scope(analysis.filter_groups[-1], [kpi])
         assert analysis.calc_fields_referenced() == {cf}
 
-    def test_emit_analysis_rejects_unregistered_calc_field(self):
+    def test_validate_rejects_unregistered_calc_field(self):
         """The wrong-calc-field bug class — passing a CalcField that
-        isn't registered on the Analysis. emit_analysis raises with
+        isn't registered on the Analysis. validate() raises with
         the offending name."""
         cf = _make_is_anchor()  # NOT registered on the analysis
         app = App(name="t", cfg=_TEST_CFG, allow_bare_strings=True)
@@ -2247,7 +1045,7 @@ class TestAppCalcFieldDependencies:
                 subtitle="t",
         )
         with pytest.raises(ValueError, match="references unregistered calc fields"):
-            app.emit_analysis()
+            app.validate()
 
     def test_calc_field_dataset_in_dependency_graph(self):
         """A registered CalcField's Dataset participates in the App's
@@ -2301,7 +1099,7 @@ class TestAutoVisualIds:
         )
         # visual_id defaults to AUTO until App.resolve_auto_ids() fills it
         assert kpi.visual_id is AUTO
-        app.emit_analysis()
+        app.validate()
         # Now resolved
         assert kpi.visual_id == auto_id("v-kpi-s0-0")
 
@@ -2318,7 +1116,7 @@ class TestAutoVisualIds:
             title="Special",
                 subtitle="t",
         )
-        app.emit_analysis()
+        app.validate()
         assert kpi.visual_id == "v-special"
 
     def test_mixed_explicit_and_auto(self):
@@ -2335,7 +1133,7 @@ class TestAutoVisualIds:
         kpi_a = row.add_kpi(width=12, title="A", subtitle="t")
         kpi_b = row.add_kpi(width=12, title="B", visual_id=VisualId("v-special"), subtitle="t")
         kpi_c = row.add_kpi(width=12, title="C", subtitle="t")
-        app.emit_analysis()
+        app.validate()
         assert kpi_a.visual_id == auto_id("v-kpi-s0-0")
         assert kpi_b.visual_id == "v-special"
         assert kpi_c.visual_id == auto_id("v-kpi-s0-2")
@@ -2358,7 +1156,7 @@ class TestAutoVisualIds:
             weight=Measure.sum(_DS_FOO, "amount"),
                 subtitle="t",
         )
-        app.emit_analysis()
+        app.validate()
         assert kpi.visual_id == auto_id("v-kpi-s0-0")
         assert table.visual_id == auto_id("v-table-s0-1")
         assert bar.visual_id == auto_id("v-bar-s0-2")
@@ -2378,7 +1176,7 @@ class TestAutoVisualIds:
         ))
         kpi_a = sheet_a.layout.row(height=6).add_kpi(width=12, title="A0", subtitle="t")
         kpi_b = sheet_b.layout.row(height=6).add_kpi(width=12, title="B0", subtitle="t")
-        app.emit_analysis()
+        app.validate()
         assert kpi_a.visual_id == auto_id("v-kpi-s0-0")
         assert kpi_b.visual_id == auto_id("v-kpi-s1-0")
 
@@ -2397,7 +1195,7 @@ class TestAutoFilterGroupIds:
         ))
         sheet.scope(fg, [kpi])
         assert fg.filter_group_id is AUTO
-        app.emit_analysis()
+        app.validate()
         assert fg.filter_group_id == auto_id("fg-0")
 
     def test_explicit_filter_group_id_preserved(self):
@@ -2413,7 +1211,7 @@ class TestAutoFilterGroupIds:
             filters=[_category_filter("f-1", _DS_FOO, "col")],
         ))
         sheet.scope(fg, [kpi])
-        app.emit_analysis()
+        app.validate()
         assert fg.filter_group_id == "fg-special"
 
 
@@ -2536,16 +1334,8 @@ class TestTreeQueryHelpers:
 # ---------------------------------------------------------------------------
 
 from recon_gen.common.tree import (
-    FilterCrossSheet,
-    FilterDateTimePicker,
-    FilterDropdown,
-    FilterSlider,
     LinkedValues,
-    ParameterDateTimePicker,
-    ParameterDropdown,
-    ParameterSlider,
     ParameterTextField,
-    StaticValues,
 )
 
 
@@ -2577,45 +1367,6 @@ class TestLinkedValues:
 
 
 class TestParameterDropdown:
-    def test_emits_with_static_values(self):
-        sigma = IntegerParam(name=ParameterName("pSigma"), default=[2])
-        ctrl = ParameterDropdown(
-            parameter=sigma,
-            title="σ Threshold",
-            type="SINGLE_SELECT",
-            selectable_values=StaticValues(values=["1", "2", "3", "4"]),
-            control_id="pc-test",
-        )
-        emitted = ctrl.emit()
-        assert emitted.Dropdown is not None
-        assert emitted.Dropdown.SourceParameterName == "pSigma"
-        assert emitted.Dropdown.Title == "σ Threshold"
-        assert emitted.Dropdown.Type == "SINGLE_SELECT"
-        assert emitted.Dropdown.SelectableValues == {"Values": ["1", "2", "3", "4"]}
-
-    def test_emits_with_linked_values(self):
-        anchor = StringParam(name=ParameterName("pAnchor"))
-        ctrl = ParameterDropdown(
-            parameter=anchor,
-            title="Anchor account",
-            selectable_values=LinkedValues.from_string(dataset=_DS_FOO, column_name="display"),
-            hidden_select_all=True,
-            control_id="pc-anchor",
-        )
-        emitted = ctrl.emit()
-        assert emitted.Dropdown is not None
-        sv = emitted.Dropdown.SelectableValues
-        assert sv == {
-            "LinkToDataSetColumn": {
-                "DataSetIdentifier": "ds-foo",
-                "ColumnName": "display",
-            },
-        }
-        # SelectAll suppression encodes as the documented dict shape
-        assert emitted.Dropdown.DisplayOptions == {
-            "SelectAllOptions": {"Visibility": "HIDDEN"},
-        }
-
     def test_linked_values_dataset_in_dependency_graph(self):
         """A ParameterDropdown's LinkedValues dataset must be registered
         on the App — same enforcement the visuals get."""
@@ -2632,54 +1383,10 @@ class TestParameterDropdown:
             selectable_values=LinkedValues.from_string(dataset=_DS_FOO, column_name="d"),
         )
         with pytest.raises(ValueError, match="references unregistered datasets"):
-            app.emit_analysis()
-
-
-class TestParameterSlider:
-    def test_emits(self):
-        sigma = IntegerParam(name=ParameterName("pSigma"), default=[2])
-        ctrl = ParameterSlider(
-            parameter=sigma,
-            title="σ",
-            minimum_value=1, maximum_value=4, step_size=1,
-            control_id="pc-test",
-        )
-        emitted = ctrl.emit()
-        assert emitted.Slider is not None
-        assert emitted.Slider.SourceParameterName == "pSigma"
-        assert emitted.Slider.MinimumValue == 1
-        assert emitted.Slider.MaximumValue == 4
-        assert emitted.Slider.StepSize == 1
-
-
-class TestParameterDateTimePicker:
-    def test_emits(self):
-        date_param = DateTimeParam(
-            name=ParameterName("pDate"),
-            default=DateTimeDefaultValues(StaticValues=["2030-01-01"]),
-        )
-        ctrl = ParameterDateTimePicker(
-            parameter=date_param,
-            title="Date",
-            control_id="pc-date",
-        )
-        emitted = ctrl.emit()
-        assert emitted.DateTimePicker is not None
-        assert emitted.DateTimePicker.SourceParameterName == "pDate"
-        assert emitted.DateTimePicker.Title == "Date"
+            app.validate()
 
 
 class TestParameterTextField:
-    def test_emits_when_bound_to_single_valued_param(self):
-        p = StringParam(name=ParameterName("pSearch"), multi_valued=False)
-        ctrl = ParameterTextField(
-            parameter=p, title="Search", control_id="pc-test",
-        )
-        emitted = ctrl.emit()
-        assert emitted.TextField is not None
-        assert emitted.TextField.SourceParameterName == "pSearch"
-        assert emitted.TextField.Title == "Search"
-
     def test_rejects_multi_valued_string_param(self):
         """Y.1.m: text-field bound to multi_valued=True is the broken
         L2FT cascade combination — silently reverts the parameter to
@@ -2696,20 +1403,6 @@ class TestParameterTextField:
 
 
 class TestFilterDropdown:
-    def test_emits_with_filter_id_resolved(self):
-        f = CategoryFilter.with_values(
-            filter_id="filter-anchor", dataset=_DS_FOO,
-            column="col", values=["yes"],
-        )
-        ctrl = FilterDropdown(
-            filter=f, title="Anchor",
-            control_id="fc-anchor",
-        )
-        emitted = ctrl.emit()
-        assert emitted.Dropdown is not None
-        assert emitted.Dropdown.SourceFilterId == "filter-anchor"
-        assert emitted.Dropdown.Title == "Anchor"
-
     def test_emits_with_auto_filter_id(self):
         """Filter wrapper's auto-ID resolves to a string — the dropdown
         reads it via the object ref. Tests the L.1.8.5 + L.1.9
@@ -2727,58 +1420,13 @@ class TestFilterDropdown:
         fg = analysis.add_filter_group(FilterGroup(filters=[f]))
         sheet.scope(fg, [kpi])
         sheet.add_filter_dropdown(filter=f, title="A")
-        app.emit_analysis()
+        app.validate()
         # Auto-IDs resolved
         assert f.filter_id == auto_id("f-category-fg0-0")
         # The dropdown picked it up
         ctrl_emitted = sheet.filter_controls[0].emit()
         assert ctrl_emitted.Dropdown is not None
         assert ctrl_emitted.Dropdown.SourceFilterId == auto_id("f-category-fg0-0")
-
-
-class TestFilterSlider:
-    def test_emits(self):
-        sigma_param = IntegerParam(name=ParameterName("pSigma"), default=[2])
-        f = NumericRangeFilter(
-            filter_id="filter-sigma",
-            dataset=_DS_FOO, column="z_score",
-            minimum=ParameterBound(sigma_param),
-        )
-        ctrl = FilterSlider(
-            filter=f, title="σ",
-            minimum_value=1, maximum_value=4, step_size=1,
-            control_id="fc-sigma",
-        )
-        emitted = ctrl.emit()
-        assert emitted.Slider is not None
-        assert emitted.Slider.SourceFilterId == "filter-sigma"
-
-
-class TestFilterDateTimePicker:
-    def test_emits(self):
-        f = TimeRangeFilter(
-            filter_id="filter-date",
-            dataset=_DS_FOO, column="posted_at",
-        )
-        ctrl = FilterDateTimePicker(
-            filter=f, title="Date Range",
-            control_id="fc-date",
-        )
-        emitted = ctrl.emit()
-        assert emitted.DateTimePicker is not None
-        assert emitted.DateTimePicker.SourceFilterId == "filter-date"
-
-
-class TestFilterCrossSheet:
-    def test_emits_with_no_title(self):
-        f = CategoryFilter.with_values(
-            filter_id="filter-x", dataset=_DS_FOO,
-            column="col", values=["yes"],
-        )
-        ctrl = FilterCrossSheet(filter=f, control_id="fc-x")
-        emitted = ctrl.emit()
-        assert emitted.CrossSheet is not None
-        assert emitted.CrossSheet.SourceFilterId == "filter-x"
 
 
 class TestControlAutoIds:
@@ -2796,7 +1444,7 @@ class TestControlAutoIds:
             minimum_value=1, maximum_value=4, step_size=1,
         )
         assert ctrl.control_id is AUTO
-        app.emit_analysis()
+        app.validate()
         assert ctrl.control_id == auto_id("pc-slider-s0-0")
 
     def test_filter_control_auto_id(self):
@@ -2815,37 +1463,8 @@ class TestControlAutoIds:
         sheet.scope(fg, [kpi])
         ctrl = sheet.add_filter_dropdown(filter=f, title="X")
         assert ctrl.control_id is AUTO
-        app.emit_analysis()
+        app.validate()
         assert ctrl.control_id == auto_id("fc-dropdown-s0-0")
-
-
-class TestSheetEmitsFilterControls:
-    """SheetDefinition.FilterControls populated from sheet.filter_controls."""
-
-    def test_filter_controls_appear_in_emitted_sheet(self):
-        f = CategoryFilter.with_values(
-            filter_id="filter-x", dataset=_DS_FOO,
-            column="col", values=["yes"],
-        )
-        app = App(name="t", cfg=_TEST_CFG, allow_bare_strings=True)
-        app.add_dataset(_DS_FOO)
-        analysis = app.set_analysis(Analysis(analysis_id_suffix="t", name="T"))
-        sheet = analysis.add_sheet(Sheet(
-            sheet_id=SheetId("s"), name="S", title="S", description="test",
-        ))
-        kpi = sheet.layout.row(height=6).add_kpi(width=12, title="K", subtitle="t")
-        fg = analysis.add_filter_group(FilterGroup(filters=[f]))
-        sheet.scope(fg, [kpi])
-        sheet.add_filter_dropdown(filter=f, title="X", control_id="fc-x",
-        )
-        m = app.emit_analysis()
-        assert m.Definition.Sheets is not None
-        emitted_sheet = m.Definition.Sheets[0]
-        assert emitted_sheet.FilterControls is not None
-        assert len(emitted_sheet.FilterControls) == 1
-        ctrl_emitted = emitted_sheet.FilterControls[0]
-        assert ctrl_emitted.Dropdown is not None
-        assert ctrl_emitted.Dropdown.FilterControlId == "fc-x"
 
 
 # ---------------------------------------------------------------------------
@@ -2898,31 +1517,11 @@ class TestDrillEmit:
         )
         return app, src_sheet, dest_sheet, table
 
-    def test_drill_emits_with_target_sheet_resolved(self):
-        app, _, _dest_sheet, _table = self._setup()
-        m = app.emit_analysis()
-        # Find the source sheet in the emitted JSON
-        assert m.Definition.Sheets is not None
-        emitted_src = m.Definition.Sheets[0]
-        assert emitted_src.Visuals is not None
-        emitted_table = emitted_src.Visuals[0].TableVisual
-        assert emitted_table is not None
-        assert emitted_table.Actions is not None
-        actions = emitted_table.Actions
-        assert len(actions) == 1
-        action = actions[0]
-        assert action.Name == "Walk to anchor"
-        assert action.Trigger == "DATA_POINT_MENU"
-        # NavigationOperation should have the dest sheet's id
-        nav = action.ActionOperations[0].NavigationOperation
-        assert nav is not None
-        assert nav.LocalNavigationConfiguration.TargetSheetId == "s-dest"
-
     def test_drill_action_id_auto_assigned(self):
         app, _, _, table = self._setup()
         action = table.actions[0]
         assert action.action_id is AUTO
-        app.emit_analysis()
+        app.validate()
         # auto-IDed: act-s{sheet_idx}-v{visual_idx}-{action_idx}
         assert action.action_id == auto_id("act-s0-v0-0")
 
@@ -2955,7 +1554,7 @@ class TestDrillEmit:
                 subtitle="t",
         )
         with pytest.raises(ValueError, match="drill actions targeting sheets"):
-            app.emit_analysis()
+            app.validate()
 
     def test_drill_source_calc_field_without_shape_raises(self):
         """L.1.18 — _resolve_drill_source raises TypeError when a Drill
@@ -2991,7 +1590,7 @@ class TestDrillEmit:
                 subtitle="t",
         )
         with pytest.raises(TypeError, match="has no ``shape`` tag"):
-            app.emit_analysis()
+            app.validate()
 
     def test_explicit_action_id_preserved(self):
         app = App(name="t", cfg=_TEST_CFG, allow_bare_strings=True)
@@ -3013,7 +1612,7 @@ class TestDrillEmit:
             )],
                 subtitle="t",
         )
-        app.emit_analysis()
+        app.validate()
         assert table.actions[0].action_id == "my-explicit-id"
 
 
@@ -3062,25 +1661,19 @@ class TestUnvalidatedColumnsRaiseByDefault:
     def test_default_app_raises_on_bare_string_column(self):
         app = self._build_app_with_bare_string_dim()  # default allow=False
         with pytest.raises(ValueError, match="unvalidated column refs"):
-            app.emit_analysis()
-
-    def test_default_app_raises_on_bare_string_column_in_dashboard(self):
-        app = self._build_app_with_bare_string_dim()
-        app.create_dashboard(dashboard_id_suffix="d", name="D")
-        with pytest.raises(ValueError, match="unvalidated column refs"):
-            app.emit_dashboard()
+            app.validate()
 
     def test_explicit_allow_bypasses_check(self):
         """Tests + datasets without a contract opt into the bare-string
         form via ``allow_bare_strings=True``."""
         app = self._build_app_with_bare_string_dim(allow_bare_strings=True)
         # Should not raise.
-        app.emit_analysis()
+        app.validate()
 
     def test_error_message_lists_offending_column(self):
         app = self._build_app_with_bare_string_dim()
         with pytest.raises(ValueError) as exc_info:
-            app.emit_analysis()
+            app.validate()
         message = str(exc_info.value)
         # The bad column name + the visual id appear in the message
         # so the developer can fix at the right call site.
@@ -3114,7 +1707,7 @@ class TestUnvalidatedColumnsRaiseByDefault:
         # Flip to default-strict for the assertion run.
         app.allow_bare_strings = False
         with pytest.raises(ValueError, match="unvalidated column refs"):
-            app.emit_analysis()
+            app.validate()
 
     def test_unvalidated_column_ref_raises(self):
         """``ds["col"]`` on a dataset without a registered DatasetContract
@@ -3138,7 +1731,7 @@ class TestUnvalidatedColumnsRaiseByDefault:
                 subtitle="t",
         )
         with pytest.raises(ValueError) as exc_info:
-            app.emit_analysis()
+            app.validate()
         message = str(exc_info.value)
         assert "no registered DatasetContract" in message
         assert _DS_FOO.identifier in message
@@ -3184,7 +1777,7 @@ class TestUnvalidatedColumnsRaiseByDefault:
         # Drop the bare-string KPI value so only the filter path is bad.
         kpi.values = [_DS_FOO["amount"].sum()]
         with pytest.raises(ValueError) as exc_info:
-            app.emit_analysis()
+            app.validate()
         message = str(exc_info.value)
         assert "no registered DatasetContract" in message
         # Both unvalidated columns surface (the KPI value AND the
@@ -3210,4 +1803,4 @@ class TestUnvalidatedColumnsRaiseByDefault:
                 subtitle="t",
         )
         # Should not raise.
-        app.emit_analysis()
+        app.validate()

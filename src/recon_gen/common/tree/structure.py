@@ -1765,6 +1765,25 @@ class App:
                 f"aren't registered on the analysis: {bad}"
             )
 
+    def _validate_drill_sources(self) -> None:
+        """Resolve every Drill write source's K.2 shape, raising if a
+        calc-field source lacks a ``shape`` tag (or a real column's shape
+        can't be derived from the contract).
+
+        The drill-source-shape invariant used to live only inside the QS
+        ``Drill.emit()`` path; post-DW the emitter is gone, so the walk
+        lives here where it gates EVERY renderer. Runs after
+        ``resolve_auto_ids`` (which validate() calls first) so the source
+        leaves' field_ids are assigned."""
+        if self.analysis is None:
+            return
+        for sheet in self.analysis.sheets:
+            for visual in sheet.visuals:
+                actions: list[Action] = getattr(visual, "actions", None) or []
+                for action in actions:
+                    if isinstance(action, Drill):
+                        action.resolve_source_shapes()
+
     def _validate_no_bare_string_columns(self) -> None:
         """Raise if any tree node uses an unvalidated column ref.
 
@@ -1919,6 +1938,7 @@ class App:
         self._validate_parameter_references()
         self._validate_filter_param_settability()
         self._validate_drill_destinations()
+        self._validate_drill_sources()
         # Phase DB.2 — App2 completeness gate. Walk every Visual + assert
         # each dataclass field has a registry entry. Catches the DA-shape
         # gap class (tree adds a field, emit() lands it in QS JSON, App2
