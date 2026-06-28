@@ -61,7 +61,6 @@ from recon_gen.common.env_keys import (
     RECON_GEN_ENV_LOG_DIR,
     RECON_GEN_DEMO_DATABASE_URL_OR,
     RECON_GEN_DEMO_DATABASE_URL_PG,
-    RECON_GEN_QS_CONFIG,
     RECON_GEN_FUZZ_SEED,
     RECON_GEN_LAYER,
     RECON_GEN_ORACLE_IMAGE,
@@ -199,10 +198,11 @@ _RUN_ID_PATTERN: Final = re.compile(r"^\d{8}T\d{6}Z-\w+(?:-dirty)?$")
 # tests/unit/test_runner_skeleton.py::test_layer_deps_match_audit (c.14).
 #
 # Probe kinds (matched to _probe_* function names):
-#   "aws"             — AWS creds present + not expired (sts:GetCallerIdentity).
 #   "docker"          — Docker daemon reachable (`docker ps`).
 # CB.11.a.2 (2026-06-01) — `aws_rds_running` probe deleted. RDS Aurora is
 # gone post-CB.12; Docker-on-self-hosted-runner is the only DB substrate.
+# DW.11 (2026-06-28) — the `aws` creds probe deleted with the whole AWS
+# footprint (DW.0.5 = fully-local). Docker is the only probe left.
 #
 # DB connectivity is probed via cfg-loaded URLs and lands when Y.2.gate.h.2
 # (cfg-driven DB strings) wires up. For now, layers that need DB rely on the
@@ -252,11 +252,9 @@ def _run_probe_subprocess(
     docker ps in <1s. On TimeoutExpired we synthesize a returncode=124 + empty
     stdout/stderr the caller can branch on.
 
-    ``env_overrides`` (Y.2.gate.h+i.0): caller-supplied env additions merged
-    on top of `os.environ` for this subprocess only. Used by `_probe_aws` to
-    inject `AWS_PROFILE` from cfg before the SSO-default check fails — keeps
-    the long-lived-IAM-keys path working even when the operator's ambient
-    SSO token is expired.
+    ``env_overrides``: caller-supplied env additions merged on top of
+    `os.environ` for this subprocess only. (General-purpose seam; the
+    only historical caller was the now-deleted `_probe_aws`.)
     """
     env = {**os.environ, **env_overrides} if env_overrides else None
     try:
@@ -272,60 +270,6 @@ def _run_probe_subprocess(
         return subprocess.CompletedProcess(args=cmd, returncode=124, stdout="", stderr="probe timed out")
     except FileNotFoundError:
         return subprocess.CompletedProcess(args=cmd, returncode=127, stdout="", stderr=f"{cmd[0]}: not found")
-
-
-def _probe_aws() -> ProbeFailure | None:
-    """Y.2.gate.c.8 + b.14.4 — check AWS creds via ``aws sts get-caller-identity``.
-
-    Returns ``None`` if creds work. On expired/missing/unknown failure, returns
-    a ``ProbeFailure`` whose message tells the operator exactly what to type
-    (`! aws sso login`); we **never** auto-invoke the SSO browser flow.
-
-    Y.2.gate.h+i.0 — honors ``cfg.auth.aws.profile`` if discoverable. The
-    runner injects `AWS_PROFILE` into subprocess env_overrides at variant
-    setup, but the probe runs BEFORE that — so without this lookup, a probe
-    running on an expired SSO ambient session would fail even when the cfg
-    points at a long-lived IAM-keys profile that would have worked. Uses
-    the default-candidate cfg-discovery list.
-    """
-    env_overrides: dict[str, str] | None = None
-    cfg_path = _resolve_seed_config(_DEFAULT_RUNNER_CFG_CANDIDATES)
-    if cfg_path is not None:
-        try:
-            from recon_gen.common.config import load_config  # noqa: PLC0415 — lazy
-            cfg = load_config(str(cfg_path))
-        except Exception:  # noqa: BLE001 — bad cfg surfaces elsewhere; here we just want a yes/no
-            cfg = None
-        # DE.2 commit A — cfg.auth is now always-present (default-factory).
-        # The auth-None check that lived here pre-sweep is unnecessary.
-        if cfg is not None and cfg.auth.aws.profile is not None:
-            env_overrides = {"AWS_PROFILE": cfg.auth.aws.profile}
-    result = _run_probe_subprocess(
-        ["aws", "sts", "get-caller-identity"], env_overrides=env_overrides,
-    )
-    if result.returncode == 0:
-        return None
-
-    stderr_lower = result.stderr.lower()
-    if "expiredtoken" in stderr_lower or "tokenexpired" in stderr_lower:
-        return ProbeFailure(
-            kind="aws_creds_expired",
-            message="AWS creds expired — type '! aws sso login' yourself, then re-invoke",
-        )
-    if "unable to locate credentials" in stderr_lower or "no credentials" in stderr_lower:
-        return ProbeFailure(
-            kind="aws_no_creds",
-            message="No AWS credentials — set AWS_PROFILE or run 'aws configure', then re-invoke",
-        )
-    if result.returncode == 127:
-        return ProbeFailure(
-            kind="aws_cli_missing",
-            message="aws CLI not found — install awscli, then re-invoke",
-        )
-    return ProbeFailure(
-        kind="aws_check_failed",
-        message=f"AWS check failed (rc={result.returncode}): {result.stderr.strip() or '(no stderr)'}",
-    )
 
 
 _DOCKER_DAEMON_PROBE_BACKOFFS_SECONDS: Final[tuple[float, ...]] = (5.0, 10.0, 20.0)
@@ -415,7 +359,6 @@ def _probe_docker() -> ProbeFailure | None:
 
 _ProbeFunc = Callable[[], "ProbeFailure | None"]
 _PROBE_FUNCTIONS: Final[dict[str, _ProbeFunc]] = {
-    "aws": _probe_aws,
     "docker": _probe_docker,
 }
 
@@ -432,7 +375,6 @@ class RunOptions:
       cmd_up_to entry: env-override > random-per-invocation; persists across xdist
       workers in this run via env passthrough — c.6.xdist-safety lock).
     - ``trace_all`` — Playwright capture every test (env var passthrough; consumed by c.11).
-    - ``allow_dirty_deploy`` — bypass tracked-changes refusal on layer 4+ (active now per b.10).
     - ``coverage`` — emit per-(variant, layer) ``.coverage.<variant>.<layer>`` data
       files (Y.2.gate.k.1.coverage). When set, every pytest layer (unit/db/app2/
       api/browser) runs with ``--cov=recon_gen --cov-report=`` and
@@ -464,7 +406,6 @@ class RunOptions:
     skip_cheap: bool = False
     keep_on_failure: bool = False
     trace_all: bool = False
-    allow_dirty_deploy: bool = False
     coverage: bool = False
 
 
@@ -1172,18 +1113,6 @@ def dispatch_layer(
     )
 
 
-def _is_aws_touching_layer(layer: str) -> bool:
-    """Y.2.gate.b.10 — layers that touch AWS/external state. The
-    dirty-state refusal applies only to those.
-
-    DW.5.2 — QuickSight removed, so ``AWS_TOUCHING_LAYERS`` is empty and
-    this always returns False; the whole chain is local + idempotent.
-    Kept as the seam (rather than inlining ``False``) so re-adding an
-    external-state tier is a one-line change to the constant.
-    """
-    return layer in AWS_TOUCHING_LAYERS
-
-
 # Y.2.gate.c.3 — drift threshold. ±50% triggers a ⚠ marker. Spec'd in audit
 # §7.9 LOCKED 2026-05-07 — generous default; tightens as Phase Y / X.2 sweeps
 # settle baselines (Y.2.gate.j.9: "first run = baseline; ratchet via timing-diff").
@@ -1474,14 +1403,6 @@ def is_layer_cached_green(layer: str, *, variant: str = "default") -> bool:
 # `app2` (b.3.impl.layer) reads the variant DB via the App2 fetcher
 # (`make_tree_db_fetcher`), so it lives here.
 DB_TOUCHING_LAYERS: Final = ("db", "app2", "app2_browser")
-
-# DW.5.2 — QuickSight removed, so NO layer needs an AWS-reachable
-# datasource anymore. The whole chain runs against the local Docker
-# container; ``app2_browser`` is the local-Docker browser terminal.
-# Empty by design (not deleted) — re-adding an external-state tier is a
-# one-line change here. Drives ``_is_aws_touching_layer`` (always False
-# now) + the deploy/qs_user_arn skips downstream.
-AWS_TOUCHING_LAYERS: Final[tuple[str, ...]] = ()
 
 # Phase DC.3 — layers whose subprocess serves HTTPS (App2 uvicorn). The
 # runner auto-mints + renews certs via ``ensure_dev_env`` before
@@ -1973,19 +1894,12 @@ def _redact_password(url: str) -> str:
     import re  # noqa: PLC0415 — lazy
     return re.sub(r"(://[^:]+:)[^@]+(@)", r"\1***\2", url)
 
-# CB.11.b — fixed host port for the local PG container. Matches the
-# operator's hotchkiss.io:5433 forward target, so QS data sources
-# pointing at hotchkiss.io:5433 land here. Single PG cell at a time —
-# parallel PG cells collide on this port until CB.11.c adds port-pool
-# support (or sequentializes qs-touching layers per-dialect).
+# CB.11.b — fixed host port for the local PG container. Single PG cell at
+# a time — parallel PG cells collide on this port. (Pre-DW.11 this also
+# matched the operator's hotchkiss.io:5433 QS-egress forward; QuickSight
+# is gone, so the port is now purely the local-container bind target.)
 _LOCAL_PG_HOST_PORT: Final = 5433
 _LOCAL_ORACLE_HOST_PORT: Final = 1522
-
-# CB.11.b — DDNS host the operator's port-forwards terminate on. QS in
-# us-east-1 reaches this Docker container via
-# `hotchkiss.io:<_LOCAL_*_HOST_PORT>` → home firewall → dev machine LAN.
-# Memory: [[project_cb10_qs_to_docker_pg_constraints]].
-_QS_FORWARD_HOST: Final = "hotchkiss.io"
 
 
 _LEGACY_VARIANT_HINTS: Final[dict[str, str]] = {
@@ -2284,87 +2198,6 @@ def _start_thin_container(
     raise ValueError(
         f"_start_thin_container: unhandled dialect={peek_cfg.db.dialect!r}"
     )
-
-
-def _write_qs_cfg_for_thin(
-    base_cfg_path: Path,
-    local_url: str,
-    run_dir: Path,
-) -> Path | None:
-    """CB.17.d — thin equivalent of _write_qs_cfg_for_variant.
-
-    Clones the operator's base cfg, swaps ``demo_database_url`` from
-    the 127.0.0.1:RANDOM_PORT form to the hotchkiss.io:_LOCAL_PG_HOST_PORT
-    form so QS in us-east-1 can reach the dev box via DDNS. PG branch
-    sets ``qs_disable_pg_ssl: true`` (postgres:17-alpine has no TLS).
-    Returns None for DuckDB (no QS-reachable shape).
-
-    Operator cfg's deployment_name / db_table_prefix / auth carry
-    through unchanged so the deploy + downstream qs_api/qs_browser
-    layers all reference the same QS resource namespace.
-    """
-    import yaml  # noqa: PLC0415
-
-    from recon_gen.common.config import (  # noqa: PLC0415
-        _load_raw_nested,
-        load_config,
-    )
-    from recon_gen.common.sql.dialect import Dialect  # noqa: PLC0415
-
-    peek_cfg = load_config(str(base_cfg_path))
-    if peek_cfg.db.dialect is Dialect.DUCKDB:
-        return None
-
-    # DE.5.config_v14_consolidation.B (fix) — use the v14 loader's
-    # ``_load_raw_nested`` to resolve ``extends:`` against the source path
-    # BEFORE we mutate + dump. A bare ``yaml.safe_load`` preserves the
-    # ``extends: [./base.yaml]`` directive in the dumped qs.yaml; the
-    # relative ``./`` then resolves to ``runs/<id>/cfg/`` where base.yaml
-    # doesn't exist, so the dumped cfg fails to load and the deploy
-    # layer dispatch-skips silently. Resolving extends at this seam
-    # makes the dumped qs.yaml self-contained.
-    raw: dict[str, Any] = _load_raw_nested(base_cfg_path)  # typing-smell: ignore[explicit-any]: nested YAML payload — yaml.safe_load returns scalar/list/dict per node
-
-    # operator cfg yaml is v14 nested shape; route mutations through the
-    # nested blocks instead of the legacy flat keys.
-    db_block_raw = raw.setdefault("db", {})
-    if not isinstance(db_block_raw, dict):
-        raise RuntimeError(
-            f"_write_qs_cfg_for_thin: base cfg {base_cfg_path} db: must be "
-            f"a mapping (got {type(db_block_raw).__name__})"
-        )
-    db_block: dict[str, Any] = cast(dict[str, Any], db_block_raw)  # typing-smell: ignore[explicit-any]: nested YAML payload
-    aws_block_raw = raw.setdefault("aws", {})
-    if not isinstance(aws_block_raw, dict):
-        raise RuntimeError(
-            f"_write_qs_cfg_for_thin: base cfg {base_cfg_path} aws: must be "
-            f"a mapping (got {type(aws_block_raw).__name__})"
-        )
-    aws_block: dict[str, Any] = cast(dict[str, Any], aws_block_raw)  # typing-smell: ignore[explicit-any]: nested YAML payload
-    if peek_cfg.db.dialect is Dialect.POSTGRES:
-        # CB.17.h followup — port preserved from the source URL so
-        # CI's shared PG on 5432 routes through hotchkiss.io:5432 and
-        # local's testcontainer on 5433 routes through hotchkiss.io:5433.
-        # DDNS layer routes per-port to the right backend.
-        new_url = _swap_url_host(local_url, _QS_FORWARD_HOST)
-        db_block["url"] = new_url
-        aws_block["qs_disable_pg_ssl"] = True
-    elif peek_cfg.db.dialect is Dialect.ORACLE:
-        new_url = _swap_url_host(local_url, _QS_FORWARD_HOST)
-        db_block["url"] = new_url
-        # Oracle datasource already hardcodes DisableSsl=True (common/datasource.py).
-
-    cfg_dir = run_dir / "cfg"
-    cfg_dir.mkdir(parents=True, exist_ok=True)
-    qs_cfg_path = cfg_dir / "qs.yaml"
-    with qs_cfg_path.open("w") as f:
-        f.write(
-            f"# Runner-generated thin-path QS-side cfg (CB.17.d).\n"
-            f"# Sibling local-layer cfg: {base_cfg_path}\n"
-            f"# DO NOT commit — `runs/` is gitignored.\n",
-        )
-        yaml.safe_dump(raw, f, sort_keys=False)
-    return qs_cfg_path
 
 
 def _sweep_test_prefixes(
@@ -3005,44 +2838,6 @@ _DEFAULT_RUNNER_CFG_CANDIDATES: Final = (
 )
 
 
-def _swap_url_host(url: str, new_host: str, new_port: int | None = None) -> str:
-    """Replace the host (and optionally port) of a postgresql:// or
-    oracle:// URL.
-
-    Used by ``_write_qs_cfg_for_thin`` to map the local container URL
-    onto the hotchkiss.io-forwarded endpoint. When ``new_port`` is
-    None, preserves the URL's existing port — so CI's shared PG on
-    port 5432 routes through `hotchkiss.io:5432` while local dev's
-    testcontainer on 5433 routes through `hotchkiss.io:5433`. The
-    DDNS forwarding layer routes per-port to the right backend.
-
-    Preserves user, pw, and path/db components. Raises if the URL
-    doesn't parse — we want a misshapen URL to fail loudly, not
-    silently land a wrong endpoint in the QS data source.
-    """
-    from urllib.parse import urlparse, urlunparse  # noqa: PLC0415
-    parsed = urlparse(url)
-    if not parsed.scheme or not parsed.hostname:
-        raise RuntimeError(
-            f"_swap_url_host: malformed URL {url!r} (missing scheme or host)"
-        )
-    if new_port is None:
-        new_port = parsed.port or 0
-        if new_port == 0:
-            raise RuntimeError(
-                f"_swap_url_host: URL {url!r} has no port and no override given"
-            )
-    # Rebuild netloc with auth + new host:port.
-    auth = ""
-    if parsed.username:
-        if parsed.password:
-            auth = f"{parsed.username}:{parsed.password}@"
-        else:
-            auth = f"{parsed.username}@"
-    new_netloc = f"{auth}{new_host}:{new_port}"
-    return urlunparse(parsed._replace(netloc=new_netloc))
-
-
 def _is_dirty() -> bool:
     """True if the working tree has tracked modifications (b.10 lock — tracked-only).
 
@@ -3301,7 +3096,6 @@ def _options_from_args(args: argparse.Namespace) -> RunOptions:
         skip_cheap=getattr(args, "skip_cheap", False),
         keep_on_failure=getattr(args, "keep_on_failure", False),
         trace_all=getattr(args, "trace_all", False),
-        allow_dirty_deploy=getattr(args, "allow_dirty_deploy", False),
         coverage=getattr(args, "coverage", False),
     )
 
@@ -3650,9 +3444,6 @@ def cmd_up_to(args: argparse.Namespace) -> int:
     Pre-flight: probes the named layer's required deps. On any failure,
     prints the operator-actionable message and exits NEEDS_OPERATOR.
 
-    For layers >= deploy, refuses on tracked-changes dirty state unless
-    `--allow-dirty-deploy` (or `RECON_GEN_RUNNER_YES=1`) is set.
-
     Each layer runs ONCE as a single subprocess; ``pytest-xdist`` handles
     in-layer parallelism; session-scoped ``pg_container_url`` /
     ``oracle_container_url`` fixtures (tests/conftest.py CB.17.a)
@@ -3675,15 +3466,6 @@ def cmd_up_to(args: argparse.Namespace) -> int:
     + its 1500+ LOC of supporting machinery deleted in the same pass.
     """
     options = _options_from_args(args)
-
-    if _is_aws_touching_layer(args.layer) and _is_dirty():
-        if not options.allow_dirty_deploy and not RECON_GEN_RUNNER_YES.get_or_none():
-            print(
-                "runner: refusing to deploy: tracked changes present "
-                "(commit / stash, or pass --allow-dirty-deploy)",
-                file=sys.stderr,
-            )
-            return EXIT_NEEDS_OPERATOR
 
     failures = probe_dependencies(args.layer)
     if failures:
@@ -3770,38 +3552,6 @@ def cmd_up_to(args: argparse.Namespace) -> int:
                 f"runner: thin container up (dialect-matching) — "
                 f"{RECON_GEN_DEMO_DATABASE_URL.name}=...exported"
             )
-            # CB.17.d — when the chain reaches qs_api/qs_browser
-            # AND dialect is QS-reachable (pg/or, not du), materialize
-            # a QS-side cfg yaml with hotchkiss.io-routable URL. The
-            # qs_deployed fixture + qs_* layers prefer RECON_GEN_QS_CONFIG
-            # over RECON_GEN_CONFIG so the QS DataSource endpoint
-            # routes via DDNS, not 127.0.0.1.
-            #
-            # DI phase — ``deploy`` retired as a chain layer; the
-            # ``qs_deployed`` fixture in tests/e2e/conftest.py reads
-            # RECON_GEN_QS_CONFIG via env at session start.
-            chain_includes_qs = any(
-                _is_aws_touching_layer(layer)
-                for layer in chain_through(args.layer)
-            )
-            if chain_includes_qs and RECON_GEN_DEMO_DATABASE_URL.name in container_env:
-                try:
-                    qs_cfg_path = _write_qs_cfg_for_thin(
-                        cfg_path,
-                        container_env[RECON_GEN_DEMO_DATABASE_URL.name],
-                        run_dir,
-                    )
-                    if qs_cfg_path is not None:
-                        runner_variant_env[RECON_GEN_QS_CONFIG.name] = str(qs_cfg_path)
-                        print(
-                            f"runner: thin QS-side cfg written → {qs_cfg_path}"
-                        )
-                except Exception as exc:  # noqa: BLE001 — surface as triage signal
-                    print(
-                        f"runner: thin QS-side cfg gen failed "
-                        f"({type(exc).__name__}: {exc})",
-                        file=sys.stderr,
-                    )
         except Exception as exc:  # noqa: BLE001 — container start failure should fail loud
             # CB.17.k — fail fast, don't swallow. The probe-side
             # `_probe_docker` retries cover the daemon-down lag window,
@@ -3950,16 +3700,9 @@ def cmd_up_to(args: argparse.Namespace) -> int:
     final_code = EXIT_SUCCESS
     try:
         for layer in chain:
-            # DI phase — the prior CB.11.b deploy-layer env-munge
-            # (swap RECON_GEN_CONFIG with the QS cfg + drop the local
-            # DB URL so the deploy CLI sees the hotchkiss.io endpoint)
-            # is gone. Deploy is owned by the session-autouse
-            # ``qs_deployed`` fixture (tests/e2e/conftest.py), which
-            # reads ``RECON_GEN_QS_CONFIG`` directly without needing
-            # the runner to alias it onto ``RECON_GEN_CONFIG``. The
-            # qs_browser layer still receives the local DB URL so
-            # consumer tests can read seeded state via
-            # connect_demo_db(cfg).
+            # Each layer gets a fresh copy of the runner-built env (DB
+            # URL + container handles). No per-layer env-munge — every
+            # layer runs against the same local container.
             layer_env = dict(runner_variant_env)
             result = dispatch_layer(
                 layer, run_dir, options, variant_env=layer_env,
@@ -4819,12 +4562,6 @@ def _setup_thin_chain_environment(
                     f"runner: cfg.db.default_l2_instance={l2_default!r} not found on disk",
                     file=sys.stderr,
                 )
-        # AWS_PROFILE injection is vestigial post-QuickSight (DW.0.5 =
-        # fully-local; no subprocess reaches AWS). No-op when the cfg
-        # carries no aws.profile; the whole cfg.auth.aws surface retires
-        # in the DW.11 AWS-footprint teardown / config cleanup.
-        if peek_cfg.auth.aws.profile is not None:
-            runner_variant_env["AWS_PROFILE"] = peek_cfg.auth.aws.profile
     except Exception as exc:  # noqa: BLE001 — peek failure shouldn't gate the run
         print(f"runner: cfg peek for L2 discovery failed ({exc!r}); continuing")
     return runner_variant_env
@@ -4912,16 +4649,6 @@ def cmd_triage(args: argparse.Namespace) -> int:
             print(
                 f"runner: failed to kill existing screen session "
                 f"{_TRIAGE_SCREEN_NAME!r}",
-                file=sys.stderr,
-            )
-            return EXIT_NEEDS_OPERATOR
-
-    # Dirty-tree gate (deploy layer or later).
-    if _is_aws_touching_layer(layer) and _is_dirty():
-        if not args.allow_dirty_deploy and not RECON_GEN_RUNNER_YES.get_or_none():
-            print(
-                "runner: refusing to deploy: tracked changes present "
-                "(commit / stash, or pass --allow-dirty-deploy)",
                 file=sys.stderr,
             )
             return EXIT_NEEDS_OPERATOR
@@ -5024,33 +4751,6 @@ def cmd_triage(args: argparse.Namespace) -> int:
                 message=msg,
             )
             return EXIT_NEEDS_OPERATOR
-
-        # QS-side cfg when the chain reaches qs_api/qs_browser. The
-        # qs_deployed fixture (tests/e2e/conftest.py) reads
-        # RECON_GEN_QS_CONFIG at session start.
-        chain_includes_qs = layer in AWS_TOUCHING_LAYERS
-        if (
-            chain_includes_qs
-            and RECON_GEN_DEMO_DATABASE_URL.name in container_env
-        ):
-            try:
-                qs_cfg_path = _write_qs_cfg_for_thin(
-                    cfg_path,
-                    container_env[RECON_GEN_DEMO_DATABASE_URL.name],
-                    run_dir,
-                )
-                if qs_cfg_path is not None:
-                    runner_variant_env[RECON_GEN_QS_CONFIG.name] = str(qs_cfg_path)
-                    print(
-                        f"runner: thin QS-side cfg written -> "
-                        f"{_rel_or_abs(qs_cfg_path)}"
-                    )
-            except Exception as exc:  # noqa: BLE001
-                print(
-                    f"runner: thin QS-side cfg gen failed "
-                    f"({type(exc).__name__}: {exc})",
-                    file=sys.stderr,
-                )
 
         # DG.2 sweep + seed (idempotent + cheap).
         if container_env:
@@ -5183,27 +4883,11 @@ def cmd_triage(args: argparse.Namespace) -> int:
     # were read by triage-down). State is operational glue between
     # triage + triage-down, NOT a source of truth for what was deployed
     # (the QS account is) or which container is up (Docker is).
-    #
-    # ``deployed`` semantics: True when ``layer in AWS_TOUCHING_LAYERS``
-    # (the prediction "the qs_deployed fixture will fire"). When the
-    # operator triages a qs_browser test and pytest crashes before the
-    # fixture sets up, the QS account may still be clean — but
-    # ``json clean --all --execute`` is idempotent (deletes nothing
-    # when nothing matches the deployment tag), so over-cleaning is
-    # harmless.
     state: dict[str, Any] = {
         "run_dir": str(run_dir),
         "nodeid": nodeid,
         "screen_name": _TRIAGE_SCREEN_NAME,
         "cfg_path": str(cfg_path),
-        # Issue #7 fix: persist the QS-side cfg (hotchkiss.io URL) when
-        # the deploy step minted one, so triage-down's `json clean`
-        # uses the same cfg the deploy used. None when the triage layer
-        # never touched QS (qs_cfg_path stays unset).
-        "qs_cfg_path": (
-            runner_variant_env.get(RECON_GEN_QS_CONFIG.name)
-        ),
-        "deployed": layer in AWS_TOUCHING_LAYERS,
         # Bug A.7 fix — persist the triage-spawned container name so
         # triage-down stops ONLY that container (instead of the
         # over-broad `_cmd_down_local()` sweep that hit unrelated
@@ -5389,21 +5073,17 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Playwright capture every test (failure-only is the default).",
     )
     p_up_to.add_argument(
-        "--allow-dirty-deploy", action="store_true",
-        help="(DW.5.2: no-op — no AWS-touching layers remain after QuickSight removal; kept for CLI compat.)",
-    )
-    p_up_to.add_argument(
         "--coverage", action="store_true",
         help="emit .coverage.<run-id>.<layer> data files under runs/<id>/.",
     )
     p_up_to.set_defaults(func=cmd_up_to)
 
-    p_up = subs.add_parser("up", help="Boot dependencies (default scope = all)")
-    p_up.add_argument("scope", nargs="?", default="all", choices=["local", "aws", "all"])
+    p_up = subs.add_parser("up", help="Boot local dependencies")
+    p_up.add_argument("scope", nargs="?", default="local", choices=["local"])
     p_up.set_defaults(func=cmd_up)
 
-    p_down = subs.add_parser("down", help="Tear down dependencies (default scope = all)")
-    p_down.add_argument("scope", nargs="?", default="all", choices=["local", "aws", "all"])
+    p_down = subs.add_parser("down", help="Tear down local dependencies")
+    p_down.add_argument("scope", nargs="?", default="local", choices=["local"])
     p_down.add_argument("--yes", action="store_true", help="confirm destructive op")
     p_down.set_defaults(func=cmd_down)
 
@@ -5437,14 +5117,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "Override inferred layer. Use when nodeid resolves to an "
             "ambiguous path (e.g. tests/e2e/test_dashboard_driver.py)."
-        ),
-    )
-    p_triage.add_argument(
-        "--allow-dirty-deploy",
-        action="store_true",
-        help=(
-            "(DW.5.2: no-op — no AWS-touching layers remain after "
-            "QuickSight removal; kept for CLI compat with up_to's gate.)"
         ),
     )
     p_triage.add_argument(

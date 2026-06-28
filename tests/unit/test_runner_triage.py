@@ -14,8 +14,8 @@ Coverage:
   empty / absolute nodeid, unknown nodeid).
 - ``cmd_triage_down`` gates (--yes required, missing state file is a
   successful no-op).
-- Layer-chain design locks (post-QuickSight: LAYERS tuple,
-  AWS_TOUCHING_LAYERS empty, deploy arm retired).
+- Layer-chain design locks (post-QuickSight: LAYERS tuple shape with
+  agreement terminal, deploy arm retired).
 """
 
 from __future__ import annotations
@@ -171,12 +171,10 @@ def test_argparse_triage_parses_nodeid_and_flags() -> None:
         "triage",
         "tests/e2e/test_l1_filters.py::test_y",
         "--layer", "app2_browser",
-        "--allow-dirty-deploy",
         "--force",
     ])
     assert ns.nodeid == "tests/e2e/test_l1_filters.py::test_y"
     assert ns.layer == "app2_browser"
-    assert ns.allow_dirty_deploy is True
     assert ns.force is True
 
 
@@ -352,12 +350,10 @@ def _mk_triage_args(
     nodeid: str = "tests/e2e/test_l1_filters.py::test_y",
     *,
     layer: str | None = None,
-    allow_dirty_deploy: bool = False,
     force: bool = False,
 ) -> argparse.Namespace:
     return argparse.Namespace(
-        nodeid=nodeid, layer=layer,
-        allow_dirty_deploy=allow_dirty_deploy, force=force,
+        nodeid=nodeid, layer=layer, force=force,
     )
 
 
@@ -522,16 +518,6 @@ def test_deploy_retired_from_layers_tuple() -> None:
     )
 
 
-def test_aws_touching_layers_is_empty_post_quicksight() -> None:
-    """DW.5.2: AWS_TOUCHING_LAYERS is empty — QuickSight removed, the
-    whole chain is local. No layer deploys, derives a QS user ARN, or
-    trips the dirty-tree refusal.
-    """
-    assert r.AWS_TOUCHING_LAYERS == ()
-    assert "agreement" not in r.AWS_TOUCHING_LAYERS
-    assert "app2_browser" not in r.AWS_TOUCHING_LAYERS
-
-
 def test_layer_command_deploy_arm_removed(tmp_path: Path) -> None:
     """DI phase: ``_layer_command("deploy", ...)`` returns None
     because the deploy arm is gone. Locks the design lock so a
@@ -544,16 +530,6 @@ def test_layer_command_deploy_arm_removed(tmp_path: Path) -> None:
     assert r._layer_command(
         "deploy", tmp_path, variant_env=variant_env,
     ) is None
-
-
-def test_is_aws_touching_layer_always_false_post_quicksight() -> None:
-    """DW.5.2: no layer is AWS-touching anymore (QuickSight removed),
-    so the dirty-tree refusal never triggers."""
-    assert r._is_aws_touching_layer("app2_browser") is False
-    assert r._is_aws_touching_layer("agreement") is False
-    assert r._is_aws_touching_layer("app2") is False
-    assert r._is_aws_touching_layer("db") is False
-    assert r._is_aws_touching_layer("unit") is False
 
 
 def test_chain_through_app2_browser_stops_before_agreement() -> None:
@@ -606,12 +582,13 @@ def test_cmd_triage_state_file_omits_run_id_layer_as_of_anchor(
     assert '"nodeid"' in state_block
     assert '"screen_name"' in state_block
     assert '"cfg_path"' in state_block
-    assert '"qs_cfg_path"' in state_block
-    assert '"deployed"' in state_block
     # Slimmed away.
     assert '"run_id"' not in state_block
     assert '"layer"' not in state_block
     assert '"as_of_anchor"' not in state_block
+    # DW.11 — QuickSight gone: no QS-side cfg, no deploy prediction.
+    assert '"qs_cfg_path"' not in state_block
+    assert '"deployed"' not in state_block
 
 
 def test_cmd_triage_body_drops_inline_deploy_block() -> None:
