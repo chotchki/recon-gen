@@ -123,7 +123,6 @@ def _build_studio_asgi(cache: L2InstanceCache) -> object:
     )
 
 
-@pytest.mark.browser
 def test_browser_operator_creates_account_via_studio_nav(
     tmp_path: Path,
 ) -> None:
@@ -167,7 +166,6 @@ def test_browser_operator_creates_account_via_studio_nav(
         )
 
 
-@pytest.mark.browser
 def test_browser_operator_creates_rail_with_role_checkbox(
     tmp_path: Path,
 ) -> None:
@@ -220,7 +218,6 @@ def test_browser_operator_creates_rail_with_role_checkbox(
         )
 
 
-@pytest.mark.browser
 @pytest.mark.parametrize(
     "fixture_id",
     [
@@ -349,7 +346,6 @@ def test_browser_full_create_l2_structural_equality(
             )
 
 
-@pytest.mark.browser
 def test_browser_operator_creates_rail_with_bb2_create_new_reconciler(
     tmp_path: Path,
 ) -> None:
@@ -451,7 +447,6 @@ def test_browser_operator_creates_rail_with_bb2_create_new_reconciler(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.browser
 @pytest.mark.parametrize(
     "kind, list_path",
     [
@@ -548,7 +543,6 @@ def test_browser_card_delete_swaps_button_inplace_without_toggling_details(
         )
 
 
-@pytest.mark.browser
 def test_browser_delete_confirm_flow_completes_and_removes_entity(
     tmp_path: Path,
 ) -> None:
@@ -652,7 +646,6 @@ def test_browser_delete_confirm_flow_completes_and_removes_entity(
         )
 
 
-@pytest.mark.browser
 def test_browser_list_page_delete_removes_article_without_manual_reload(
     tmp_path: Path,
 ) -> None:
@@ -759,7 +752,6 @@ def test_browser_list_page_delete_removes_article_without_manual_reload(
         )
 
 
-@pytest.mark.browser
 def test_browser_card_delete_disabled_when_referenced(
     tmp_path: Path,
 ) -> None:

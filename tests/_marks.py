@@ -51,10 +51,12 @@ class Tier(StrEnum):
     needs no AWS, no browser, no DB of its own; it reads the artifacts
     the earlier layers wrote under the shared run dir.
 
-    Browser tests carry `Tier.APP2` + `@pytest.mark.browser`; the
-    runner's terminal `app2_browser` LAYER selects them via the
-    `browser` marker (there is no separate browser *tier*). The
-    QuickSight QS_API / QS_BROWSER tiers were removed in Phase DW."""
+    Browser tests are `Tier.APP2` and live under
+    `tests/e2e/app2_browser/`; the runner's terminal `app2_browser`
+    LAYER selects them by DIRECTORY (DY.1 finished the CB.6 migration —
+    the legacy `@pytest.mark.browser` + `-m browser` selector are
+    retired; there is no separate browser *tier*). The QuickSight
+    QS_API / QS_BROWSER tiers were removed in Phase DW."""
 
     UNIT = "unit"
     DB = "db"
