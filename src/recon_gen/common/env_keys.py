@@ -704,9 +704,8 @@ RECON_GEN_RUNNER_CI: Final = EnvVar(
     optional=True,
 )
 
-# Y.2.gate.c.9 / cmd_sweep — operator override for cfg-file
-# discovery. Absent → fall back to per-dialect candidates under
-# ``run/``.
+# Y.2.gate.c.9 — operator override for cfg-file discovery. Absent →
+# fall back to per-dialect candidates under ``run/``.
 RECON_GEN_CONFIG: Final = EnvVar(
     name="RECON_GEN_CONFIG",
     legacy_name="QS_GEN_CONFIG",

@@ -189,13 +189,12 @@ def test_argparse_triage_layer_choices_rejects_unknown() -> None:
         ])
 
 
-def test_argparse_triage_down_default_no_keeps() -> None:
-    """Both ``--keep-container`` and ``--keep-qs`` default to False."""
+def test_argparse_triage_down_default_keep_container_false() -> None:
+    """``--keep-container`` defaults to False."""
     parser = r._build_parser()
     ns = parser.parse_args(["triage-down", "--yes"])
     assert ns.yes is True
     assert ns.keep_container is False
-    assert ns.keep_qs is False
 
 
 def test_argparse_triage_down_yes_default_false() -> None:
@@ -423,10 +422,9 @@ def test_cmd_triage_unknown_nodeid_returns_config_error(
 
 def _mk_triage_down_args(
     *, yes: bool = False, keep_container: bool = False,
-    keep_qs: bool = False,
 ) -> argparse.Namespace:
     return argparse.Namespace(
-        yes=yes, keep_container=keep_container, keep_qs=keep_qs,
+        yes=yes, keep_container=keep_container,
     )
 
 
@@ -471,10 +469,12 @@ def test_cmd_triage_down_unparseable_state_returns_needs_operator(
     assert "unparseable" in buf.getvalue()
 
 
-def test_cmd_triage_down_kills_screen_and_skips_qs_when_not_deployed(
+def test_cmd_triage_down_kills_screen_and_removes_state(
     triage_state_tmp: Path,
 ) -> None:
-    """When state says deployed=False, QS sweep is skipped + screen killed."""
+    """Screen killed + state file removed; container stop skipped via
+    --keep-container. (Post-DW.7: no QS sweep step — the chain is fully
+    local, nothing in AWS to clean.)"""
     state: dict[str, Any] = {
         "run_id": "20260614T120000Z-deadbee",
         "run_dir": "/runs/x",
@@ -482,7 +482,6 @@ def test_cmd_triage_down_kills_screen_and_skips_qs_when_not_deployed(
         "layer": "db",
         "screen_name": "recon-gen-triage",
         "cfg_path": "/run/config.yaml",
-        "deployed": False,
         "as_of_anchor": "2026-06-14",
     }
     r._write_triage_state(state)
@@ -498,38 +497,8 @@ def test_cmd_triage_down_kills_screen_and_skips_qs_when_not_deployed(
     out = buf.getvalue()
     assert "killing screen session" in out
     assert "screen session terminated" in out
-    assert "skipping QS sweep" in out
     assert "--keep-container" in out
     # State file must be removed.
-    assert not triage_state_tmp.exists()
-
-
-def test_cmd_triage_down_keep_qs_skips_sweep(
-    triage_state_tmp: Path,
-) -> None:
-    """--keep-qs skips the QS sweep even when deployed=True."""
-    state: dict[str, Any] = {
-        "run_id": "20260614T120000Z-deadbee",
-        "run_dir": "/runs/x",
-        "nodeid": "tests/e2e/test_l1_filters.py::test_bar",
-        "layer": "app2_browser",
-        "screen_name": "recon-gen-triage",
-        "cfg_path": "/run/config.yaml",
-        "deployed": True,
-        "as_of_anchor": "2026-06-14",
-    }
-    r._write_triage_state(state)
-    args = _mk_triage_down_args(yes=True, keep_qs=True, keep_container=True)
-    with (
-        patch.object(r, "_screen_kill", return_value=True),
-        patch.object(r, "_triage_qs_sweep") as mock_sweep,
-    ):
-        buf = io.StringIO()
-        with redirect_stdout(buf):
-            rc = r.cmd_triage_down(args)
-    assert rc == r.EXIT_SUCCESS
-    mock_sweep.assert_not_called()
-    assert "skipping QS resource sweep" in buf.getvalue()
     assert not triage_state_tmp.exists()
 
 

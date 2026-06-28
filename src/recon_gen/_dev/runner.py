@@ -18,7 +18,6 @@ Verbs:
     up [scope]        Boot dependencies. scope = local | aws | all (default).
     down [scope]      Tear down dependencies. scope as above.
     status [--cost]   Show what's currently running.
-    sweep             Clean orphan resources (tagged ManagedBy:recon-gen).
 
 Exit codes:
     0  success
@@ -3493,9 +3492,9 @@ _NAMED_L2_FIXTURES: Final[dict[str, str]] = {
 }
 
 # m.3.a — fuzz module lives under tests/l2/. The runner imports it via
-# sys.path injection (matches the cmd_sweep pattern for tests/e2e/
-# helpers). Lifting random_l2_yaml into common/l2/ is a follow-up; for
-# now the runner only ever runs from a source tree, not from a wheel.
+# sys.path injection. Lifting random_l2_yaml into common/l2/ is a
+# follow-up; for now the runner only ever runs from a source tree, not
+# from a wheel.
 _FUZZ_MODULE_DIR: Final = REPO_ROOT / "tests" / "l2"
 
 
@@ -4758,132 +4757,6 @@ def _dump_capture_status(cell_dir: Path, layer_dir: Path, stdout: str) -> None:
         print()
 
 
-def cmd_sweep(args: argparse.Namespace) -> int:
-    """Y.2.gate.c.9 — clean orphan QuickSight resources tagged
-    ``Harness:e2e``.
-
-    Replaces ``scripts/sweep_harness_orphans.py`` (deletion of the
-    standalone script is `Y.2.gate.f.8`). Same default: dry-run
-    (collect + print). Pass ``--yes`` (or set ``RECON_GEN_RUNNER_YES=1``,
-    matching the destructive-op convention from `b.14.3`) to actually
-    delete.
-
-    Tag set: ``Harness:e2e`` — production deploys don't carry that
-    tag (they wear ``ManagedBy:recon-gen`` + optional
-    ``L2Instance:<prefix>``), so this is safe against the production
-    resource graph.
-
-    Exit codes:
-      0 — clean (dry-run completed OR delete completed)
-      2 — needs operator (AWS creds expired / config not found)
-    """
-    from recon_gen.common.config import load_config
-
-    # Sweep only needs aws_account_id + aws_region — any cfg has those.
-    # Lookup mirrors tests/e2e/conftest.py::cfg with the per-dialect
-    # files added (Phase P split run/config.yaml → per-dialect).
-    config_path: Path | None = None
-    # Soft-fallback: registry's must_be_file validator would raise on
-    # a non-existent pin; sweep is best-effort + cfg discovery has
-    # other candidates, so soak the absence rather than fail-loud.
-    explicit = os.environ.get(RECON_GEN_CONFIG.name)
-    if explicit:
-        candidate = Path(explicit)
-        if candidate.exists():
-            config_path = candidate
-    if config_path is None:
-        for candidate in (
-            REPO_ROOT / "run" / "config.yaml",
-            REPO_ROOT / "config.yaml",
-            REPO_ROOT / "run" / "config.postgres.yaml",
-            REPO_ROOT / "run" / "config.oracle.yaml",
-        ):
-            if candidate.exists():
-                config_path = candidate
-                break
-    if config_path is None:
-        print(
-            "runner: sweep — no config.yaml found in repo "
-            "(checked RECON_GEN_CONFIG, run/config.yaml, config.yaml, "
-            "run/config.{postgres,oracle}.yaml); cannot resolve "
-            "AWS account/region.",
-            file=sys.stderr,
-        )
-        return EXIT_NEEDS_OPERATOR
-
-    cfg = load_config(str(config_path))
-    try:
-        import boto3
-    except ImportError as exc:
-        print(f"runner: sweep — boto3 missing: {exc}", file=sys.stderr)
-        return EXIT_NEEDS_OPERATOR
-
-    # Y.2.gate.f.9 — sweep helpers lifted from
-    # tests/e2e/_harness_cleanup.py to recon_gen/_dev/cleanup.py.
-    # Direct import; no sys.path / importlib gymnastics.
-    from recon_gen._dev.cleanup import (
-        _collect_resources_matching_tag,
-        sweep_qs_resources_by_tag,
-    )
-
-    # boto3-stubs's huge per-service overload union confuses pyright
-    # — Unknown branches leak through on most-cases. Suppress narrowly.
-    client: Any = boto3.client(  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]: boto3-stubs huge overload union confuses pyright (X.2.o.5)
-        "quicksight", region_name=cfg.aws.region,
-    )
-
-    confirm = bool(args.yes) or bool(RECON_GEN_RUNNER_YES.get_or_none())
-    tag_key, tag_value = "Harness", "e2e"
-
-    if not confirm:
-        # Dry-run: collect-only, no deletes. Same shape as
-        # scripts/sweep_harness_orphans.py without --confirm.
-        try:
-            raw_matched = _collect_resources_matching_tag(
-                client, cfg.aws.account_id,
-                tag_key=tag_key, tag_value=tag_value,
-            )
-        except Exception as exc:  # noqa: BLE001
-            print(
-                f"runner: sweep — collect failed: {exc!r}",
-                file=sys.stderr,
-            )
-            return EXIT_NEEDS_OPERATOR
-        # f.9 — direct import means pyright knows the return type;
-        # no cast needed.
-        matched = raw_matched
-        print(
-            f"runner: sweep DRY-RUN — would delete resources tagged "
-            f"{tag_key}={tag_value} in {cfg.aws.region}:"
-        )
-        total = 0
-        for kind, items in matched.items():
-            print(f"  {kind}: {len(items)}")
-            total += len(items)
-            for resource_id, _arn in items:
-                print(f"    - {resource_id}")
-        print(f"  total: {total}")
-        if total > 0:
-            print("runner: re-run with --yes to actually delete.")
-        return EXIT_SUCCESS
-
-    print(
-        f"runner: sweep --yes — deleting resources tagged "
-        f"{tag_key}={tag_value} in {cfg.aws.region}"
-    )
-    try:
-        raw_counts = sweep_qs_resources_by_tag(
-            client, cfg.aws.account_id,
-            tag_key=tag_key, tag_value=tag_value,
-        )
-    except Exception as exc:  # noqa: BLE001
-        print(f"runner: sweep — delete pass failed: {exc!r}", file=sys.stderr)
-        return EXIT_NEEDS_OPERATOR
-    counts = raw_counts
-    print(f"runner: sweep deleted: {counts} (total={sum(counts.values())})")
-    return EXIT_SUCCESS
-
-
 # ---------------------------------------------------------------------------
 # triage / triage-down — interactive PDB session inside a detached GNU screen.
 # ---------------------------------------------------------------------------
@@ -5580,10 +5453,10 @@ def _teardown_container_best_effort(handle: object | None) -> None:
 
 
 def cmd_triage_down(args: argparse.Namespace) -> int:
-    """Tear down the active triage session: kill the screen session,
-    sweep tagged QS resources, optionally stop the local container.
+    """Tear down the active triage session: kill the screen session and
+    stop the local container.
 
-    Destructive — requires ``--yes`` (matches cmd_down / cmd_sweep).
+    Destructive — requires ``--yes`` (matches cmd_down).
 
     Idempotent — when no state file exists, prints a friendly message
     and returns EXIT_SUCCESS rather than EXIT_NEEDS_OPERATOR. Rationale:
@@ -5625,41 +5498,6 @@ def cmd_triage_down(args: argparse.Namespace) -> int:
         )
     else:
         print("runner: screen session terminated")
-
-    # QS sweep.
-    if args.keep_qs:
-        print("runner: --keep-qs set; skipping QS resource sweep")
-    else:
-        deployed = bool(state.get("deployed", False))
-        if not deployed:
-            print(
-                "runner: triage did not reach the deploy layer; "
-                "skipping QS sweep"
-            )
-        else:
-            cfg_path_str = state.get("cfg_path")
-            if not isinstance(cfg_path_str, str):
-                print(
-                    "runner: state file missing cfg_path; cannot run QS sweep",
-                    file=sys.stderr,
-                )
-                _TRIAGE_STATE_FILE.unlink(missing_ok=True)
-                return EXIT_FAILURE
-            # Issue #7 fix: prefer the QS-side cfg path (hotchkiss.io URL)
-            # when the deploy step minted one — matches deploy step routing.
-            qs_cfg_raw = state.get("qs_cfg_path")
-            qs_cfg_obj = (
-                Path(qs_cfg_raw) if isinstance(qs_cfg_raw, str) else None
-            )
-            sweep_rc = _triage_qs_sweep(Path(cfg_path_str), qs_cfg_obj)
-            if sweep_rc != EXIT_SUCCESS:
-                print(
-                    f"runner: QS sweep failed rc={sweep_rc}; state file "
-                    f"removed but AWS may still hold resources",
-                    file=sys.stderr,
-                )
-                _TRIAGE_STATE_FILE.unlink(missing_ok=True)
-                return EXIT_FAILURE
 
     # Container teardown — narrowed to ONLY the triage-spawned
     # container (bug A.7 fix). Pre-fix this called `_cmd_down_local()`
@@ -5705,48 +5543,6 @@ def cmd_triage_down(args: argparse.Namespace) -> int:
 
     _TRIAGE_STATE_FILE.unlink(missing_ok=True)
     print("runner: triage-down complete (state file removed)")
-    return EXIT_SUCCESS
-
-
-def _triage_qs_sweep(cfg_path: Path, qs_cfg_path: Path | None = None) -> int:
-    """Sweep QS resources tagged ``ManagedBy=recon-gen`` +
-    ``Deployment=<deployment_name>`` by shelling out to
-    ``recon-gen json clean --execute -c <cfg>``.
-
-    Mirrors triage's deploy step's cfg routing: prefers ``qs_cfg_path``
-    (hotchkiss.io URL — the cfg the deploy actually used to create the
-    QS DataSource) when present, falling back to the local cfg path.
-
-    Issue #7 fix: the prior body called
-    ``sweep_qs_resources_by_tag(tag_key="Harness", tag_value="e2e")``
-    which matches NOTHING in production — real deploys tag
-    ``ManagedBy=recon-gen`` + ``Deployment=<deployment_name>``
-    (``common/cleanup.py:33-35``). Going through the same CLI path
-    deploy used guarantees tag-key parity and won't silently orphan
-    QS resources in AWS.
-    """
-    effective_cfg = str(qs_cfg_path) if qs_cfg_path is not None else str(cfg_path)
-    # `--all` makes triage-down unconditional regardless of repo-root
-    # `out/` carve-out state. Without it, if the operator has previously
-    # run `recon-gen json apply -o out/` against the same
-    # `deployment_name`, those repo-root `out/` artifacts will carve out
-    # matching resources from cleanup → triage QS resources for that
-    # deployment ORPHANED in AWS. triage-down is operator-explicit
-    # teardown (already gated by `--yes`); leaving repo-root `out/`
-    # artifacts in the carve-out is the wrong default for this verb.
-    # (Surfaced by adversarial review of #7 fix, runner.py post-054d2fe2.)
-    cmd = [str(_VENV_BIN / "recon-gen"), "json", "clean", "--all", "--execute", "-c", effective_cfg]
-    result = subprocess.run(  # noqa: S603 — fixed argv, no shell
-        cmd, cwd=REPO_ROOT, capture_output=True, text=True, check=False,
-    )
-    if result.returncode != 0:
-        print(
-            f"runner: json clean failed rc={result.returncode}: "
-            f"{result.stderr.strip()}",
-            file=sys.stderr,
-        )
-        return EXIT_NEEDS_OPERATOR
-    print(result.stdout.strip() or "runner: json clean done")
     return EXIT_SUCCESS
 
 
@@ -5828,10 +5624,6 @@ def _build_parser() -> argparse.ArgumentParser:
     p_status.add_argument("--cost", action="store_true", help="include hourly cost estimate")
     p_status.set_defaults(func=cmd_status)
 
-    p_sweep = subs.add_parser("sweep", help="Clean orphan resources tagged ManagedBy:recon-gen")
-    p_sweep.add_argument("--yes", action="store_true", help="confirm destructive op")
-    p_sweep.set_defaults(func=cmd_sweep)
-
     p_triage = subs.add_parser(
         "triage",
         help=(
@@ -5883,15 +5675,15 @@ def _build_parser() -> argparse.ArgumentParser:
     p_triage_down = subs.add_parser(
         "triage-down",
         help=(
-            "Tear down the active triage session: kill the screen session, "
-            "sweep tagged QS resources, optionally stop the local container."
+            "Tear down the active triage session: kill the screen session "
+            "and stop the local container."
         ),
     )
     p_triage_down.add_argument(
         "--yes",
         action="store_true",
         help=(
-            "Confirm destructive teardown (required; matches `down` + `sweep` "
+            "Confirm destructive teardown (required; matches `down` "
             "convention). Also honored via RECON_GEN_RUNNER_YES=1."
         ),
     )
@@ -5900,16 +5692,7 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "Skip the `docker stop` of the local PG/Oracle container; useful "
-            "when you want to re-launch triage against the same seeded data. "
-            "QS resources still get swept (they're a per-deploy concern)."
-        ),
-    )
-    p_triage_down.add_argument(
-        "--keep-qs",
-        action="store_true",
-        help=(
-            "Skip the QS sweep. Useful when triage stayed at db/app2 layer "
-            "and there's nothing in AWS to clean."
+            "when you want to re-launch triage against the same seeded data."
         ),
     )
     p_triage_down.set_defaults(func=cmd_triage_down)
