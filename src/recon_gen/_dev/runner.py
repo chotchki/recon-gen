@@ -70,6 +70,7 @@ from recon_gen.common.env_keys import (
     RECON_GEN_RUNNER_YES,
     RECON_GEN_TEST_L2_INSTANCE,
     RECON_GEN_TRACE_ALL,
+    RECON_GEN_TRAINER_DIALECTS,
 )
 
 EXIT_SUCCESS: Final = 0
@@ -882,8 +883,23 @@ def _layer_command(
         # interaction (xdist 3.8 dies at session-start when marker-
         # deselected items carry xdist_group). App2 discovers via
         # `tests/e2e/app2/` directory with NO `-m` filter — that hazard
-        # does not apply here. Leave qs_browser at default `--dist=load`.
+        # does not apply here.
         cmd += ["--dist=loadgroup"]
+        # DW.5.2 triage — POLICY 1 parity: ci.yml pins
+        # RECON_GEN_TRAINER_DIALECTS=du, but the runner set nothing, so the
+        # LOCAL chain defaulted to all 3 dialects (du/pg/or —
+        # test_bv33_trainer_dogfood.py:154) and spun three Studio servers
+        # concurrently under --dist=loadgroup. On a memory-pressured host
+        # they starve each other and the Trainer dogfood's
+        # `Page.wait_for_function` hangs (the documented CE.4 Studio-server
+        # flake; faulthandler shows the Playwright greenlet stuck in
+        # run_until_complete). CI dodged it by setting the env; local didn't
+        # → "passes on CI, hangs locally" — exactly the divergence POLICY 1
+        # forbids. Default the runner to the same single dialect CI uses so
+        # local ≡ CI; operator-set value wins. The deeper pg/or Studio-server
+        # SessionStart hang stays the open CE.4 root-cause (backlog).
+        if RECON_GEN_TRAINER_DIALECTS.name not in os.environ:
+            env_addl[RECON_GEN_TRAINER_DIALECTS.name] = "du"
         return (cmd, env_addl)
     if layer == "agreement":
         # DW.3 — cross-renderer agreement validators. Pure JSON-artifact
