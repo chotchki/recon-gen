@@ -22,7 +22,7 @@ from tests._marks import Need, Tier, needs, tier
 
 from recon_gen.apps.l2_flow_tracing.app import _TRANSFER_TEMPLATES_NAME
 
-from ._l2ft_dropdown_walk import walk_dropdown
+from tests.e2e._l2ft_dropdown_walk import walk_dropdown
 
 
 

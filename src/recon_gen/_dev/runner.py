@@ -732,11 +732,8 @@ def _layer_command(
                 pass
         only = ["-k", opts.only] if opts.only else []
         cmd = [
-            str(_VENV_BIN / "pytest"), "tests/e2e/",
-            "-m", "browser", "-q",
-            "--ignore=tests/e2e/app2",
-            "--ignore=tests/e2e/db",
-            "--ignore=tests/e2e/agreement",
+            str(_VENV_BIN / "pytest"), "tests/e2e/app2_browser/",
+            "-q",
             *only, *_cov_args,
             "-n", nworkers,
             # Y.7-followup — auto-retry a flaky browser test

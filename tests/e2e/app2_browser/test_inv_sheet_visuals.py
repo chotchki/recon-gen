@@ -29,7 +29,7 @@ import pytest
 
 from tests._marks import Need, Tier, needs, tier
 
-from .tree_validator import TreeValidator
+from tests.e2e.tree_validator import TreeValidator
 
 if TYPE_CHECKING:
     from recon_gen.common.tree import App
