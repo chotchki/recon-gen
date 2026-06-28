@@ -3,9 +3,9 @@
 Replaces the constant-heavy + manually-cross-referenced builders in
 ``apps/{payment_recon,account_recon,investigation}/{analysis,filters,
 visuals}.py``. Authors construct apps as trees of typed nodes; the
-tree walks itself at emit time to produce the existing ``models.py``
-dataclasses, which serialize through the same ``to_aws_json()`` path
-the deploy pipeline uses.
+tree validates itself and the App2 (HTMX/d3) renderer walks it to
+produce the self-hosted dashboards. (Pre-DW the same tree also emitted
+the AWS QuickSight API JSON; that renderer retired in Phase DW.)
 
 **Validation rules** (catch these at construction or emit time):
 
