@@ -109,28 +109,6 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
             driver.open()
             yield driver
 
-    @classmethod
-    @contextmanager
-    def attached(
-        cls, base_url: str, *, headless: bool = True,
-    ) -> Generator["StudioBrowserEditorDriver", None, None]:
-        """Attach to an ALREADY-RUNNING Studio server (vs ``serving()``,
-        which spins its own editor app from an ``asgi_app``).
-
-        For tests that need a bespoke server config the editor harness
-        doesn't build — e.g. the Deploy integration test's
-        PG-container + ``etl_hook`` Studio (``_studio_deploy_helpers.
-        studio_server``). The test owns the server lifecycle + passes its
-        bound ``base_url``; this just opens a WebKit page against it and
-        hands back the verb surface, so the test never touches Playwright
-        directly (keeps the no-playwright-leak lint clean)."""
-        from recon_gen.common.browser.helpers import webkit_page  # noqa: PLC0415 — lazy
-
-        with webkit_page(headless=headless) as page:
-            driver = cls(page, base_url)
-            driver.open()
-            yield driver
-
     # -- raw access (escape hatch for studio-internal assertions) -------
 
     @property
@@ -160,34 +138,6 @@ class StudioBrowserEditorDriver(_BaseStudioEditorDriver):
         """The single URL entry of the test lifecycle. Subsequent
         navigation is link-click or form-submit."""
         self._page.goto(f"{self._base}/")
-
-    # -- deploy chrome (DY.1) -------------------------------------------
-
-    def deploy_changes(self, *, timeout_ms: int = 120_000) -> str:
-        """Click the Studio "Deploy changes" button + wait for the deploy
-        to finish, returning the status text (e.g. ``"Deployed (gen N,
-        M tx)"``).
-
-        The deploy controls render on the ``/data`` (data-shaping) page.
-        Unlike the editor verbs, this one navigates by URL: ``/data``
-        currently carries NO top-nav entry (``build_top_nav_entries`` =
-        Diagram / L2 Editor / ETL Support / Training) and no rendered
-        ``href="/data"`` anywhere, so there is no nav link to click — the
-        operator-discoverability constraint can't be honored until that
-        nav gap is closed (flagged DY.1; a real Studio reachability bug).
-
-        ``timeout_ms`` covers the full pipeline (etl_hook re-runs ``data
-        apply`` — ~30-60s on sasquatch_pr); the click + selector waits use
-        the driver default."""
-        self._page.goto(f"{self._base}/data", wait_until="domcontentloaded")
-        self._page.wait_for_selector("#deploy-btn")
-        self._page.click("#deploy-btn")
-        # Status flips running → ok; key off the semantic data-state attr
-        # (not the Tailwind color classes the JS writes — AM.2 step 1).
-        self._page.wait_for_selector(
-            '#deploy-status[data-state="ok"]', timeout=timeout_ms,
-        )
-        return self._page.locator("#deploy-status").text_content() or ""
 
     # BX.6/11 follow-up (2026-06-11) — ``_ensure_home`` dropped. The
     # historical helper was a ``page.go_back()`` back-walk loop that
