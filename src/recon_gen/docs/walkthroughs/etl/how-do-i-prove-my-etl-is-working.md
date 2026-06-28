@@ -49,9 +49,9 @@ Run the three pre-flight checks against the seeded demo database:
 ```bash
 recon-gen schema apply -c run/config.yaml --execute && \
     recon-gen data apply -c run/config.yaml --execute && \
-    recon-gen data refresh -c run/config.yaml --execute && \
-    recon-gen json apply -c run/config.yaml -o run/out/ --execute
+    recon-gen data refresh -c run/config.yaml --execute
 psql "$DEMO_DATABASE_URL" -f /tmp/preflight.sql
+recon-gen dashboards -c run/config.yaml   # then open the L1 dashboard
 ```
 
 Where `/tmp/preflight.sql` is the three queries below. On a clean

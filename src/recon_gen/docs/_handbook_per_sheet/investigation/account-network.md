@@ -81,10 +81,6 @@ If the matview row count shows zero on the App Info sheet, the SQL is dry — no
 - [Daily Statement](../l1/daily-statement.md) — per-account narrative; drill here when you want to see every Pending + Posted leg for an anchor account on a specific day.
 - [Transactions](../l1/transactions.md) — the raw leg list; the final destination when you need to inspect metadata or timestamps.
 
-## QS parity notes
-
-See [quirks log §dependent-dropdown-no-refresh](../../reference/quicksight-quirks.md) if the anchor dropdown shows "All" on screen but the data is correctly filtered to your selected anchor.
-
 ---
 
 *First time here? See the [Vocabulary](../_glossary.md) for `matview`, `rail`, `chain` and the other project-specific terms.*

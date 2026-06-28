@@ -9,7 +9,7 @@ covers the same L1 SHOULD-constraints the
 [L1 Reconciliation Dashboard](l1.md) surfaces — drift, overdraft,
 limit breach, stuck pending, stuck unbundled, supersession — but
 shaped for a regulator or external auditor sitting outside the
-operator's QuickSight account. The PDF is the artifact you hand off;
+operator's dashboards. The PDF is the artifact you hand off;
 the dashboard is the artifact you operate against.
 
 The report is generated DIRECTLY from the database via

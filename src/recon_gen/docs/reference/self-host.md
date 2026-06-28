@@ -1,6 +1,6 @@
 # Self-hosting the dashboards
 
-The four bundled apps render two ways. QuickSight is the default — `recon-gen json apply --execute` pushes a JSON resource graph (theme, datasource, datasets, analyses, dashboards) to AWS. Dashboards is the other: a small self-hosted HTMX + d3 page server that reads the same L2 instance and the same database, no AWS account involved. (Some module names still call it "App 2"; the user-facing CLI is `recon-gen dashboards`.) It's the offline-iteration path — edit the L2 YAML / dataset SQL, refresh the page — and the renderer Studio (`recon-gen studio` — implementation tools: unified diagram, L2 editor, data-shaping panel, Deploy-changes orchestration) builds on.
+The four bundled apps render through Dashboards — a small self-hosted HTMX + d3 page server that reads an L2 instance and a database, nothing else. (Some module names still call it "App 2"; the user-facing CLI is `recon-gen dashboards`.) It's an offline-iteration loop — edit the L2 YAML / dataset SQL, refresh the page — and the renderer Studio (`recon-gen studio` — implementation tools: unified diagram, L2 editor, data-shaping panel, Deploy-changes orchestration) builds on.
 
 ## Running it
 
@@ -10,7 +10,7 @@ recon-gen dashboards -c config.yaml                # one process, all 4 apps
 # → http://127.0.0.1:8765/dashboards
 ```
 
-`config.yaml` points at a database (`db.url`) — PostgreSQL, Oracle or a DuckDB file; Dashboards supports all three (the same dialect-aware SQL the QuickSight datasets use). The schema + seed have to already be applied (`recon-gen schema apply --execute`, `data apply --execute`, `data refresh --execute`) — Dashboards only reads.
+`config.yaml` points at a database (`db.url`) — PostgreSQL, Oracle or a DuckDB file; Dashboards supports all three (the same dialect-aware SQL the rest of the pipeline emits). The schema + seed have to already be applied (`recon-gen schema apply --execute`, `data apply --execute`, `data refresh --execute`) — Dashboards only reads.
 
 It's stateless on purpose: no auth or sessions, and no in-process cache. Every GET re-runs the query — the URL IS the cache key (filter state round-trips as `?param_X=…` query params), so an edge / browser cache layer Just Works. Embed it behind your own auth front when you put it on a network.
 

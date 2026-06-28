@@ -104,9 +104,8 @@ Then:
 The integrator workflow loop:
 
 1. Edit `<your-l2>.yaml`.
-2. Regenerate the dashboard JSON: `recon-gen json apply -c run/config.yaml -o run/out --l2 <yaml>`. The loader runs the validator as it reads the YAML — any cross-entity errors surface here with a logical path before any JSON gets written.
-3. Deploy to AWS: `recon-gen json apply -c run/config.yaml -o run/out --l2 <yaml> --execute`.
-4. Re-open L2 Flow Tracing — the new declarations should show up
+2. Re-serve the dashboards against the edited YAML: `recon-gen dashboards -c run/config.yaml --l2 <yaml>` (or `recon-gen studio` for the editor surface). The loader runs the validator as it reads the YAML — any cross-entity errors surface here with a logical path before a single dashboard renders.
+3. Re-open L2 Flow Tracing — the new declarations should show up
    with their firing counts (which may be zero on day one if
    nothing has fired yet).
 

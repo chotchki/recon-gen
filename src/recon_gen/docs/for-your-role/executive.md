@@ -88,9 +88,6 @@ prepare it. Suggested cadences:
 - **Quarterly / annual** — date-range filter to the period,
   export as needed for board materials.
 
-The QuickSight visuals support per-user saved views — bookmark
-the date ranges you use most so you're one click from each cadence.
-
 ## The concepts you'll want grounded
 
 - [Sweep / net / settle](../concepts/accounting/sweep-net-settle.md) — why

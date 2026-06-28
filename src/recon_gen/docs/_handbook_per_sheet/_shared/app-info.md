@@ -1,6 +1,6 @@
 # App Info
 
-> **What this sheet teaches.** Dashboard health — whether the QuickSight rendering pipeline is operational and whether the matviews feeding this dashboard are fresh. When a sheet elsewhere renders blank and you don't know why, App Info is the diagnostic ladder's first rung.
+> **What this sheet teaches.** Dashboard health — whether the rendering pipeline is operational and whether the matviews feeding this dashboard are fresh. When a sheet elsewhere renders blank and you don't know why, App Info is the diagnostic ladder's first rung.
 
 ## What you're looking at
 
@@ -8,7 +8,7 @@ A single *Liveness* KPI tops the sheet — a count of user-visible database tabl
 
 ## How to read the numbers
 
-The *Liveness* KPI runs a real query against the database's catalog (Postgres: `information_schema.tables` filtered to `public`; Oracle: `USER_TABLES`; DuckDB: `information_schema.tables` filtered to `main`). If the KPI shows a number, you know the QuickSight → database round-trip is working and the rendering pipeline is healthy. A blank KPI means QuickSight itself cannot reach the data source — not a SQL issue, not a data issue.
+The *Liveness* KPI runs a real query against the database's catalog (Postgres: `information_schema.tables` filtered to `public`; Oracle: `USER_TABLES`; DuckDB: `information_schema.tables` filtered to `main`). If the KPI shows a number, you know the renderer → database round-trip is working and the rendering pipeline is healthy. A blank KPI means the dashboard server itself cannot reach the data source — not a SQL issue, not a data issue.
 
 The *Matview Status* table lists every [matview](../_glossary.md#matview--materialized-view) (a SQL view whose results are stored in a regular table and refreshed on demand) and base table this specific dashboard depends on, paired with:
 
@@ -21,7 +21,7 @@ The *Deploy Stamp* text box carries metadata baked at dashboard generation time:
 - `git` short SHA (which source commit was deployed)
 - `generated` ISO timestamp (when the dashboard was built)
 - `dialect` (Postgres, Oracle or DuckDB; dev builds flag DuckDB explicitly)
-- `prefix` (the deployment name stamped on every resource, e.g., `recon-prod`)
+- `prefix` (the deployment name carried on every table, e.g., `recon-prod`)
 - `as_of (at emit)` (the calendar day the dashboards default to, baked at generate time)
 - `as_of source` (where that day came from — pinned in YAML, pinned via env, derived from the feed's data anchor or a wall-clock fallback)
 - `cadence` (internal entities by balance cadence — N sparse, M explicit_daily; present only when the app passes its L2 instance)
@@ -32,11 +32,11 @@ Each dashboard's App Info is isolated per-app scope by design — the L1 ([accou
 
 ### Liveness KPI shows a number; other sheets render blank
 
-The QuickSight pipeline is healthy. The blank sheet indicates a data or visual-binding problem, not a system failure. Check the *Matview Status* table for the matview feeding that sheet — if its `row_count` is zero, the SQL is dry and the ETL hasn't populated it yet. If `row_count` is positive, the issue is in the visual configuration on that sheet (column binding, filter pushdown or aggregation mismatch).
+The rendering pipeline is healthy. The blank sheet indicates a data or visual-binding problem, not a system failure. Check the *Matview Status* table for the matview feeding that sheet — if its `row_count` is zero, the SQL is dry and the ETL hasn't populated it yet. If `row_count` is positive, the issue is in the visual configuration on that sheet (column binding, filter pushdown or aggregation mismatch).
 
 ### Liveness KPI is blank
 
-QuickSight cannot execute the direct-query SQL against the database. This is a QuickSight infrastructure problem — check your network connectivity, database credentials in QuickSight's data source settings and whether the data source is still registered on the deployment account. Restart QuickSight or refresh your browser.
+The dashboard server cannot execute the direct-query SQL against the database. This is a server-side infrastructure problem — check your network connectivity, the database credentials in your cfg's `demo_database_url` and whether the database is still reachable. Restart the dashboard server or refresh your browser.
 
 ### Matview row_count is zero; latest_date is NULL
 

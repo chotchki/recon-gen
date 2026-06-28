@@ -132,8 +132,6 @@ nav:
       - How do I map my database to the two base tables?: walkthroughs/customization/how-do-i-map-my-database.md
       - How do I swap the SQL behind a dataset?: walkthroughs/customization/how-do-i-swap-dataset-sql.md
       - How do I reskin the dashboards for my brand?: walkthroughs/customization/how-do-i-reskin-the-dashboards.md
-      - How do I configure the deploy for my AWS account?: walkthroughs/customization/how-do-i-configure-the-deploy.md
-      - How do I run my first deploy?: walkthroughs/customization/how-do-i-run-my-first-deploy.md
       - How do I add an app-specific metadata key?: walkthroughs/customization/how-do-i-add-a-metadata-key.md
       - How do I extend canonical values?: walkthroughs/customization/how-do-i-extend-canonical-values.md
       - How do I add an AML inbound-flow cap?: walkthroughs/customization/how-do-i-add-an-aml-inbound-cap.md
@@ -171,7 +169,6 @@ nav:
       - ETL Hook — Bulk Helpers Reference: handbook/etl-hook.md
       - Customization: handbook/customization.md
       - CLI reference: reference/cli.md
-      - Disabling AWS resource tagging: reference/disable-tagging.md
       - QuickSight quirks log: reference/quicksight-quirks.md
   # API Reference moved to ReadTheDocs (Sphinx autodoc, .readthedocs.yaml
   # + docs/sphinx/). The mkdocstrings-generated pages here were too

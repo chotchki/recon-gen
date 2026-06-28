@@ -35,11 +35,6 @@ The sheet has two controls in the top-right panel:
 - **Min hop amount** — drops noise edges below the threshold. Default
   is $0; raise to filter out small bookkeeping legs.
 
-> **UX note:** the QuickSight `ParameterDropDownControl` widget only
-> opens when you click the **narrow grey bar** in the middle of the
-> control. Clicking the visible outer edge does nothing. This is a
-> QuickSight quirk, not a bug in the dashboard.
-
 Three visuals:
 
 - **Inbound — counterparties → anchor** (top-left, half-width) — the
@@ -58,9 +53,7 @@ Three visuals:
 
 The two Sankeys are intentionally SIDE-BY-SIDE with the anchor
 meeting in the middle. Direction is encoded by LAYOUT — inbound on
-the left, outbound on the right — because QuickSight's built-in
-Sankey right-click drill is non-functional in practice. The geometry
-is the contract.
+the left, outbound on the right. The geometry is the contract.
 
 ## Walking the anchor
 
@@ -77,12 +70,6 @@ anchor:
   target (the counterparty side), so the menu disambiguation a
   right-click would provide is gone. Left-click matches the "click
   the thing to drill" mental model.
-
-The anchor dropdown widget may briefly LAG behind a walk — this is a
-known QuickSight URL-parameter control-sync limitation; the data
-filters correctly, but the on-screen widget text may stay stale. The
-sheet description says "trust the chart, not the control text" so
-analysts know what to expect.
 
 {% if vocab.demo.has_investigation_plants and vocab.demo.investigation.layering_chain and vocab.demo.investigation.anomaly_pair_sender %}
 ??? example "Worked example: {{ vocab.fixture_name }}"

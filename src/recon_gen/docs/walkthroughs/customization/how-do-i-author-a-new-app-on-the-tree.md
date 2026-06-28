@@ -16,8 +16,8 @@ shapes.
 
 You want to build a fifth dashboard from scratch. You don't want
 to fork an existing app, because most of the wiring you'd inherit
-is the wrong shape for your question. And you don't want to drop
-into raw QuickSight JSON, because that's how the constants-heavy
+is the wrong shape for your question. And you don't want to hand-roll
+the low-level dashboard wiring, because that's how the constants-heavy
 maintenance burden the tree replaced started.
 
 The tree primitives in `common/tree/` are the answer. This
@@ -58,9 +58,7 @@ Five reference points:
   shape.
 - **`src/recon_gen/cli/_app_builders.py`** — the
   `_generate_executives()` helper. Add a sibling
-  `_generate_<myapp>()` here. **`src/recon_gen/cli/json.py`**
-  — the `json_apply` command body that calls each
-  `_generate_<app>()` in turn; add a line for yours.
+  `_generate_<myapp>()` here.
   **`src/recon_gen/cli/_helpers.py`** — the `APPS` tuple
   shared across the artifact groups; append your app slug.
 - **`tests/json/test_executives.py`** — the starter pack that walks the
@@ -228,10 +226,8 @@ The tree primitives expose more than this walkthrough surfaces:
   can read from them.
   [recon_gen.common.tree (filters / controls)](https://recon-gen.readthedocs.io/en/latest/).
 - **Cross-app drills**: `CustomActionURLOperation` builders in
-  `common/drill.py` for jumping to another app's deployed dashboard
-  with parameter values pre-set in the URL — but note the
-  [QuickSight URL parameter sync limitation](../../handbook/customization.md)
-  before relying on it.
+  `common/drill.py` for jumping to another app's dashboard
+  with parameter values pre-set in the URL.
 
 ## Next step
 
@@ -242,19 +238,18 @@ The tree primitives expose more than this walkthrough surfaces:
 3. Build a minimal `app.py` with one sheet and one visual; `pytest
    tests/json/test_<myapp>.py -v` to confirm it builds.
 4. Wire it into the CLI: append your app slug to the `APPS` tuple
-   in `cli/_helpers.py`, add `_generate_<myapp>()` to
-   `cli/_app_builders.py` (mirror `_generate_executives`) and add
-   one call to it in `cli/json.py`'s `json_apply` body. `json
-   apply` then emits + deploys your app alongside the others.
-5. Add e2e tests mirroring `tests/e2e/test_exec_*.py` once a
-   deployment exists.
+   in `cli/_helpers.py` and add `_generate_<myapp>()` to
+   `cli/_app_builders.py` (mirror `_generate_executives`).
+   `recon-gen dashboards` then serves your app alongside the others.
+5. Add e2e tests mirroring `tests/e2e/test_exec_*.py` once your
+   app renders.
 
 ## Related shape
 
 - [How do I swap the SQL behind a dataset?](how-do-i-swap-dataset-sql.md)
   — same `DatasetContract` mechanism your app's datasets use.
-- [How do I configure the deploy for my AWS account?](how-do-i-configure-the-deploy.md)
-  — once your app slug is in the `APPS` tuple, `json apply --execute`
-  emits + deploys it alongside the existing four every time.
+- [How do I self-host the dashboards?](../../reference/self-host.md)
+  — once your app slug is in the `APPS` tuple, `recon-gen dashboards`
+  serves it alongside the existing four.
 - [How do I reskin the dashboards for my brand?](how-do-i-reskin-the-dashboards.md)
   — theme presets in `common/theme.py` apply to your app the same way.

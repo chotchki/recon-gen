@@ -1,20 +1,21 @@
 # QuickSight quirks log
 
-> **QuickSight support is being REMOVED.** This renderer is now optional (the `[quicksight]` extra) and goes away in an upcoming release (Phase DW). MIGRATE NOW to the self-hosted dashboards (`recon-gen dashboards` / `recon-gen studio`) — the supported path, no AWS account.
+> **QuickSight is GONE.** The supported fronts are now the self-hosted dashboards (`recon-gen dashboards` / `recon-gen studio`) and the regulator-ready audit PDF (`recon-gen audit apply`) — no AWS account. **QuickSight shipped through v15.x; pin `recon-gen==15.x` with the `[quicksight]` extra if you still need it.** This page stays put as a REFERENCE for anyone on that pin, and as the record of WHY we left.
 
-Bugs, undocumented behaviors and silent-failure modes we've hit
-while building the four shipped dashboards. Each entry captures the
+We didn't leave because QuickSight is wrong. Managed BI, embed-in-an-AWS-portal, no self-host appetite — for some orgs it's the right call. We dropped it because THIS is an independent-validation tool for midsize institutions, and that mission can't carry QuickSight's recurring AWS cost-risk (a surprise $250/mo GenBI bill is the kind of thing that sinks the value proposition). The self-hosted renderer does the same job offline, on hardware you already own.
+
+Bugs, undocumented behaviors and silent-failure modes we hit
+while building the four shipped dashboards on QuickSight. Each entry captures the
 observed behavior, the user-visible symptom, the workaround we
-ship and the suggested fix on the QuickSight side.
+shipped and the suggested fix on the QuickSight side.
 
 Two jobs:
 
-1. **Defect reports.** We've collected enough QS-side issues that
-   filing them with the QuickSight team needs a single canonical
-   reference, not bug-by-bug archeology across this repo's commit
-   history.
-2. **Operator survival kit.** When a dashboard renders blank or a
-   control behaves oddly, scan this page first — most of the
+1. **Defect reports.** We collected enough QS-side issues that the
+   canonical reference belongs in one place, not bug-by-bug archeology
+   across this repo's commit history.
+2. **Survival kit for the pinned.** When a dashboard renders blank or a
+   control behaves oddly on a v15.x pin, scan this page first — most of the
    "didn't I just fix that?" moments are a returning instance of one
    of these classes.
 

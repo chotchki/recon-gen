@@ -124,7 +124,7 @@ A few patterns to know once the basic addition works:
 
 ### Filter dropdowns auto-populate from data
 
-QuickSight's multi-select filter doesn't enumerate values in
+The dashboard's multi-select filter doesn't enumerate values in
 its config — it reads them from the dataset's column at query
 time. The wiring in `apps/l1_dashboard/app.py` references the
 `rail_name` column directly; add a new value, dashboard renders
@@ -214,14 +214,14 @@ Once your new rail is wired:
    one-line assertion: ≥N rows of the new rail. Without
    demo coverage, the dashboard "works" but the new value's
    visual treatment never gets exercised in the e2e tests.
-3. **Re-deploy.** Chain `recon-gen schema apply -c
+3. **Re-seed and serve.** Chain `recon-gen schema apply -c
    config.yaml --execute && recon-gen data apply -c
    config.yaml --execute && recon-gen data refresh -c
-   config.yaml --execute` to rewrite seed data, then
-   `recon-gen json apply -c config.yaml -o out/ --execute`
-   to push the schema and dashboard changes. The new rail
-   appears in the Rail filter dropdown on the first dashboard
-   refresh.
+   config.yaml --execute` to rewrite seed data, then serve
+   it with `recon-gen dashboards -c config.yaml`. The
+   dashboards direct-query the DB, so the new rail appears in
+   the Rail filter dropdown on the first dashboard refresh — no
+   separate push step.
 
 ## Related walkthroughs
 

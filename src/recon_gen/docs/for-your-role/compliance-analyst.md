@@ -116,8 +116,8 @@ fingerprint binding the report to its source data.
 
 Use it when:
 
-- An auditor needs a printable artifact outside your QuickSight
-  account.
+- An auditor needs a printable artifact outside the live
+  dashboard.
 - A SAR file needs an attached reconciliation snapshot for the
   reporting period.
 - A regulator asks "show me what your books looked like on

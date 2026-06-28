@@ -80,14 +80,6 @@ Bullet list of 2–4 sibling pages the reader is likely to want next.
 Use relative paths (`[Drift Timelines](../l1/drift-timelines.md)`)
 so mkdocs and the App2 `?` route both resolve them.
 
-## QS parity notes
-
-If this sheet has known QuickSight rendering quirks (count-distinct,
-URL-param dropdown desync, etc.), name them and link to the
-quirks log entry (`[quirks log §<name>](../../reference/quicksight-quirks.md)`).
-Otherwise omit this section — the agents should NOT default to
-"no quirks" prose; absence is the signal.
-
 ```
 
 ## Vocabulary discipline — L1 / L2 are NOT universal
@@ -155,8 +147,8 @@ For every sheet:
    patterns).
 4. The Sheet's `Drill(` actions in `apps/<app>/app.py` (gives you the
    cross-sheet drill list).
-5. The relevant memory entries (e.g. `project_qs_url_parameter_no_control_sync.md`
-   for sheets with cross-app drills).
+5. The relevant memory entries (e.g. `feedback_demo_teaches_error_classes.md`
+   for the empty-state teaching contract).
 
 For sheets with cold-read findings in `docs/audits/_archive/v*_feedback.md`,
 read those too — they describe what an operator actually felt confused

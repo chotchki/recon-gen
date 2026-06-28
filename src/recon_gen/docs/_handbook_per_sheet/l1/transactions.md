@@ -64,11 +64,7 @@ If *App Info* shows that `latest_date` as null or the matview row count as zero 
 - [Pending Aging](pending-aging.md) — when you want to find stuck-Pending legs and their age bucket.
 - [Unbundled Aging](unbundled-aging.md) — when you want to find Posted legs waiting for the aggregator and their age bucket.
 - [Drift](drift.md) — the L1 integrity invariant that catches when postings disagree with stored balance; Transactions is the source-of-truth leg list for reconciling drift findings.
-- [Metadata Popup](metadata-popup.md) — the `{} View metadata` entry on the row-drill `⋯` menu; opens a side panel with the row's pretty-printed JSON metadata (App2-only).
-
-## QS parity notes
-
-- **URL-driven transfer ID dropdown.** When you arrive at this sheet via a drill from another sheet (e.g., Daily Statement's "View Transactions for this transfer"), QS may filter the data correctly but show the *Transfer* dropdown still at *All* — the data is right, the control is lying. App2 doesn't have this defect. See [quirks log §dependent-dropdown-no-refresh](../../reference/quicksight-quirks.md).
+- [Metadata Popup](metadata-popup.md) — the `{} View metadata` entry on the row-drill `⋯` menu; opens a side panel with the row's pretty-printed JSON metadata.
 
 ---
 

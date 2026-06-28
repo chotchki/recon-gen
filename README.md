@@ -33,7 +33,7 @@ Both render straight from the bundled L2 YAMLs (`tests/l2/{spec_example,sasquatc
 
 ## Architecture
 
-Everything generates from one L2 YAML — your institution's shape — plus your ETL feed, through one shared core, into three renderers. The core is layered **L1 → L2 → L3**: persona-blind primitives, per-app assembly in domain vocabulary, then your persona / customer flavor.
+Everything generates from one L2 YAML — your institution's shape — plus your ETL feed, through one shared core, into two renderers. The core is layered **L1 → L2 → L3**: persona-blind primitives, per-app assembly in domain vocabulary, then your persona / customer flavor.
 
 ```mermaid
 flowchart LR
@@ -50,7 +50,6 @@ flowchart LR
 
     YAML --> core
     FEED --> core
-    core --> QS["AWS QuickSight<br/>JSON resource graph"]
     core --> HTMX["Self-hosted HTMX<br/>Dashboards + Studio"]
     core --> PDF["Auditor-ready PDF<br/>audit report"]
 ```
@@ -70,27 +69,24 @@ We help you implement in two ways:
 
 Database backends — **PostgreSQL 17+** and **Oracle 19c+** for the on-prem / cloud-managed production targets, plus **DuckDB** as the zero-install integrator-laptop backend — a pure-Python wheel with an in-process vectorized executor and no server to stand up. The prior SQLite backend was dropped in v13.0.0 since it isn't optimized for analytics.
 
-Multiple runtime environments — pick what your auditors and analysts already trust:
+Two runtime surfaces — pick what your auditors and analysts already trust:
 
-> **QuickSight support is being REMOVED.** AWS now charges a flat **$250 / account / month [infrastructure fee](https://aws.amazon.com/quick/pricing/)** the moment you cross into the Professional tier (on top of $20–40 / user / month), and it keeps pushing the product HARDER — the forced rebrand to "Amazon Quick", the GenAI agent-hour upsell. That recurring, creeping AWS overhead doesn't fit an independent, offline-first validation tool. The QuickSight renderer is now optional (the `[quicksight]` extra) and goes away in an upcoming release. MIGRATE NOW to the self-hosted dashboards — the same four apps, no AWS account.
-
-- **Self-hosted HTMX web app** — the same dashboards with NO AWS dependency, so it runs offline. For sensitive deployments that can't reach external SaaS. The supported path.
-- **AWS QuickSight** — managed BI you embed in your own portal; permissions follow the QS user. OPTIONAL (the `[quicksight]` extra; a plain install is QS-free) and BEING REMOVED in an upcoming release as AWS keeps changing their pricing.
-- **Auditor-ready PDF audit report** — printable and cryptographically fingerprinted (optionally pyHanko-signed). Same source data as the dashboards, and an end-of-pipeline [4-way agreement test](https://github.com/chotchki/recon-gen/blob/main/tests/e2e/qs_browser/test_audit_invariants_agreement.py) (against the underlying sql) gates that they stay in agreement.
+- **Self-hosted HTMX web app** — the four apps as dashboards you run yourself, offline, no external service in the loop. For sensitive deployments that can't reach external SaaS.
+- **Auditor-ready PDF audit report** — printable and cryptographically fingerprinted (optionally pyHanko-signed). Same source data as the dashboards, and an end-of-pipeline 3-way agreement test (against the underlying sql) gates that they stay in agreement.
 
 ## How it's tested
 
 You can't ship a reconciliation tool on "trust me." This tool ships with:
 
-- **Layered test gates** that run in order — unit → db → app2 → qs_api → qs_browser — so a regression at layer N short-circuits before burning minutes on layer N+1.
+- **Layered test gates** that run in order — unit → db → app2 — so a regression at layer N short-circuits before burning minutes on layer N+1.
 - **Strong typing throughout** (Pyright strict on the core, NewType-wrapped identifiers and dataclass invariants), so an entire class of bug becomes a type error at the wiring site instead of a silent zero-row dashboard.
 - **Fuzz testing as a property axis** — every test variant runs against random L2 institution shapes (`fuzz:N` for N seeds, pinned via `f<seed>_..` for repro), so the same invariants check against shapes nobody hand-wrote.
 - **Deterministic, exhaustive test-data generation** — your L2 institution shape drives positive and negative scenarios that the harness plants automatically: drift, overdraft, limit breach, stuck-pending, stuck-unbundled, supersession audit, fanout, anomaly spikes, money-trail chains. Each scenario is shape-locked per `(L2 instance, dialect)`.
-- **Cross-runtime parity** — the same scenario fans out into the QuickSight cell, the self-hosted cell, the audit PDF and the underlying SQL — a 4-way agreement test gates that all four agree on every L1 invariant violation set (the drift the dashboard shows is the drift the PDF prints).
+- **Cross-runtime parity** — the same scenario fans out into the self-hosted cell, the audit PDF and the underlying SQL — a 3-way agreement test gates that all three agree on every L1 invariant violation set (the drift the dashboard shows is the drift the PDF prints).
 
 ---
 
-The CLI is five artifact groups — `recon-gen schema | data | json | docs | audit` — plus two server commands, `studio` and `dashboards` (below). Each artifact group runs `apply` / `clean` / `test` (audit adds `verify`, which recomputes a generated PDF's provenance fingerprint); anything destructive defaults to emit and needs `--execute` before it touches the DB, AWS or disk. Change the Python (or ask Claude) and re-run `json apply --execute` — you get a new dashboard.
+The CLI is four artifact groups — `recon-gen schema | data | docs | audit` — plus two server commands, `studio` and `dashboards` (below). Each artifact group runs `apply` / `clean` / `test` (audit adds `verify`, which recomputes a generated PDF's provenance fingerprint); anything destructive defaults to emit and needs `--execute` before it touches the DB or disk. Change the Python (or ask Claude) and refresh the page — you get a new dashboard.
 
 ## Demo Docs
 
@@ -109,12 +105,10 @@ Source lives in `src/recon_gen/docs/` (shipped with the wheel — extract with `
 
 - Python 3.14+
 - A PostgreSQL 17+ / Oracle 19c+ / DuckDB database URL for demo mode (PG and Oracle use SQL/JSON path syntax — `JSON_VALUE` / `JSON_QUERY` / `JSON_EXISTS`; DuckDB uses `json_extract_string`)
-- ONLY if you opt into the QuickSight target (the optional `[quicksight]` extra, BEING REMOVED — see above; the self-hosted dashboards need no AWS account): an AWS account with QuickSight Enterprise enabled, plus either a pre-existing QuickSight datasource ARN or the demo DB URL above
-  - **WARNING:** the Professional and Enterprise tiers carry a flat **$250 / account / month infrastructure fee** (NOT prorated) on top of the $20–40 / user / month seat — see [AWS's own pricing](https://aws.amazon.com/quick/pricing/). This is a big reason QuickSight is being removed.
 
 ### Install from PyPI
 
-The base package — the self-hosted dashboards, DuckDB demo mode and the docs, with no AWS SDK pulled in:
+The base package — the self-hosted dashboards, DuckDB demo mode and the docs:
 
 ```bash
 pip install recon-gen
@@ -154,8 +148,8 @@ Then invoke tools directly via the venv (no `source activate` needed):
 For a leaner install, swap `--all-extras` for the three real extras (collapsed from eight in BS.6 — one knob per persona):
 
 - `--extra dev` (unit tests + pyright)
-- `--extra prod` (everything a production run needs — DB drivers, AWS deploy, the self-hosted server, PDF + docs)
-- `--extra e2e` (Playwright + boto3 for the browser / API layers)
+- `--extra prod` (everything a production run needs — DB drivers, the self-hosted server, PDF + docs)
+- `--extra e2e` (Playwright for the browser layer)
 
 If you'd rather stick with pip, the standard PEP-621 path still works:
 
@@ -166,7 +160,7 @@ python3 -m venv .venv
 
 ### Configure
 
-> **v14.0.0 cfg shape (shipped 2026-06-14).** Replaced the previous flat-field shape with concern-grouped nested blocks (`aws:` / `db:` / `app2:` / `audit:` / `auth:` / `test:`) and `extends:` inheritance for base + per-env overlays. Field accessors are `cfg.aws.account_id` / `cfg.db.url` / `cfg.auth.aws.profile` etc. Full migration map (every v13 key → its v14 path): [`docs/audits/de_0_cfg_redesign.md#migration-v13x--v1400-hard-break`](docs/audits/de_0_cfg_redesign.md#migration-v13x--v1400-hard-break).
+> **v14.0.0 cfg shape (shipped 2026-06-14).** Replaced the previous flat-field shape with concern-grouped nested blocks (`db:` / `app2:` / `audit:` / `test:`) and `extends:` inheritance for base + per-env overlays. Field accessors are `cfg.db.url` / `cfg.db.dialect` / `cfg.db.table_prefix` etc. Full migration map (every v13 key → its v14 path): [`docs/audits/de_0_cfg_redesign.md#migration-v13x--v1400-hard-break`](docs/audits/de_0_cfg_redesign.md#migration-v13x--v1400-hard-break).
 
 See [`config.example.yaml`](https://github.com/chotchki/recon-gen/blob/main/config.example.yaml)
 
@@ -179,53 +173,32 @@ cp config.example.yaml config.yaml
 ```yaml
 # config.prod.yaml
 extends: ./config.base.yaml
-aws:
-  deployment_name: "recon-prod"
 db:
   url: "postgresql://prod-user:pass@prod-host:5432/recon"
+  table_prefix: "recon_prod"
 ```
 
-> Theme is declared inline on the L2 institution YAML's `theme:` block, not on the deploy config. When the L2 instance carries no `theme:` block, AWS QuickSight CLASSIC takes over at deploy.
+> Theme is declared inline on the L2 institution YAML's `theme:` block, not the run config. When the L2 instance carries no `theme:` block, the `DEFAULT_PRESET` in-canvas-accent fallback takes over (silent-fallback contract).
 
-All values can also be set via `RECON_GEN_`-prefixed environment variables (e.g. `RECON_GEN_AWS_ACCOUNT_ID` / `RECON_GEN_DEMO_DATABASE_URL` / `RECON_GEN_DIALECT`). Env vars override YAML.
-
-### Generate and deploy
-
-```bash
-# Generate JSON for all four bundled apps to out/
-recon-gen json apply -c config.yaml -o out/
-
-# Same emit, then deploy to AWS (delete-then-create, idempotent)
-recon-gen json apply -c config.yaml -o out/ --execute
-
-# Override the L2 instance (defaults to bundled spec_example)
-recon-gen json apply -c config.yaml -o out/ --l2 run/sasquatch_pr.yaml --execute
-```
-
-`json apply --execute` polls async resources (analyses, dashboards) until they reach a terminal state. Resources with the `ManagedBy: recon-gen` tag that aren't in the current output aren't touched — clean those up explicitly:
-
-```bash
-recon-gen json clean              # dry-run: list stale tagged resources
-recon-gen json clean --execute    # delete them
-```
+All values can also be set via `RECON_GEN_`-prefixed environment variables (e.g. `RECON_GEN_DEMO_DATABASE_URL` / `RECON_GEN_DIALECT`). Env vars override YAML.
 
 ## Demo mode
 
 A deterministic demo generator seeds the four apps so you can see them work without wiring up real data. Every app feeds two per-prefix base tables — `<db_table_prefix>_transactions` (every money-movement leg) and `<db_table_prefix>_daily_balances` (per-account end-of-day snapshots), where `<db_table_prefix>` is `cfg.db.table_prefix` (required).
 
 ```bash
-# Apply schema + seed to your demo database, then generate QuickSight JSON.
+# Apply schema + seed to your demo database, then serve the dashboards.
 # Requires: db.url + db.dialect in config.yaml and the `[prod]` extra
 # installed (bundles psycopg + oracledb; DuckDB needs no extra).
 # Per-prefix DDL + seed are emitted at apply time using cfg.db.table_prefix.
 recon-gen schema apply -c config.yaml --execute   # tables + matviews
 recon-gen data apply   -c config.yaml --execute   # 90-day baseline + plants
 recon-gen data refresh -c config.yaml --execute   # populate matviews
-recon-gen json apply   -c config.yaml -o out/ --execute  # JSON + AWS deploy
 recon-gen audit apply  -c config.yaml --execute -o report.pdf  # auditor-ready PDF (optional)
+recon-gen dashboards   -c config.yaml             # serve the four apps at /dashboards
 ```
 
-Datasets are all Direct Query (no SPICE), so seed changes show up immediately after a fresh `data apply --execute` + `data refresh --execute` — no QuickSight-side refresh needed.
+The self-hosted server re-runs every query on each page load (no cache), so seed changes show up immediately after a fresh `data apply --execute` + `data refresh --execute`.
 
 ### Demo scenarios
 
@@ -238,7 +211,7 @@ Pass `--l2 tests/l2/sasquatch_pr.yaml` (or your own) to switch the rendered hand
 
 ## Self-hosted: Dashboards and Studio
 
-The four apps render off the same L2 instance two ways. **AWS QuickSight** is one — `json apply --execute` pushes the JSON resource graph (above). The other is the self-hosted stack: an HTMX + d3 server that reads the database directly, no AWS account in the loop. It comes at two depths.
+The four apps render off the same L2 instance through the self-hosted stack: an HTMX + d3 server that reads the database directly, no external service in the loop. It comes at two depths.
 
 **Dashboards** is the lean read-only mount — one process serves all four apps plus the handbook at `/docs`:
 
@@ -250,36 +223,33 @@ recon-gen dashboards -c config.yaml                # one process, all 4 apps + t
 
 It speaks all three SQL dialects (PostgreSQL / Oracle / DuckDB); point `db.url` at any of them. The schema + seed have to already be applied (`schema apply --execute`, `data apply --execute`, `data refresh --execute`) — Dashboards only reads. It's stateless: every GET re-runs the query, filter state round-trips as `?param_X=…` query params (so the URL is the cache key), no auth/sessions — put it behind your own auth front on a network. All browser-side assets (htmx, d3, the filter widgets) ship inside the wheel — it runs offline.
 
-**Studio** (`recon-gen studio`) is everything Dashboards mounts plus the implementation surface we hand integrators, trainers and ETL engineers — the L2-YAML editor, the unified diagram (your accounts / rails / chains / templates as a graph you edit in place), the data-shaping panel (trainer knobs + scenario plants) and Deploy-changes orchestration with an ETL hook. The YAML on disk stays the source of truth; every save is an atomic write. This is the offline-iteration loop — edit the shape and refresh the page, no deploy cycle and no AWS round-trip.
+**Studio** (`recon-gen studio`) is everything Dashboards mounts plus the implementation surface we hand integrators, trainers and ETL engineers — the L2-YAML editor, the unified diagram (your accounts / rails / chains / templates as a graph you edit in place), the data-shaping panel (trainer knobs + scenario plants) and Deploy-changes orchestration with an ETL hook. The YAML on disk stays the source of truth; every save is an atomic write. This is the offline-iteration loop — edit the shape and refresh the page, no deploy cycle, no external round-trip.
 
-The self-hosted stack isn't a lesser copy of QuickSight. A 4-way agreement test (`scenario plants ⊆ direct matview SELECT == QuickSight == Dashboards`, `== audit PDF` where it applies) gates the release, so it matches QuickSight on every L1 invariant violation set — enforced, not just claimed. And with QuickSight on a deprecation path (AWS pricing, see above), this is where the tool is going. Full reference — what ships in the wheel, the maintainer recipes for bumping a vendored asset — in the handbook's [Self-hosting the dashboards](https://chotchki.github.io/recon-gen/reference/self-host/) page.
+A 3-way agreement test (`scenario plants ⊆ direct matview SELECT == Dashboards`, `== audit PDF` where it applies) gates the release, so the dashboards match the underlying SQL on every L1 invariant violation set — enforced, not just claimed. Full reference — what ships in the wheel, the maintainer recipes for bumping a vendored asset — in the handbook's [Self-hosting the dashboards](https://chotchki.github.io/recon-gen/reference/self-host/) page.
 
 ## Theming
 
-Theme is declared inline on the L2 institution YAML's `theme:` block. When the L2 instance carries no `theme:` block, `build_theme` returns `None` and AWS QuickSight CLASSIC takes over at deploy (silent-fallback contract). The single `DEFAULT_PRESET` in `common/theme.py` is the in-canvas-accent fallback for apps when their L2 instance declares no theme — no registry, no CLI flag.
+Theme is declared inline on the L2 institution YAML's `theme:` block. When the L2 instance carries no `theme:` block, `build_theme` returns `None` and the single `DEFAULT_PRESET` in `common/theme.py` — the in-canvas-accent fallback — takes over (silent-fallback contract). No registry, no CLI flag.
 
 To customize the demo persona's brand, launch studio and use its built-in editor!
 
 ## Tests
 
 ```bash
-./run_tests.sh up_to=unit                                  # ~20s, no DB / no AWS
+./run_tests.sh up_to=unit                                  # ~20s, no DB
 ./run_tests.sh up_to=db                                    # db layer, xdist-parallel
 ./run_tests.sh up_to=db --only test_drift                  # narrow within a layer (pytest -k)
-./run_tests.sh up_to=qs_browser                            # full chain through Playwright
-./run_tests.sh up_to=qs_api                                # API layer (boto3, live QS)
-./run_tests.sh sweep --yes                                 # cleanup orphan AWS resources
+./run_tests.sh up_to=app2                                  # full chain through Playwright
 ```
 
-The runner enforces ordering — invoking layer N runs layers 1..N-1 first. Layers: `unit → db → app2 → qs_api → qs_browser` (the standalone `deploy` layer was retired in Phase DI; QS deploy now fires inside pytest via the session-scoped `qs_deployed` autouse fixture in `tests/e2e/conftest.py` whenever the layer crosses into AWS-touching territory). See `CLAUDE.md::Test sequencing` for the full guide.
+The runner enforces ordering — invoking layer N runs layers 1..N-1 first. Layers: `unit → db → app2`. See `CLAUDE.md::Test sequencing` for the full guide.
 
-**Triage a specific failing test:** `./run_tests.sh triage <pytest_nodeid>` spawns the appropriate DB container, lets the `qs_deployed` fixture handle QS deploy idempotently, and drops into a screen-attached pdb at the failure line. Multi-client — both operator and assistant can drive pdb via `screen -x recon-gen-triage` / `screen -S recon-gen-triage -X stuff $'<cmd>\n'`. Teardown: `./run_tests.sh triage-down --yes` (kills the screen session, sweeps QS resources, stops the triage container). Full runbook: `CLAUDE.md::Triage workflow` section.
+**Triage a specific failing test:** `./run_tests.sh triage <pytest_nodeid>` spawns the appropriate DB container and drops into a screen-attached pdb at the failure line. Multi-client — both operator and assistant can drive pdb via `screen -x recon-gen-triage` / `screen -S recon-gen-triage -X stuff $'<cmd>\n'`. Teardown: `./run_tests.sh triage-down --yes` (kills the screen session and stops the triage container). Full runbook: `CLAUDE.md::Triage workflow` section.
 
 Coverage:
 
-- **Unit / integration**: models, tags, config, CLI, demo determinism + scenario coverage (per-instance SHA256 seed-hash locks), tree primitives + validators, dataset builders, visual builders, filter groups, cross-reference validation (dataset ARNs, filter bindings, visual ID uniqueness, sheet scoping), explanation coverage, schema + seed SQL structure for both Postgres + Oracle.
-- **E2E**: two layers — qs_api and qs_browser — that collect by default (the standalone `RECON_GEN_E2E=1` gate was retired in DJ.1); the QS legs skip when `RECON_E2E_USER_ARN` is unavailable (auto-derived from `cfg.auth.aws.profile`).
-  - *API layer (boto3)* — resource existence, status, dashboard structure (per-sheet visual counts, parameter / filter-group source-of-truth checks), dataset import health.
-  - *Browser layer (Playwright WebKit, headless)* — dashboard loads via pre-authenticated embed URL, sheet tabs, per-sheet visual counts + spot-checked titles, drill-downs, mutual-filter reconciliation tables, date-range filter narrowing, Show-Only-X toggles, Investigation slider + dropdown filters.
+- **Unit / integration**: models, tags, config, CLI, demo determinism + scenario coverage (per-instance SHA256 seed-hash locks), tree primitives + validators, dataset builders, visual builders, filter groups, cross-reference validation (dataset identifiers, filter bindings, visual ID uniqueness, sheet scoping), explanation coverage, schema + seed SQL structure for both Postgres + Oracle.
+- **E2E**: the app2 browser layer collects by default (the standalone `RECON_GEN_E2E=1` gate was retired in DJ.1).
+  - *Browser layer (Playwright WebKit, headless)* — the self-hosted dashboards load, sheet tabs, per-sheet visual counts + spot-checked titles, drill-downs, mutual-filter reconciliation tables, date-range filter narrowing, Show-Only-X toggles, Investigation slider + dropdown filters.
 
-E2E tunables (env vars): `RECON_E2E_PAGE_TIMEOUT`, `RECON_E2E_VISUAL_TIMEOUT`, `RECON_E2E_USER_ARN`, `RECON_E2E_IDENTITY_REGION`. `RECON_E2E_USER_ARN` is auto-derived from `cfg.auth.aws.profile` (via STS + `quicksight:ListUsers`) when unset, so the operator-side cfg block is the canonical wiring. Failure screenshots land in `tests/e2e/screenshots/<app>/` (gitignored).
+E2E tunables (env vars): `RECON_E2E_PAGE_TIMEOUT`, `RECON_E2E_VISUAL_TIMEOUT`. Failure screenshots land in `tests/e2e/screenshots/<app>/` (gitignored).
