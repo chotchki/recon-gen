@@ -17,14 +17,13 @@
 # Usage examples:
 #   ./run_tests.sh up_to=unit                  # pytest direct (no orchestration)
 #   ./run_tests.sh up_to=db                    # runner: one pytest, with container
-#   ./run_tests.sh up_to=app2_browser          # full local chain (DW.5.2: QuickSight removed)
+#   ./run_tests.sh up_to=agreement             # full local chain, terminal layer (DW.11)
 #   ./run_tests.sh status                      # what's currently running
 #   ./run_tests.sh pyright [<paths>...]        # fast standalone type-check
 #
 # Cfg → env injection: `tests/conftest.py::_derive_env_from_cfg`
-# promotes `cfg.auth.aws_profile` → `AWS_PROFILE`,
-# `cfg.default_l2_instance` → `RECON_GEN_TEST_L2_INSTANCE`, and the
-# resolved cfg path → `RECON_GEN_CONFIG`. Operator-set env wins.
+# promotes `cfg.db.default_l2_instance` → `RECON_GEN_TEST_L2_INSTANCE`
+# and the resolved cfg path → `RECON_GEN_CONFIG`. Operator-set env wins.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -32,8 +31,8 @@ cd "$SCRIPT_DIR"
 
 # Auto-load run/secrets.env so callers never need the `set -a; source`
 # dance — `./run_tests.sh` is meant to just work. The file holds dev-only
-# secrets (e.g. RECON_GEN_CLOUDFLARE_TOKEN for the QS→Docker-PG DNS
-# forward the qs_browser layer's TLS pre-flight requires).
+# secrets (e.g. RECON_GEN_CLOUDFLARE_TOKEN for the App2 HTTPS TLS cert
+# coordinator the app2 / app2_browser layers use when cfg.app2.tls is set).
 #
 # Env wins, file fills the gap: a var already in the environment (CI's
 # GitHub secrets, or an operator's exported value) is NEVER overwritten;
@@ -56,12 +55,12 @@ if [ ! -x ".venv/bin/python" ]; then
 fi
 
 # Y.2.gate.h+i.0 — unset env vars the runner / conftest derive from cfg.
-# Stale values in the operator's shell would shadow the cfg-injected ones
-# and confuse triage when "why is the runner using THIS user / profile /
-# L2?" doesn't match what cfg declares. Pre-existing values are never
-# useful: cfg is the source of truth, populated from cfg.auth.aws_profile,
-# the STS+ListUsers derivation, and cfg.default_l2_instance respectively.
-unset AWS_PROFILE RECON_E2E_USER_ARN RECON_GEN_TEST_L2_INSTANCE
+# A stale RECON_GEN_TEST_L2_INSTANCE in the operator's shell would shadow
+# the cfg-injected one and confuse triage when "why is the runner using
+# THIS L2?" doesn't match what cfg declares. cfg is the source of truth
+# (cfg.db.default_l2_instance). (DW.11 — AWS_PROFILE / RECON_E2E_USER_ARN
+# dropped: no AWS, nothing to unset.)
+unset RECON_GEN_TEST_L2_INSTANCE
 
 # Fast path: bare `up_to=unit` is pure unit + json + cli + docs + schema
 # + l2 tests — no DB, no AWS, no L2-flavored fixtures. Direct pytest

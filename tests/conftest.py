@@ -115,11 +115,11 @@ def pytest_configure(config: Any) -> None:
     for _mark_name, _mark_doc in _CB_MARK_DOCS.items():
         config.addinivalue_line("markers", f"{_mark_name}: {_mark_doc}")
 
-    # CB.17.e — derive AWS_PROFILE + RECON_GEN_TEST_L2_INSTANCE from the
-    # operator cfg so bare `pytest` (no runner wrapper) gets the same env
-    # the runner used to inject. Pre-existing env wins (operator overrides
-    # cfg). Failure is silent — tests that need these will skip or fail
-    # loudly with their own actionable messages.
+    # CB.17.e — derive RECON_GEN_TEST_L2_INSTANCE from the operator cfg so
+    # bare `pytest` (no runner wrapper) gets the same env the runner used
+    # to inject. Pre-existing env wins (operator overrides cfg). Failure is
+    # silent — tests that need these will skip or fail loudly with their
+    # own actionable messages.
     _derive_env_from_cfg()
 
 
@@ -134,9 +134,8 @@ _DEFAULT_CFG_CANDIDATES: tuple[Path, ...] = (
 def _derive_env_from_cfg() -> None:
     """Cfg → env injection at session start, runner-free.
 
-    Promotes three values from the operator cfg into process env:
+    Promotes two values from the operator cfg into process env:
     - ``RECON_GEN_CONFIG`` — the resolved cfg path (when not pre-set)
-    - ``AWS_PROFILE`` — from ``cfg.auth.aws.profile``
     - ``RECON_GEN_TEST_L2_INSTANCE`` — from ``cfg.db.default_l2_instance``
 
     Pre-existing env wins (operator overrides cfg). Mirrors the runner's
@@ -170,10 +169,6 @@ def _derive_env_from_cfg() -> None:
         peek_cfg = load_config(str(cfg_path))
     except Exception:  # noqa: BLE001 — cfg peek is best-effort
         return
-
-    aws_profile = peek_cfg.auth.aws.profile
-    if aws_profile and "AWS_PROFILE" not in os.environ:
-        os.environ["AWS_PROFILE"] = aws_profile
 
     l2_default = peek_cfg.db.default_l2_instance
     if l2_default and RECON_GEN_TEST_L2_INSTANCE.get_or_none() is None:
