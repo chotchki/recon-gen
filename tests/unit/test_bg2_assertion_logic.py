@@ -40,7 +40,7 @@ from recon_gen.common.sql.dialect import Dialect
 from tests._test_helpers import make_test_config
 from tests.e2e._drivers.base import query_db_via_cfg
 from tests.e2e._kpi_parse import parse_currency_kpi as _parse_currency_kpi
-from tests.e2e.test_l1_account_filters import _KPI_TO_COLUMN
+from tests.e2e.app2_browser.test_l1_account_filters import _KPI_TO_COLUMN
 
 if TYPE_CHECKING:
     from recon_gen.common.config import Config

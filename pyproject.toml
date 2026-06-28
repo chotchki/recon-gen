@@ -389,7 +389,6 @@ testpaths = ["tests"]
 markers = [
     "e2e: end-to-end tests requiring deployed AWS resources",
     "api: API-only e2e tests (no browser)",
-    "browser: browser-based e2e tests (requires Playwright)",
 ]
 
 # DG.3 — always-on hang diagnostic. Pytest arms a faulthandler timer

@@ -47,7 +47,6 @@ if TYPE_CHECKING:
 
 pytestmark = [
     pytest.mark.e2e,
-    pytest.mark.browser,
 ]
 
 

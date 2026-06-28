@@ -123,7 +123,6 @@ def _build_studio_asgi(cache: L2InstanceCache) -> object:
     )
 
 
-@pytest.mark.browser
 def test_browser_operator_creates_account_via_studio_nav(
     tmp_path: Path,
 ) -> None:
@@ -167,7 +166,6 @@ def test_browser_operator_creates_account_via_studio_nav(
         )
 
 
-@pytest.mark.browser
 def test_browser_operator_creates_rail_with_role_checkbox(
     tmp_path: Path,
 ) -> None:
@@ -220,7 +218,6 @@ def test_browser_operator_creates_rail_with_role_checkbox(
         )
 
 
-@pytest.mark.browser
 @pytest.mark.parametrize(
     "fixture_id",
     [
@@ -265,7 +262,7 @@ def test_browser_full_create_l2_structural_equality(
         reference_path.write_text(random_l2_yaml(12345))
     else:
         # `spec_example` and `sasquatch_pr` live under tests/l2/
-        source = Path(__file__).parent.parent / "l2" / f"{fixture_id}.yaml"
+        source = Path(__file__).parent.parent.parent / "l2" / f"{fixture_id}.yaml"
         reference_path = tmp_path / f"{fixture_id}_reference.yaml"
         reference_path.write_text(source.read_text())
     reference = load_instance(reference_path)
@@ -349,7 +346,6 @@ def test_browser_full_create_l2_structural_equality(
             )
 
 
-@pytest.mark.browser
 def test_browser_operator_creates_rail_with_bb2_create_new_reconciler(
     tmp_path: Path,
 ) -> None:
@@ -451,7 +447,6 @@ def test_browser_operator_creates_rail_with_bb2_create_new_reconciler(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.browser
 @pytest.mark.parametrize(
     "kind, list_path",
     [
@@ -481,7 +476,7 @@ def test_browser_card_delete_swaps_button_inplace_without_toggling_details(
     """
     import shutil
     fixture_src = (
-        Path(__file__).parent.parent / "l2" / "spec_example.yaml"
+        Path(__file__).parent.parent.parent / "l2" / "spec_example.yaml"
     )
     fixture_dst = tmp_path / "delete_flow.yaml"
     shutil.copy(fixture_src, fixture_dst)
@@ -548,7 +543,6 @@ def test_browser_card_delete_swaps_button_inplace_without_toggling_details(
         )
 
 
-@pytest.mark.browser
 def test_browser_delete_confirm_flow_completes_and_removes_entity(
     tmp_path: Path,
 ) -> None:
@@ -564,7 +558,7 @@ def test_browser_delete_confirm_flow_completes_and_removes_entity(
     """
     import shutil
     fixture_src = (
-        Path(__file__).parent.parent / "l2" / "spec_example.yaml"
+        Path(__file__).parent.parent.parent / "l2" / "spec_example.yaml"
     )
     fixture_dst = tmp_path / "delete_flow_e2e.yaml"
     shutil.copy(fixture_src, fixture_dst)
@@ -652,7 +646,6 @@ def test_browser_delete_confirm_flow_completes_and_removes_entity(
         )
 
 
-@pytest.mark.browser
 def test_browser_list_page_delete_removes_article_without_manual_reload(
     tmp_path: Path,
 ) -> None:
@@ -674,7 +667,7 @@ def test_browser_list_page_delete_removes_article_without_manual_reload(
     """
     import shutil
     fixture_src = (
-        Path(__file__).parent.parent / "l2" / "spec_example.yaml"
+        Path(__file__).parent.parent.parent / "l2" / "spec_example.yaml"
     )
     fixture_dst = tmp_path / "list_cascade_reload.yaml"
     shutil.copy(fixture_src, fixture_dst)
@@ -759,7 +752,6 @@ def test_browser_list_page_delete_removes_article_without_manual_reload(
         )
 
 
-@pytest.mark.browser
 def test_browser_card_delete_disabled_when_referenced(
     tmp_path: Path,
 ) -> None:
@@ -778,7 +770,7 @@ def test_browser_card_delete_disabled_when_referenced(
     """
     import shutil
     fixture_src = (
-        Path(__file__).parent.parent / "l2" / "spec_example.yaml"
+        Path(__file__).parent.parent.parent / "l2" / "spec_example.yaml"
     )
     fixture_dst = tmp_path / "delete_refused.yaml"
     shutil.copy(fixture_src, fixture_dst)

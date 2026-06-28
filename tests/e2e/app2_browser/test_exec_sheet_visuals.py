@@ -26,7 +26,7 @@ from recon_gen.apps.executives.datasets import (
 )
 from tests.e2e._kpi_parse import parse_currency_kpi, parse_int_kpi
 
-from .tree_validator import TreeValidator
+from tests.e2e.tree_validator import TreeValidator
 from recon_gen.common.config import Config
 
 
@@ -38,7 +38,6 @@ if TYPE_CHECKING:
 
 pytestmark = [
     pytest.mark.e2e,
-    pytest.mark.browser,
     tier(Tier.APP2),
     needs(Need.PLAYWRIGHT),
 ]

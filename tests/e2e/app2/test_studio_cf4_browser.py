@@ -60,7 +60,6 @@ def heavy_cache(tmp_path: Path) -> L2InstanceCache:
     return L2InstanceCache.from_path(dst)
 
 
-@pytest.mark.browser
 def test_summary_search_filters_section_under_heavy_density(
     heavy_cache: L2InstanceCache,
 ) -> None:
@@ -113,7 +112,6 @@ def test_summary_search_filters_section_under_heavy_density(
         )
 
 
-@pytest.mark.browser
 def test_pager_advances_through_pages_with_state_preserved(
     heavy_cache: L2InstanceCache,
 ) -> None:
@@ -164,7 +162,6 @@ def test_pager_advances_through_pages_with_state_preserved(
         )
 
 
-@pytest.mark.browser
 def test_collapsed_card_expands_to_full_body_on_toggle(
     heavy_cache: L2InstanceCache,
 ) -> None:

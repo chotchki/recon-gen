@@ -20,7 +20,7 @@ from tests._marks import Need, Tier, needs, tier
 
 from recon_gen.apps.l2_flow_tracing.app import _CHAINS_NAME
 
-from ._l2ft_dropdown_walk import walk_dropdown
+from tests.e2e._l2ft_dropdown_walk import walk_dropdown
 
 
 
@@ -30,7 +30,6 @@ if TYPE_CHECKING:
 
 pytestmark = [
     pytest.mark.e2e,
-    pytest.mark.browser,
     tier(Tier.APP2),
     needs(Need.PLAYWRIGHT),
 ]

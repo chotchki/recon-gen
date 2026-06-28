@@ -133,14 +133,13 @@ _HANG_THRESHOLDS: Final[dict[str, int]] = {
     "agreement": 240,   # ~seconds: JSON-artifact reads + set comparisons,
                         #           no DB / browser / AWS. db-like ceiling.
 }
-# CB.11.a.3 (2026-06-02) — renamed `api` → `qs_api`, `browser` →
-# `qs_browser` to match the `Tier.QS_API` / `Tier.QS_BROWSER` marks
-# defined in `tests/_marks.py`. The pytest mark selectors below still
-# use `-m api` / `-m browser` against the old-style `@pytest.mark.api`
-# / `@pytest.mark.browser` decorators — CB.6 will migrate selection to
-# `--tier=qs_api` / `--tier=qs_browser` once the test-file migration
-# (tests/e2e/qs_api/ + tests/e2e/qs_browser/ subdirs) finishes covering
-# the full set.
+# CB.6 / DY.1 — e2e layer selection is now DIRECTORY-based, not `-m mark`.
+# Each e2e layer selects its `tests/e2e/<tier>/` dir (db/ app2/
+# app2_browser/ + agreement/ via `--tier=agreement`), so the tier-dir IS
+# the run-set. DY.1 finished the migration: it moved the root browser
+# files into app2_browser/ and retired the `-m browser` selector + the
+# `browser` marker. (The vestigial `e2e` / `api` marks in pyproject are
+# still applied by a few files but no selector reads them — backlog.)
 # Y.2.gate.b.3.impl.layer (2026-05-07) — `app2` inserted as layer 3.7
 # (between db + deploy) per audit §7.10. App2 is the local-Docker
 # fast-feedback gate: same dataset SQL as QS, no AWS contact, runs
@@ -700,16 +699,18 @@ def _layer_command(
         cmd += ["-n", str(opts.parallel) if opts.parallel > 1 else "auto"]
         return (cmd, env_addl)
     if layer == "app2_browser":
-        # DW.5.2 — terminal browser tier (was ``qs_browser`` before
-        # QuickSight was removed). Playwright/WebKit against locally-spun
-        # App 2 servers: the root ``tests/e2e/test_*.py`` parametrized
-        # browser tests (pytest mark ``browser``), now app2-only post-DW.6.
+        # Terminal browser tier (was ``qs_browser`` before QuickSight was
+        # removed). Playwright/WebKit against locally-spun App 2 servers.
         #
-        # Select by the ``browser`` mark, but ``--ignore`` the per-tier
-        # subdirs — ``app2/`` files own the ``app2`` layer (and six of them
-        # ALSO carry ``mark.browser``, so without the ignore they'd
-        # double-run here); ``db/`` + ``agreement/`` have their own layers.
-        # That leaves exactly the root e2e browser files.
+        # DY.1 finished the CB.6 ``-m mark`` → ``--tier`` migration: these
+        # tests moved into ``tests/e2e/app2_browser/`` and the layer now
+        # selects that DIRECTORY (like db/ + app2/), so the tier-dir IS the
+        # run-set. The legacy ``-m browser`` selector + the three
+        # ``--ignore`` hacks + the ``browser`` marker are retired — a
+        # tier-marked file that forgot the mark used to run NOWHERE
+        # (test_dashboard_driver.py); the reconciliation gate
+        # (tests/unit/test_layer_coverage_reconciliation.py) now makes that
+        # unrepresentable.
         nworkers = str(opts.parallel) if opts.parallel > 1 else "4"
         # BR.x — Oracle cells lower the cap to 2. Oracle SE2 19c has no
         # DRCP (project_drcp_on_aws_oracle_dead_end) so every worker
@@ -732,11 +733,8 @@ def _layer_command(
                 pass
         only = ["-k", opts.only] if opts.only else []
         cmd = [
-            str(_VENV_BIN / "pytest"), "tests/e2e/",
-            "-m", "browser", "-q",
-            "--ignore=tests/e2e/app2",
-            "--ignore=tests/e2e/db",
-            "--ignore=tests/e2e/agreement",
+            str(_VENV_BIN / "pytest"), "tests/e2e/app2_browser/",
+            "-q",
             *only, *_cov_args,
             "-n", nworkers,
             # Y.7-followup — auto-retry a flaky browser test
