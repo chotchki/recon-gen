@@ -22,7 +22,7 @@ jobs:
 
       - name: Install uv (also installs Python 3.14 per .python-version)
         # See ci.yml for the rationale on dropping actions/setup-python.
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v8
         with:
           enable-cache: true
           python-version: "3.14"
