@@ -2,7 +2,7 @@
 
 > **QuickSight is GONE.** The supported fronts are now the self-hosted dashboards (`recon-gen dashboards` / `recon-gen studio`) and the regulator-ready audit PDF (`recon-gen audit apply`) — no AWS account. **QuickSight shipped through v15.x; pin `recon-gen==15.x` with the `[quicksight]` extra if you still need it.** This page stays put as a REFERENCE for anyone on that pin, and as the record of WHY we left.
 
-We didn't leave because QuickSight is wrong. Managed BI, embed-in-an-AWS-portal, no self-host appetite — for some orgs it's the right call. We dropped it because THIS is an independent-validation tool for midsize institutions, and that mission can't carry QuickSight's recurring AWS cost-risk (a surprise $250/mo GenBI bill is the kind of thing that sinks the value proposition). The self-hosted renderer does the same job offline, on hardware you already own.
+We didn't leave because QuickSight is wrong. Managed BI, embed-in-an-AWS-portal, no self-host appetite — for some orgs it's the right call. We dropped it because THIS is an independent-validation tool for midsize institutions, and that mission can't carry QuickSight's recurring AWS cost-risk (a surprise $250/mo GenBI bill is the kind of thing that sinks the value proposition). The self-hosted renderer does the same job offline, on hardware you already own or in your cloud provider of choice.
 
 Bugs, undocumented behaviors and silent-failure modes we hit
 while building the four shipped dashboards on QuickSight. Each entry captures the
