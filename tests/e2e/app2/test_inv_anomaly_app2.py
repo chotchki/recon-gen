@@ -143,7 +143,7 @@ def isolated_inv_app(
         app = build_investigation_app(
             isolated_cfg, l2_instance=_INSTANCE,
         )
-        app.emit_analysis()
+        app.validate()
         yield app
 
 

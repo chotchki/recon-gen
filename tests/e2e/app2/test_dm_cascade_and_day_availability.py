@@ -142,7 +142,7 @@ def dm_l1_app(cfg: "Config") -> "Iterator[App]":
     instance = _load_l2_instance()
     with isolated_dataset_registries():
         app = build_l1_dashboard_app(cfg, l2_instance=instance)
-        app.emit_analysis()
+        app.validate()
         yield app
 
 

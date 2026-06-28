@@ -299,7 +299,7 @@ def _build_app(short: str) -> App:
     # at tree-build time via the module-level contract registry).
     dataset_builder(cfg, inst)
     app = builder(cfg, l2_instance=inst)
-    app.emit_analysis()
+    app.validate()
     return app
 
 

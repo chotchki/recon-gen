@@ -171,7 +171,7 @@ def app2_results(
     build_all_l1_dashboard_datasets(cfg, instance)
     tree_app = build_l1_dashboard_app(cfg, l2_instance=instance)
     if tree_app.analysis is None:
-        tree_app.emit_analysis()
+        tree_app.validate()
     visual_fetcher, options_search_fetcher = make_live_db_fetchers_for_app(
         tree_app=tree_app, cfg=cfg,
     )

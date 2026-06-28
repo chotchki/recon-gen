@@ -498,7 +498,7 @@ def require_l2ft_feature(l2_instance: "L2Instance", feature: str) -> None:
 
 @pytest.fixture(scope="session")
 def inv_app(cfg: Config) -> "App":
-    """Tree-built Investigation App (post-emit, auto-IDs resolved).
+    """Tree-built Investigation App (validated, auto-IDs resolved).
 
     Honors ``RECON_GEN_TEST_L2_INSTANCE`` so the tree's dataset ARNs
     match the deployed resources' L2 prefix (release.yml's per-tag
@@ -511,20 +511,20 @@ def inv_app(cfg: Config) -> "App":
     app = build_investigation_app(
         cfg, l2_instance=_resolve_test_l2_instance(),
     )
-    app.emit_analysis()
+    app.validate()
     return app
 
 
 @pytest.fixture(scope="session")
 def exec_app(cfg: Config) -> "App":
-    """Tree-built Executives App (post-emit, auto-IDs resolved).
+    """Tree-built Executives App (validated, auto-IDs resolved).
     See ``inv_app`` for the L2-instance-honoring rationale."""
     from recon_gen.apps.executives.app import build_executives_app
 
     app = build_executives_app(
         cfg, l2_instance=_resolve_test_l2_instance(),
     )
-    app.emit_analysis()
+    app.validate()
     return app
 
 
@@ -536,20 +536,20 @@ def l1_app(cfg: Config) -> "App":
     ``json apply`` was driven with for the deployed resources. Tree
     shape (and dataset ARNs) thus match the deployed shape exactly,
     making derived ``l1_dataset_ids`` ↔ deployed-DataSetId comparisons
-    trivially correct. Post-emit so auto-IDs are resolved.
+    trivially correct. Validated so auto-IDs are resolved.
     """
     from recon_gen.apps.l1_dashboard.app import build_l1_dashboard_app
 
     app = build_l1_dashboard_app(
         cfg, l2_instance=_resolve_test_l2_instance(),
     )
-    app.emit_analysis()
+    app.validate()
     return app
 
 
 @pytest.fixture(scope="session")
 def l2ft_app(cfg: Config) -> "App":
-    """Tree-built L2 Flow Tracing App (post-emit, auto-IDs resolved).
+    """Tree-built L2 Flow Tracing App (validated, auto-IDs resolved).
     See ``inv_app`` for the L2-instance-honoring rationale.
     ``build_l2_flow_tracing_app`` registers its datasets' CustomSQL +
     contracts internally (``build_all_l2_flow_tracing_datasets``)."""
@@ -560,7 +560,7 @@ def l2ft_app(cfg: Config) -> "App":
     app = build_l2_flow_tracing_app(
         cfg, l2_instance=_resolve_test_l2_instance(),
     )
-    app.emit_analysis()
+    app.validate()
     return app
 
 

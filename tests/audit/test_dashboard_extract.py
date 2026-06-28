@@ -73,7 +73,7 @@ def l1_app() -> "App":
 
     cfg = load_config(None)
     app = build_l1_dashboard_app(cfg)
-    app.emit_analysis()
+    app.validate()
     return app
 
 

@@ -147,7 +147,7 @@ def _walk_visual_ids() -> list[tuple[str, str]]:
 
     ids: list[tuple[str, str]] = []
     for label, tree_app in apps:
-        tree_app.emit_analysis()
+        tree_app.validate()
         analysis = tree_app.analysis
         if analysis is None:
             continue

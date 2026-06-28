@@ -14,7 +14,6 @@ is the analogous gate for the dashboard analysis prose.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from recon_gen.apps.investigation.app import build_investigation_app
@@ -26,12 +25,26 @@ _FIXTURES = Path(__file__).resolve().parent.parent / "l2"
 
 
 def _analysis_blob(l2_name: str) -> str:
-    """Build the Investigation analysis for an L2 fixture → its JSON text."""
+    """Build the Investigation analysis tree for an L2 fixture → its
+    text-box prose, where the getting-started welcome copy lives.
+
+    Post-DW the AWS-JSON emit is gone; the prose is read straight from
+    the tree's ``sheet.text_boxes`` content (the renderer-agnostic
+    source App2 reads too). ``validate()`` resolves auto-IDs + runs the
+    structural checks the old ``emit_analysis()`` ran, so a malformed
+    tree still surfaces here.
+    """
     inst = load_instance(_FIXTURES / l2_name)
     cfg = make_test_config(db_table_prefix="t")
     build_all_datasets(cfg, inst)
     app = build_investigation_app(cfg, l2_instance=inst)
-    return json.dumps(app.emit_analysis().to_aws_json())
+    app.validate()
+    assert app.analysis is not None
+    return "\n".join(
+        tb.content
+        for sheet in app.analysis.sheets
+        for tb in sheet.text_boxes
+    )
 
 
 def test_neutral_instance_has_no_hardcoded_institution_name() -> None:

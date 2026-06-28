@@ -177,7 +177,7 @@ def _build_l1_app_with_stub() -> tuple[Any, dict[str, VisualId]]:
     # emit_analysis() resolves auto-IDs (visual.visual_id = AUTO → a
     # concrete UUID) in addition to running validation walks; we need
     # the resolved form so the stub fetcher can key by visual_id.
-    tree_app.emit_analysis()
+    tree_app.validate()
     analysis = tree_app.analysis
     assert analysis is not None
     titles = {title for _, title in _SHEETS}

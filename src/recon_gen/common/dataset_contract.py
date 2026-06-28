@@ -408,7 +408,7 @@ def isolated_dataset_registries() -> Generator[None, None, None]:
         def isolated_inv_app(isolated_cfg):
             with isolated_dataset_registries():
                 app = build_investigation_app(isolated_cfg, l2_instance=_INSTANCE)
-                app.emit_analysis()
+                app.validate()
                 yield app
 
     See BL.0 in ``PLAN_ARCHIVE.md`` + ``docs/audits/_archive/bl_0_shared_state_keying_smell.md``
