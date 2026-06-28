@@ -81,7 +81,7 @@ jobs:
         # 3.12-only host upgrades transparently. Hosted runners keep
         # working the same way — uv prefers its own managed Python
         # over the runner-provided one when the version mismatches.
-        uses: astral-sh/setup-uv@v8
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
           python-version: "3.14"
@@ -584,7 +584,7 @@ jobs:
         # 3.12-only host upgrades transparently. Hosted runners keep
         # working the same way — uv prefers its own managed Python
         # over the runner-provided one when the version mismatches.
-        uses: astral-sh/setup-uv@v8
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
           python-version: "3.14"
@@ -652,7 +652,7 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Install uv (Python 3.14 per .python-version)
-        uses: astral-sh/setup-uv@v8
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
           python-version: "3.14"
@@ -693,7 +693,7 @@ jobs:
         # 3.12-only host upgrades transparently. Hosted runners keep
         # working the same way — uv prefers its own managed Python
         # over the runner-provided one when the version mismatches.
-        uses: astral-sh/setup-uv@v8
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
           python-version: "3.14"
