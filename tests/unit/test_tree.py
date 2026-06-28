@@ -129,13 +129,12 @@ class TestDim:
     def test_currency_rejects_categorical_dim(self):
         # Money never makes sense on a categorical or date axis — wiring
         # currency=True on a non-numerical Dim is a typo, not an
-        # ergonomic shorthand. Fail loud at emit.
-        dim = Dim(
-            dataset=_DS_FOO, column="account_name", kind="categorical",
-            field_id="f-bad", currency=True,
-        )
-        with pytest.raises(AssertionError, match="kind='numerical'"):
-            dim.emit()
+        # ergonomic shorthand. Fail loud at construction (Dim.__post_init__).
+        with pytest.raises(ValueError, match="kind='numerical'"):
+            Dim(
+                dataset=_DS_FOO, column="account_name", kind="categorical",
+                field_id="f-bad", currency=True,
+            )
 
 
 class TestMeasure:
@@ -144,31 +143,29 @@ class TestMeasure:
     # FormatConfiguration at all so existing measures stay byte-identical.
     def test_currency_rejects_count_aggregations(self):
         """count / distinct_count are categorical (return row counts,
-        never money) — currency=True is an author bug, fail loud."""
-        import pytest as _pytest
-        m = Measure(
-            dataset=_DS_FOO, column="account_id", kind="count",
-            field_id="f-1", currency=True,
-        )
-        with _pytest.raises(AssertionError, match="numerical aggregations"):
-            m.emit()
+        never money) — currency=True is an author bug, fail loud at
+        construction (Measure.__post_init__)."""
+        with pytest.raises(ValueError, match="numerical aggregations"):
+            Measure(
+                dataset=_DS_FOO, column="account_id", kind="count",
+                field_id="f-1", currency=True,
+            )
 
     def test_v11_24_1_rejects_numerical_aggregation_over_datetime_column(self):
         """v11.24.1 regression guard: ``Measure.{sum,max,min,average}``
-        over a DATETIME-declared column has to fail at emit time. QS
-        rejects ``NumericalMeasureField`` over non-INTEGER/DECIMAL
+        over a DATETIME-declared column has to fail validation. QS
+        rejected ``NumericalMeasureField`` over non-INTEGER/DECIMAL
         columns at analysis-create time; v11.24.0's BO.12 "Latest Leg"
         KPI bound ``postings["posting"].max()`` over a DATETIME column
-        and took out the L2 Flow Tracing deploy in CI. The guard now
-        fires at emit time so the same shape fails the unit + json
-        layers before deploy ever runs.
+        and took out the L2 Flow Tracing deploy in CI. Post-DW the check
+        lives in ``Measure.validate_column_type()`` (walked by
+        ``App.validate()``) instead of the deleted emit path.
 
         The check leans on a registered ``DatasetContract`` declaring
         the column's type; without that ground truth it stays
         permissive (CalcField refs, missing contracts, missing columns
         all skip). This test uses a fresh test-local identifier so the
         registration doesn't pollute other tests' ``ds-foo`` state."""
-        import pytest as _pytest
         from recon_gen.common.dataset_contract import (
             ColumnSpec, DatasetContract, register_contract,
         )
@@ -182,34 +179,31 @@ class TestMeasure:
             ColumnSpec("amount", "DECIMAL"),
         ]))
 
-        # The numeric column emits cleanly under every numerical kind.
+        # The numeric column validates cleanly under every numerical kind.
         for kind in ("sum", "max", "min", "average"):
-            ok = getattr(Measure, kind)(
+            getattr(Measure, kind)(
                 dataset=ds, field_id=f"f-ok-{kind}", column="amount",
-            )
-            assert ok.emit().NumericalMeasureField is not None
+            ).validate_column_type()  # doesn't raise
 
-        # The DATETIME column trips the v11.24.1 guard on every
-        # numerical kind. Pinning all four because QS rejects the same
-        # field-well shape regardless of which aggregation it carries.
+        # The DATETIME column trips the v11.24.1 guard on every numerical
+        # kind. Pinning all four because QS rejected the same field-well
+        # shape regardless of which aggregation it carries.
         for kind in ("sum", "max", "min", "average"):
             bad = getattr(Measure, kind)(
                 dataset=ds, field_id=f"f-bad-{kind}", column="posting",
             )
-            with _pytest.raises(
+            with pytest.raises(
                 AssertionError,
                 match=r"INTEGER or DECIMAL columns, but 'posting' is declared",
             ):
-                bad.emit()
+                bad.validate_column_type()
 
-        # distinct_count emits a CategoricalMeasureField — QS accepts
-        # those over any column type — so the v11.24.1 guard MUST NOT
-        # fire even when pointed at the DATETIME column.
-        ok = Measure(
+        # distinct_count is categorical — accepts any column type — so the
+        # v11.24.1 guard MUST NOT fire even pointed at the DATETIME column.
+        Measure(
             dataset=ds, column="posting", kind="distinct_count",
             field_id="f-cat-distinct-count",
-        )
-        assert ok.emit().CategoricalMeasureField is not None
+        ).validate_column_type()  # doesn't raise (no-op for categorical)
 
 
 # ---------------------------------------------------------------------------
@@ -642,16 +636,17 @@ class TestFilterGroupScope:
         assert ret is fg  # chains
         assert len(fg._scope_entries) == 1
 
-    def test_emit_without_scope_raises(self):
+    def test_validate_scope_without_scope_raises(self):
         """A FilterGroup with no scope configured wouldn't apply to
-        anything at deploy — fail loud at construction rather than
-        silently emitting an empty configuration."""
+        anything at render time — validate_scope() fails it loud rather
+        than letting an empty-scope group through (the check App.validate()
+        walks; was a FilterGroup.emit() check pre-DW)."""
         fg = FilterGroup(
             filter_group_id=FilterGroupId("fg-test"),
             filters=[_category_filter("f-1", _DS_FOO, "col_a")],
         )
         with pytest.raises(ValueError, match="has no scope"):
-            fg.emit()
+            fg.validate_scope()
 
 class TestAnalysisAddFilterGroup:
     def test_add_filter_group_returns_ref(self):

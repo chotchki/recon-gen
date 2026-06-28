@@ -1630,6 +1630,36 @@ class App:
                     if isinstance(action, Drill):
                         action.resolve_source_shapes()
 
+    def _validate_measure_column_types(self) -> None:
+        """Walk every Measure leaf and enforce the v11.24.1 column-type
+        rule (numerical aggregations need INTEGER/DECIMAL columns). Was
+        a ``Measure.emit()`` check; relocated to the validate() walk
+        post-DW so it gates every renderer, after contracts register."""
+        if self.analysis is None:
+            return
+        for sheet in self.analysis.sheets:
+            for visual in sheet.visuals:
+                for attr, _role in _FIELD_SLOTS:
+                    slot: object = getattr(visual, attr, None)
+                    if slot is None:
+                        continue
+                    leaves: list[object] = (
+                        list(slot) if isinstance(slot, list)  # type: ignore[arg-type]: list(object) is list of leaves; slot narrowed by isinstance
+                        else [slot]
+                    )
+                    for leaf in leaves:
+                        if isinstance(leaf, Measure):
+                            leaf.validate_column_type()
+
+    def _validate_filter_group_scopes(self) -> None:
+        """Raise if any registered FilterGroup has no scope configured —
+        an unscoped group applies to nothing. Was a ``FilterGroup.emit()``
+        check; relocated to the validate() walk post-DW."""
+        if self.analysis is None:
+            return
+        for fg in self.analysis.filter_groups:
+            fg.validate_scope()
+
     def _validate_no_bare_string_columns(self) -> None:
         """Raise if any tree node uses an unvalidated column ref.
 
@@ -1768,6 +1798,8 @@ class App:
         self._validate_filter_param_settability()
         self._validate_drill_destinations()
         self._validate_drill_sources()
+        self._validate_measure_column_types()
+        self._validate_filter_group_scopes()
         # Phase DB.2 — App2 completeness gate. Walk every Visual + assert
         # each dataclass field has a registry entry. Catches the DA-shape
         # gap class (tree adds a field, emit() lands it in QS JSON, App2

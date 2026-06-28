@@ -684,6 +684,17 @@ class FilterGroup:
         self._scope_entries.append((sheet, None))
         return self
 
+    def validate_scope(self) -> None:
+        """Raise if no scope was configured — a FilterGroup with no scope
+        applies to nothing at render time. Called from ``App.validate()``;
+        used to live inside ``emit()``, relocated to the validation walk
+        post-DW so it gates every renderer."""
+        if not self._scope_entries:
+            raise ValueError(
+                f"FilterGroup {self.filter_group_id!r} has no scope — "
+                f"call scope_visuals() or scope_sheet() before validating."
+            )
+
     def emit(self) -> ModelFilterGroup:
         assert not isinstance(self.filter_group_id, _AutoSentinel), (
             "filter_group_id wasn't resolved — App.resolve_auto_ids() "

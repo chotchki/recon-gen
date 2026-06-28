@@ -121,13 +121,24 @@ class Dim:
     kind: DimKind = "categorical"
     date_granularity: TimeGranularity | None = field(default=None, kw_only=True)
     field_id: str | AutoResolved = field(default=AUTO, kw_only=True)
-    # Q.1.a.7 — currency=True emits a USD CurrencyDisplayFormatConfiguration
-    # on the underlying NumericalDimensionField (row-level money columns
-    # in tables typically use Dim.numerical, not Measure.sum, since they
-    # show the raw value rather than an aggregate). Only valid for
-    # ``kind="numerical"`` — money never makes sense as a categorical
-    # axis or a date axis. Asserted at emit time.
+    # Q.1.a.7 — currency=True renders the value as USD (2 decimals, comma
+    # thousands separator, "$" prefix). Row-level money columns in tables
+    # typically use Dim.numerical, not Measure.sum, since they show the
+    # raw value rather than an aggregate. Only valid for ``kind="numerical"``
+    # — money never makes sense as a categorical or date axis. Validated
+    # at construction (see __post_init__).
     currency: bool = field(default=False, kw_only=True)
+
+    def __post_init__(self) -> None:
+        # Money never makes sense on a categorical or date axis — wiring
+        # currency=True on a non-numerical Dim is a typo, not an ergonomic
+        # shorthand. Fail at the wiring site (construction), not later.
+        if self.currency and self.kind != "numerical":
+            raise ValueError(
+                f"Dim(currency=True) is only valid for kind='numerical', "
+                f"not {self.kind!r} — money values aren't categorical or "
+                f"date axes."
+            )
 
     @classmethod
     def date(
@@ -341,12 +352,10 @@ class Measure:
     column: ColumnRef
     kind: MeasureKind
     field_id: str | AutoResolved = field(default=AUTO, kw_only=True)
-    # Q.1.a — currency=True emits a USD CurrencyDisplayFormatConfiguration
-    # on the underlying NumericalMeasureField (2 decimal places, comma
-    # thousands separator, "$" prefix per QS's USD rendering). Only
-    # valid for numerical aggregations (sum/max/min/average) — count /
-    # distinct_count don't aggregate money. The emit-time assert below
-    # catches the misuse loud rather than silently dropping the format.
+    # Q.1.a — currency=True renders a USD value (2 decimal places, comma
+    # thousands separator, "$" prefix). Only valid for numerical
+    # aggregations (sum/max/min/average) — count / distinct_count don't
+    # aggregate money. Validated at construction (see __post_init__).
     currency: bool = field(default=False, kw_only=True)
     # v11.22.1 cold-read finding #18 (2026-05-26) — when QS sees an
     # AVERAGE aggregation with no FormatConfiguration it renders 3
@@ -357,6 +366,39 @@ class Measure:
     # DecimalPlaces=N + comma thousands separator. Mutually exclusive
     # with currency=True (currency already pins 2 decimals).
     decimals: int | None = field(default=None, kw_only=True)
+
+    def __post_init__(self) -> None:
+        # Currency only applies to numerical aggregations — count /
+        # distinct_count return row counts, never money. And currency
+        # already pins 2 decimals, so a separate decimals= is contradictory.
+        # Both are author bugs; fail at the wiring site (construction).
+        if self.currency and self.kind in ("count", "distinct_count"):
+            raise ValueError(
+                f"Measure(currency=True) is only valid for numerical "
+                f"aggregations (sum/max/min/average), not {self.kind!r} — "
+                f"count/distinct_count return row counts, never money."
+            )
+        if self.currency and self.decimals is not None:
+            raise ValueError(
+                "Measure cannot set both currency=True and decimals=N — "
+                "currency already pins 2 decimals. Drop decimals= or "
+                "currency=True."
+            )
+
+    def validate_column_type(self) -> None:
+        """Numerical aggregations (sum/max/min/average) require an
+        INTEGER/DECIMAL column at the contract level (v11.24.1 — QS
+        rejected non-numeric ones at analysis-create; a malformed tree
+        should fail on any renderer). No-op for count/distinct_count
+        (categorical — they read any column type). Permissive when the
+        contract / column isn't registered (see
+        ``_assert_numerical_column_type``).
+
+        Called from ``App.validate()`` — used to live inside
+        ``Measure.emit()``, relocated to the validation walk post-DW so
+        it fires after every contract has registered."""
+        if self.kind in _NUMERICAL_AGG:
+            _assert_numerical_column_type(self.dataset, self.column, self.kind)
 
     @classmethod
     def sum(
