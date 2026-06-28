@@ -23,11 +23,6 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from recon_gen.common.ids import ParameterName
 from recon_gen.common.models import (
     DateTimeDefaultValues,
-    DateTimeParameterDeclaration,
-    IntegerParameterDeclaration,
-    MappedDataSetParameter,
-    ParameterDeclaration,
-    StringParameterDeclaration,
 )
 from recon_gen.common.tree._helpers import TimeGranularity
 
@@ -41,30 +36,10 @@ if TYPE_CHECKING:
 DatasetParamMapping = tuple["Dataset", str]
 
 
-def _emit_mappings(
-    pairs: list[DatasetParamMapping] | None,
-) -> list[MappedDataSetParameter] | None:
-    """Translate a list of (Dataset, name) pairs into the AWS-shape
-    list. Returns None when the input is empty or None so the emitted
-    JSON omits the field cleanly."""
-    if not pairs:
-        return None
-    return [
-        MappedDataSetParameter(
-            DataSetIdentifier=ds.identifier,
-            DataSetParameterName=name,
-        )
-        for ds, name in pairs
-    ]
-
-
 @runtime_checkable
 class ParameterDeclLike(Protocol):
     """Structural type for parameter declaration tree nodes."""
     name: ParameterName
-
-    def emit(self) -> ParameterDeclaration: ...
-
 
 @dataclass(eq=False)
 class StringParam:
@@ -95,29 +70,6 @@ class StringParam:
     mapped_dataset_params: list[DatasetParamMapping] | None = None
     value_when_unset: str | None = None
 
-    def emit(self) -> ParameterDeclaration:
-        return ParameterDeclaration(
-            StringParameterDeclaration=StringParameterDeclaration(
-                ParameterValueType=(
-                    "MULTI_VALUED" if self.multi_valued else "SINGLE_VALUED"
-                ),
-                Name=self.name,
-                DefaultValues={"StaticValues": self.default},
-                MappedDataSetParameters=_emit_mappings(
-                    self.mapped_dataset_params,
-                ),
-                # QS API constraint: ValueWhenUnsetOption (NULL|
-                # RECOMMENDED_VALUE) is mutually exclusive with
-                # CustomValue. For a string custom value, emit
-                # ``CustomValue`` alone — no ValueWhenUnsetOption.
-                ValueWhenUnset=(
-                    {"CustomValue": self.value_when_unset}
-                    if self.value_when_unset is not None else None
-                ),
-            ),
-        )
-
-
 @dataclass(eq=False)
 class IntegerParam:
     """Integer-valued parameter declaration."""
@@ -125,21 +77,6 @@ class IntegerParam:
     default: list[int] = field(default_factory=list[int])
     multi_valued: bool = False
     mapped_dataset_params: list[DatasetParamMapping] | None = None
-
-    def emit(self) -> ParameterDeclaration:
-        return ParameterDeclaration(
-            IntegerParameterDeclaration=IntegerParameterDeclaration(
-                ParameterValueType=(
-                    "MULTI_VALUED" if self.multi_valued else "SINGLE_VALUED"
-                ),
-                Name=self.name,
-                DefaultValues={"StaticValues": self.default},
-                MappedDataSetParameters=_emit_mappings(
-                    self.mapped_dataset_params,
-                ),
-            ),
-        )
-
 
 @dataclass(eq=False)
 class DateTimeParam:
@@ -163,14 +100,3 @@ class DateTimeParam:
     time_granularity: TimeGranularity | None = None
     mapped_dataset_params: list[DatasetParamMapping] | None = None
 
-    def emit(self) -> ParameterDeclaration:
-        return ParameterDeclaration(
-            DateTimeParameterDeclaration=DateTimeParameterDeclaration(
-                Name=self.name,
-                TimeGranularity=self.time_granularity,
-                DefaultValues=self.default,
-                MappedDataSetParameters=_emit_mappings(
-                    self.mapped_dataset_params,
-                ),
-            ),
-        )

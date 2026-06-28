@@ -8,128 +8,21 @@ corresponding ``models.py`` ``Visual`` instance.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, Literal, Protocol, runtime_checkable
+from typing import ClassVar, Literal, Protocol, runtime_checkable
 
 from recon_gen.common.ids import VisualId
-from recon_gen.common.models import (
-    AxisDataOptions,
-    AxisDisplayOptions,
-    AxisLabelOptions,
-    AxisLabelReferenceOptions,
-    AxisLogarithmicScale,
-    AxisScale,
-    BarChartAggregatedFieldWells,
-    BarChartConfiguration,
-    BarChartFieldWells,
-    BarChartSortConfiguration,
-    BarChartVisual,
-    ChartAxisLabelOptions,
-    NumericAxisOptions,
-    ColumnIdentifier,
-    KPIConfiguration,
-    KPIFieldWells,
-    KPIOptions,
-    KPIVisual,
-    LineChartAggregatedFieldWells,
-    LineChartConfiguration,
-    LineChartFieldWells,
-    LineChartSortConfiguration,
-    LineChartVisual,
-    SankeyDiagramAggregatedFieldWells,
-    SankeyDiagramChartConfiguration,
-    SankeyDiagramFieldWells,
-    SankeyDiagramSortConfiguration,
-    SankeyDiagramVisual,
-    TableAggregatedFieldWells,
-    TableUnaggregatedFieldWells,
-    TableConfiguration,
-    TableFieldOption,
-    TableFieldOptions,
-    TableFieldWells,
-    TableVisual,
-    Visual,
-)
 
 from recon_gen.common.tree._helpers import (
     AUTO,
     AutoResolved,
     GridLayoutElementType,
     _AutoSentinel,
-    subtitle_label,
-    title_label,
 )
 from recon_gen.common.tree.actions import Action, Drill
 from recon_gen.common.tree.formatting import Drillable
-from recon_gen.common.tree.calc_fields import CalcField, resolve_column
+from recon_gen.common.tree.calc_fields import CalcField
 from recon_gen.common.tree.datasets import Dataset
-from recon_gen.common.tree.fields import Dim, FieldRef, Measure, resolve_field_id, row_one_calc_name
-
-
-def _field_label(leaf: Dim | Measure) -> str:
-    """Plain-English header label for a Dim / Measure leaf (v8.5.0).
-
-    Looks up the underlying ``Column``'s human_name from the
-    contract registry. Falls back to a title-cased ``CalcField`` name
-    when the leaf references a calc field instead of a real column.
-    """
-    from recon_gen.common.dataset_contract import _smart_title
-    from recon_gen.common.tree.calc_fields import CalcField as _CF
-    from recon_gen.common.tree.datasets import Column
-
-    col = leaf.column
-    if isinstance(col, Column):
-        return col.human_name
-    if isinstance(col, _CF):
-        # CalcField.name is auto-resolved at emit time, so by the
-        # time _field_label runs it's a real string. Belt-check via
-        # ``str()`` so pyright doesn't complain about the
-        # auto-sentinel union.
-        return _smart_title(str(col.name))
-    # Bare-string fallback (allow_bare_strings escape hatch).
-    return _smart_title(str(col))
-
-
-def _axis_label_apply_to(leaf: Dim | Measure) -> AxisLabelReferenceOptions:
-    """Build the ``ApplyTo`` ref binding a chart axis label to a leaf.
-
-    AWS QuickSight requires this binding (FieldId + dataset
-    column) for ``AxisLabelOptions.CustomLabel`` to render on the
-    axis. Without it, the override is silently ignored — the chart
-    parses cleanly but the axis still shows the raw column name. The
-    pre-v8.6.1 emit only set ``CustomLabel``, which was the v8.5.5
-    "axis labels keep not landing" symptom.
-
-    DB.3 follow-up — for ``count()`` measures, BL.1's
-    ``Measure.emit()`` rewrites the field-well's ``ColumnName`` to
-    the dataset's ``_row_one_*`` literal-1 calc field (so QS
-    translates ``count() → SUM(_row_one_*)``). The ``ApplyTo`` ref
-    must mirror that rewrite or QS sees a column-name mismatch
-    against the well and silently drops the ``CustomLabel`` —
-    surfaced as ``_row_one_<dataset>_ds (Sum)`` leaking onto the
-    QS-side axis instead of the configured ``value_label``.
-
-    See `quicksight-quirks.md` 4.5 (axis label needs ApplyTo).
-    """
-    from recon_gen.common.tree.calc_fields import CalcField as _CF
-    from recon_gen.common.tree.datasets import Column
-
-    if isinstance(leaf, Measure) and leaf.kind == "count":
-        column_name = row_one_calc_name(leaf.dataset)
-    else:
-        col = leaf.column
-        if isinstance(col, Column):
-            column_name = col.name
-        elif isinstance(col, _CF):
-            column_name = str(col.name)
-        else:
-            column_name = str(col)
-    return AxisLabelReferenceOptions(
-        FieldId=resolve_field_id(leaf),
-        Column=ColumnIdentifier(
-            DataSetIdentifier=leaf.dataset.identifier,
-            ColumnName=column_name,
-        ),
-    )
+from recon_gen.common.tree.fields import Dim, FieldRef, Measure
 
 
 @runtime_checkable
@@ -151,8 +44,6 @@ class VisualLike(Protocol):
     narrowing.
     """
     visual_id: VisualId | AutoResolved
-
-    def emit(self) -> Visual: ...
 
     def datasets(self) -> set[Dataset]: ...
 
@@ -190,6 +81,34 @@ def _require_non_blank_subtitle(visual: object) -> None:
         )
 
 
+def field_label(leaf: Dim | Measure) -> str:
+    """Plain-English header label for a Dim / Measure leaf (v8.5.0).
+
+    Looks up the underlying ``Column``'s human_name from the
+    contract registry. Falls back to a title-cased ``CalcField`` name
+    when the leaf references a calc field instead of a real column.
+
+    App2's ``_tree_fetcher`` reads this for chart axis / table column
+    headers (it survived the DW emit strip — it's a renderer-agnostic
+    label resolver, not QS serialization).
+    """
+    from recon_gen.common.dataset_contract import _smart_title
+    from recon_gen.common.tree.calc_fields import CalcField as _CF
+    from recon_gen.common.tree.datasets import Column
+
+    col = leaf.column
+    if isinstance(col, Column):
+        return col.human_name
+    if isinstance(col, _CF):
+        # CalcField.name is auto-resolved at emit time, so by the
+        # time field_label runs it's a real string. Belt-check via
+        # ``str()`` so pyright doesn't complain about the
+        # auto-sentinel union.
+        return _smart_title(str(col.name))
+    # Bare-string fallback (allow_bare_strings escape hatch).
+    return _smart_title(str(col))
+
+
 # BK.2 — QS-side icon enum + WCAG-AA hex colors for the KPI zero
 # indicator. The App2-side glyph (``"✓"`` / ``"✗"``) and Tailwind
 # color class (``"success"`` / ``"danger"``) live in
@@ -203,77 +122,6 @@ _KPI_BROKEN_ICON_QS = "X"
 # ``#b91c1c`` failed `CreateAnalysis`). Uppercase form.
 _KPI_HEALTHY_COLOR_HEX = "#15803D"  # tailwind green-700
 _KPI_BROKEN_COLOR_HEX = "#B91C1C"   # tailwind red-700
-
-
-def _emit_kpi_zero_indicator(value_measure: "Measure") -> dict[str, Any]:
-    """BK.2 — render the KPIValueZeroIndicator pair as a QS
-    ``KPIConditionalFormatting`` block. Two ``ConditionalFormattingOption``
-    entries on ``PrimaryValue.Icon`` — first matches zero (CHECKMARK +
-    green), second matches non-zero (X + red). QS picks the first
-    matching expression at render time.
-
-    Expression form (three layered shape gotchas, all caught by
-    run_tests deploy probe 2026-05-29 on the v11.24.x BK.2 spike):
-
-    1. Colors must be UPPERCASE hex (``^#[A-F0-9]{6}$``).
-    2. Expression references the COLUMN name, NOT the auto-derived
-       field_id — QS rejects ``{<uuid>} = 0`` with "Didn't find
-       field <uuid>".
-    3. The KPI's value is aggregated (sum / max / min / average), and
-       QS requires the aggregation function to wrap the column ref
-       in the expression — bare ``{drift} = 0`` fails with
-       "Aggregation Function can not be null in conditional
-       formatting expression for sourceColumn: drift". The lowercase
-       ``sum`` / ``max`` / ``min`` / ``avg`` function names work.
-
-    Aggregation kinds outside ``_NUMERICAL_AGG`` can't drive a zero
-    indicator (count / distinct_count are row counts, never directly
-    zero-vs-broken state); the construction-time guard above blocks
-    those cases before they reach emit.
-    """
-    column_name = resolve_column(value_measure.column)
-    kind = value_measure.kind
-    if kind not in _KPI_INDICATOR_AGG_FN:
-        raise AssertionError(
-            f"KPIValueZeroIndicator on Measure(kind={kind!r}) — only "
-            f"numerical aggregations sum/max/min/average can drive the "
-            f"indicator (count / distinct_count return row counts). "
-            f"Drop the indicator or change the aggregation."
-        )
-    agg = _KPI_INDICATOR_AGG_FN[kind]
-    aggregated_ref = f"{agg}({{{column_name}}})"
-    return {
-        "ConditionalFormattingOptions": [
-            {
-                "PrimaryValue": {
-                    "Icon": {
-                        "CustomCondition": {
-                            "Expression": f"{aggregated_ref} = 0",
-                            "IconOptions": {"Icon": _KPI_HEALTHY_ICON_QS},
-                            "Color": _KPI_HEALTHY_COLOR_HEX,
-                            "DisplayConfiguration": {
-                                "IconDisplayOption": "ICON_ONLY",
-                            },
-                        },
-                    },
-                },
-            },
-            {
-                "PrimaryValue": {
-                    "Icon": {
-                        "CustomCondition": {
-                            "Expression": f"{aggregated_ref} <> 0",
-                            "IconOptions": {"Icon": _KPI_BROKEN_ICON_QS},
-                            "Color": _KPI_BROKEN_COLOR_HEX,
-                            "DisplayConfiguration": {
-                                "IconDisplayOption": "ICON_ONLY",
-                            },
-                        },
-                    },
-                },
-            },
-        ],
-    }
 
 
 # Aggregation function names QS accepts inside the KPI conditional-
@@ -293,64 +141,6 @@ _KPI_OUTFLOW_ICON_QS = "ARROW_DOWN"
 # inflow/healthy side, red-700 for the outflow/broken side.
 _KPI_INFLOW_COLOR_HEX = "#15803D"
 _KPI_OUTFLOW_COLOR_HEX = "#B91C1C"
-
-
-def _emit_kpi_sign_indicator(value_measure: "Measure") -> dict[str, Any]:
-    """BK.9 — render the KPIValueSignIndicator pair as a QS
-    ``KPIConditionalFormatting`` block. Two ``ConditionalFormattingOption``
-    entries on ``PrimaryValue.Icon`` — first matches non-negative
-    (ARROW_UP + green), second matches negative (ARROW_DOWN + red).
-
-    Same three shape gotchas as ``_emit_kpi_zero_indicator`` apply
-    (uppercase hex, column-name expression refs, aggregation-fn
-    wrap). The comparison flips: ``>= 0`` for inflow, ``< 0`` for
-    outflow. Use this on a SIGNED currency KPI where the operator
-    needs the direction (sign) as a glance-readable signal — Exec
-    Net Money Moved being the BK.9 motivating example.
-    """
-    column_name = resolve_column(value_measure.column)
-    kind = value_measure.kind
-    if kind not in _KPI_INDICATOR_AGG_FN:
-        raise AssertionError(
-            f"KPIValueSignIndicator on Measure(kind={kind!r}) — only "
-            f"numerical aggregations sum/max/min/average can drive the "
-            f"indicator (count / distinct_count return row counts). "
-            f"Drop the indicator or change the aggregation."
-        )
-    agg = _KPI_INDICATOR_AGG_FN[kind]
-    aggregated_ref = f"{agg}({{{column_name}}})"
-    return {
-        "ConditionalFormattingOptions": [
-            {
-                "PrimaryValue": {
-                    "Icon": {
-                        "CustomCondition": {
-                            "Expression": f"{aggregated_ref} >= 0",
-                            "IconOptions": {"Icon": _KPI_INFLOW_ICON_QS},
-                            "Color": _KPI_INFLOW_COLOR_HEX,
-                            "DisplayConfiguration": {
-                                "IconDisplayOption": "ICON_ONLY",
-                            },
-                        },
-                    },
-                },
-            },
-            {
-                "PrimaryValue": {
-                    "Icon": {
-                        "CustomCondition": {
-                            "Expression": f"{aggregated_ref} < 0",
-                            "IconOptions": {"Icon": _KPI_OUTFLOW_ICON_QS},
-                            "Color": _KPI_OUTFLOW_COLOR_HEX,
-                            "DisplayConfiguration": {
-                                "IconDisplayOption": "ICON_ONLY",
-                            },
-                        },
-                    },
-                },
-            },
-        ],
-    }
 
 
 # CF.X-infra (2026-06-05) — 3-band threshold indicator. Green icon
@@ -373,88 +163,6 @@ def _emit_kpi_sign_indicator(value_measure: "Measure") -> dict[str, Any]:
 # state." See docs/reference/quicksight-quirks.md KPI icon enum entry.
 _KPI_AMBER_ICON_QS = "TRIANGLE"
 _KPI_AMBER_COLOR_HEX = "#B45309"  # tailwind amber-700 — WCAG-AA on white
-
-
-def _emit_kpi_threshold_banding(
-    value_measure: "Measure", banding: "KPIValueThresholdBanding",
-) -> dict[str, Any]:
-    """CF.X-infra — render a 3-band threshold indicator as a QS
-    ``KPIConditionalFormatting`` block. Three ``ConditionalFormattingOption``
-    entries on ``PrimaryValue.Icon``, evaluated in MOST-RESTRICTIVE-
-    FIRST order:
-
-    1. ``aggregated_ref >= red_at`` → ``X`` icon + red-700.
-    2. ``aggregated_ref >= amber_at`` → ``EXCLAMATION_CIRCLE`` icon
-       + amber-700.
-    3. ``aggregated_ref < amber_at`` → ``CHECKMARK`` icon + green-700.
-
-    QS picks the first matching expression; ordering RED → AMBER →
-    GREEN means amber doesn't shadow red and green only fires when
-    nothing else matched.
-
-    Same three shape gotchas as ``_emit_kpi_zero_indicator`` apply
-    (uppercase hex, column-name expression refs, aggregation-fn
-    wrap). count / distinct_count are blocked at construction with
-    guidance to use a sum-of-1s shape in the dataset SQL.
-    """
-    column_name = resolve_column(value_measure.column)
-    kind = value_measure.kind
-    if kind not in _KPI_INDICATOR_AGG_FN:
-        raise AssertionError(
-            f"KPIValueThresholdBanding on Measure(kind={kind!r}) — only "
-            f"numerical aggregations sum/max/min/average can drive the "
-            f"indicator. count / distinct_count return row counts; "
-            f"project a sum-of-1s in the dataset SQL and use kind='sum' "
-            f"instead."
-        )
-    agg = _KPI_INDICATOR_AGG_FN[kind]
-    aggregated_ref = f"{agg}({{{column_name}}})"
-    return {
-        "ConditionalFormattingOptions": [
-            {
-                "PrimaryValue": {
-                    "Icon": {
-                        "CustomCondition": {
-                            "Expression": f"{aggregated_ref} >= {banding.red_at}",
-                            "IconOptions": {"Icon": _KPI_BROKEN_ICON_QS},
-                            "Color": _KPI_BROKEN_COLOR_HEX,
-                            "DisplayConfiguration": {
-                                "IconDisplayOption": "ICON_ONLY",
-                            },
-                        },
-                    },
-                },
-            },
-            {
-                "PrimaryValue": {
-                    "Icon": {
-                        "CustomCondition": {
-                            "Expression": f"{aggregated_ref} >= {banding.amber_at}",
-                            "IconOptions": {"Icon": _KPI_AMBER_ICON_QS},
-                            "Color": _KPI_AMBER_COLOR_HEX,
-                            "DisplayConfiguration": {
-                                "IconDisplayOption": "ICON_ONLY",
-                            },
-                        },
-                    },
-                },
-            },
-            {
-                "PrimaryValue": {
-                    "Icon": {
-                        "CustomCondition": {
-                            "Expression": f"{aggregated_ref} < {banding.amber_at}",
-                            "IconOptions": {"Icon": _KPI_HEALTHY_ICON_QS},
-                            "Color": _KPI_HEALTHY_COLOR_HEX,
-                            "DisplayConfiguration": {
-                                "IconDisplayOption": "ICON_ONLY",
-                            },
-                        },
-                    },
-                },
-            },
-        ],
-    }
 
 
 @dataclass(frozen=True)
@@ -615,87 +323,6 @@ class KPI:
     def calc_fields(self) -> set[CalcField]:
         """CalcFields this visual references via its field-well leaves."""
         return {cf for m in self.values if (cf := m.calc_field()) is not None}
-
-    def emit(self) -> Visual:
-        assert not isinstance(self.visual_id, _AutoSentinel), (
-            "visual_id wasn't resolved — App.resolve_auto_ids() must run "
-            "before Visual.emit(). This shouldn't happen via App.emit_*()."
-        )
-        # KPI doesn't carry Actions per the QuickSight model — KPIs aren't
-        # data-point-clickable. If we ever need drill on a KPI, switch to
-        # a different visual type.
-        if self.value_zero_indicator is not None:
-            kpi_conditional = _emit_kpi_zero_indicator(self.values[0])
-        elif self.value_sign_indicator is not None:
-            kpi_conditional = _emit_kpi_sign_indicator(self.values[0])
-        elif self.value_threshold_banding is not None:
-            kpi_conditional = _emit_kpi_threshold_banding(
-                self.values[0], self.value_threshold_banding,
-            )
-        else:
-            kpi_conditional = None
-        return Visual(
-            KPIVisual=KPIVisual(
-                VisualId=self.visual_id,
-                Title=title_label(self.title),
-                Subtitle=subtitle_label(self.subtitle) if self.subtitle else None,
-                ConditionalFormatting=kpi_conditional,
-                ChartConfiguration=KPIConfiguration(
-                    FieldWells=KPIFieldWells(
-                        Values=[m.emit() for m in self.values] if self.values else None,
-                        # Hand-built KPIs emit explicit empty lists for
-                        # TargetValues + TrendGroups; without them, QS
-                        # rejects KPIOptions with the "Only
-                        # PrimaryValueFontSize display property..."
-                        # error. Apparently QS treats missing different
-                        # from empty even though docs imply both are
-                        # "empty". (M.4.4.8)
-                        TargetValues=[],
-                        TrendGroups=[],
-                    ),
-                    # M.4.4.8 — Without a fully-populated KPIOptions
-                    # block QS silently renders the visual blank
-                    # (verified against a hand-built control KPI on
-                    # 2026-04-29; QS-docs-claim-optional but in
-                    # practice the UI always produces this shape and
-                    # rejects partial shapes at CreateAnalysis time).
-                    # Mirror exactly what QS UI defaults to.
-                    #
-                    # DB.1.3 (2026-06-12) — Sparkline.Visibility flipped
-                    # from VISIBLE to HIDDEN. The tree never wired a
-                    # ``TrendGroups`` data source (KPIFieldWells emits
-                    # ``TrendGroups=[]``), so QS had nothing to plot and
-                    # rendered an empty sparkline placeholder below the
-                    # primary value. The block stays in the JSON to keep
-                    # the KPIOptions schema valid (QS still rejects
-                    # partial KPIOptions per M.4.4.8); HIDDEN tells QS
-                    # not to reserve UI space for it. App2's renderKPI
-                    # never drew a sparkline either, so HIDDEN=parity.
-                    # A future "App2 ⊇ QS richer graphics" pass can wire
-                    # both sides (TrendGroups + App2 trend renderer).
-                    KPIOptions=KPIOptions(
-                        Comparison={"ComparisonMethod": "PERCENT_DIFFERENCE"},
-                        PrimaryValueDisplayType="ACTUAL",
-                        SecondaryValueFontConfiguration={
-                            "FontSize": {"Relative": "EXTRA_LARGE"},
-                        },
-                        # ``Type`` stays "AREA" even though Visibility
-                        # is HIDDEN — botocore's QS schema requires Type
-                        # on the Sparkline block regardless of
-                        # visibility (caught in CI 20260613T000231Z: 5
-                        # KPIs failed CreateAnalysis with "Missing
-                        # required parameter in
-                        # KPIOptions.Sparkline: 'Type'"). The block stays
-                        # inert at render time since Visibility=HIDDEN.
-                        Sparkline={"Visibility": "HIDDEN", "Type": "AREA"},
-                        VisualLayoutOptions={
-                            "StandardLayout": {"Type": "VERTICAL"},
-                        },
-                    ),
-                ),
-            ),
-        )
-
 
 @dataclass(eq=False)
 class Table:
@@ -911,79 +538,6 @@ class Table:
                 deps.add(cf)
         return deps
 
-    def emit(self) -> Visual:
-        assert not isinstance(self.visual_id, _AutoSentinel), (
-            "visual_id wasn't resolved — see KPI.emit assertion."
-        )
-        sort_config: Any = None
-        if self.sort_by is not None:
-            sort_specs = (
-                self.sort_by if isinstance(self.sort_by, list)
-                else [self.sort_by]
-            )
-            sort_config = {
-                "RowSort": [
-                    {"FieldSort": {
-                        "FieldId": resolve_field_id(ref),
-                        "Direction": direction,
-                    }}
-                    for ref, direction in sort_specs
-                ],
-            }
-        if self.columns:
-            field_wells = TableFieldWells(
-                TableUnaggregatedFieldWells=TableUnaggregatedFieldWells(
-                    Values=[d.emit_unaggregated_field() for d in self.columns],
-                ),
-            )
-        else:
-            field_wells = TableFieldWells(
-                TableAggregatedFieldWells=TableAggregatedFieldWells(
-                    GroupBy=[d.emit() for d in self.group_by] if self.group_by else None,
-                    Values=[m.emit() for m in self.values] if self.values else None,
-                ),
-            )
-        # v8.5.0 — every column gets a CustomLabel header derived from
-        # the column's contract spec (display_name override or
-        # title-cased snake_case fallback). Without this QuickSight
-        # renders the raw snake_case column name as the table header,
-        # which reads poorly to non-technical analysts. ``_field_label``
-        # handles both Column refs (look up contract) and CalcField
-        # refs (use the calc-field name as-is).
-        field_options = TableFieldOptions(
-            SelectedFieldOptions=[
-                TableFieldOption(
-                    FieldId=resolve_field_id(leaf),
-                    CustomLabel=_field_label(leaf),
-                )
-                for leaf in self._all_leaves()
-            ],
-        )
-        return Visual(
-            TableVisual=TableVisual(
-                VisualId=self.visual_id,
-                Title=title_label(self.title),
-                Subtitle=subtitle_label(self.subtitle) if self.subtitle else None,
-                ChartConfiguration=TableConfiguration(
-                    FieldWells=field_wells,
-                    SortConfiguration=sort_config,
-                    FieldOptions=field_options,
-                ),
-                Actions=[a.emit() for a in self.actions] if self.actions else None,
-                ConditionalFormatting=(
-                    {"ConditionalFormattingOptions": [
-                        # Drillable.emit walks the Table's drill set to
-                        # pick the visual cue (accent vs accent+tint).
-                        # Drill is filtered out of Action to avoid
-                        # confusing SameSheetFilter or other action kinds.
-                        cf.emit([a for a in self.actions if isinstance(a, Drill)])
-                        for cf in self.conditional_formatting
-                    ]}
-                    if self.conditional_formatting else None
-                ),
-            ),
-        )
-
     def _all_leaves(self) -> list[Dim | Measure]:
         """All Dim/Measure leaves on this Table in field-well order.
 
@@ -1071,102 +625,6 @@ class BarChart:
                 deps.add(cf)
         return deps
 
-    def emit(self) -> Visual:
-        assert not isinstance(self.visual_id, _AutoSentinel), (
-            "visual_id wasn't resolved — see KPI.emit assertion."
-        )
-        sort_config: BarChartSortConfiguration | None = None
-        if self.sort_by is not None:
-            ref, direction = self.sort_by
-            sort_config = BarChartSortConfiguration(
-                CategorySort=[
-                    {"FieldSort": {
-                        "FieldId": resolve_field_id(ref),
-                        "Direction": direction,
-                    }},
-                ],
-            )
-        # v8.5.5 — auto-derive plain-English axis labels from the
-        # first leaf of each well when the author didn't pass an
-        # explicit override. ``_field_label`` runs the same
-        # human_name / smart_title cascade Table headers use
-        # (v8.5.0). Author-supplied labels still win — e.g., a chart
-        # that needs "$ Limit Cap (per day)" instead of the
-        # auto-derived "Cap" overrides via ``value_label="..."``.
-        category_label = self.category_label
-        if category_label is None and self.category:
-            category_label = _field_label(self.category[0])
-        value_label = self.value_label
-        if value_label is None and self.values:
-            value_label = _field_label(self.values[0])
-        color_label = self.color_label
-        if color_label is None and self.colors:
-            color_label = _field_label(self.colors[0])
-        return Visual(
-            BarChartVisual=BarChartVisual(
-                VisualId=self.visual_id,
-                Title=title_label(self.title),
-                Subtitle=subtitle_label(self.subtitle) if self.subtitle else None,
-                ChartConfiguration=BarChartConfiguration(
-                    FieldWells=BarChartFieldWells(
-                        BarChartAggregatedFieldWells=BarChartAggregatedFieldWells(
-                            Category=[d.emit() for d in self.category] if self.category else None,
-                            Values=[m.emit() for m in self.values] if self.values else None,
-                            Colors=[d.emit() for d in self.colors] if self.colors else None,
-                        ),
-                    ),
-                    Orientation=self.orientation,
-                    BarsArrangement=self.bars_arrangement,
-                    CategoryLabelOptions=(
-                        ChartAxisLabelOptions(AxisLabelOptions=[
-                            AxisLabelOptions(
-                                CustomLabel=category_label,
-                                ApplyTo=_axis_label_apply_to(self.category[0]),
-                            ),
-                        ])
-                        if category_label is not None and self.category else None
-                    ),
-                    ValueLabelOptions=(
-                        ChartAxisLabelOptions(AxisLabelOptions=[
-                            AxisLabelOptions(
-                                CustomLabel=value_label,
-                                ApplyTo=_axis_label_apply_to(self.values[0]),
-                            ),
-                        ])
-                        if value_label is not None and self.values else None
-                    ),
-                    ColorLabelOptions=(
-                        ChartAxisLabelOptions(AxisLabelOptions=[
-                            AxisLabelOptions(
-                                CustomLabel=color_label,
-                                ApplyTo=_axis_label_apply_to(self.colors[0]),
-                            ),
-                        ])
-                        if color_label is not None and self.colors else None
-                    ),
-                    SortConfiguration=sort_config,
-                    ValueAxis=_emit_log_scale_axis() if self.log_scale else None,
-                ),
-                Actions=[a.emit() for a in self.actions] if self.actions else None,
-            ),
-        )
-
-
-def _emit_log_scale_axis() -> "AxisDisplayOptions":
-    """BQ.5 — the 5-level AWS QS path for "use a log scale on the value
-    axis." See ``common/models.py``'s axis section for the path diagram.
-    Base 10 is left implicit (QS schema defaults to 10) — explicit base
-    would just be ``Base=10.0`` on the inner ``AxisLogarithmicScale``.
-    """
-    return AxisDisplayOptions(
-        DataOptions=AxisDataOptions(
-            NumericAxisOptions=NumericAxisOptions(
-                Scale=AxisScale(Logarithmic=AxisLogarithmicScale()),
-            ),
-        ),
-    )
-
-
 @dataclass(eq=False)
 class LineChart:
     """Line chart visual — one line per distinct ``colors`` value,
@@ -1227,68 +685,6 @@ class LineChart:
                 deps.add(cf)
         return deps
 
-    def emit(self) -> Visual:
-        assert not isinstance(self.visual_id, _AutoSentinel), (
-            "visual_id wasn't resolved — see KPI.emit assertion."
-        )
-        sort_config: LineChartSortConfiguration | None = None
-        if self.sort_by is not None:
-            ref, direction = self.sort_by
-            sort_config = LineChartSortConfiguration(
-                CategorySort=[
-                    {"FieldSort": {
-                        "FieldId": resolve_field_id(ref),
-                        "Direction": direction,
-                    }},
-                ],
-            )
-        # v8.6.1 — match BarChart's auto-derive cascade. Author-supplied
-        # labels still win.
-        category_label = self.category_label
-        if category_label is None and self.category:
-            category_label = _field_label(self.category[0])
-        value_label = self.value_label
-        if value_label is None and self.values:
-            value_label = _field_label(self.values[0])
-        return Visual(
-            LineChartVisual=LineChartVisual(
-                VisualId=self.visual_id,
-                Title=title_label(self.title),
-                Subtitle=subtitle_label(self.subtitle) if self.subtitle else None,
-                ChartConfiguration=LineChartConfiguration(
-                    FieldWells=LineChartFieldWells(
-                        LineChartAggregatedFieldWells=LineChartAggregatedFieldWells(
-                            Category=[d.emit() for d in self.category] if self.category else None,
-                            Values=[m.emit() for m in self.values] if self.values else None,
-                            Colors=[d.emit() for d in self.colors] if self.colors else None,
-                        ),
-                    ),
-                    Type=self.chart_type,
-                    SortConfiguration=sort_config,
-                    XAxisLabelOptions=(
-                        ChartAxisLabelOptions(AxisLabelOptions=[
-                            AxisLabelOptions(
-                                CustomLabel=category_label,
-                                ApplyTo=_axis_label_apply_to(self.category[0]),
-                            ),
-                        ])
-                        if category_label is not None and self.category else None
-                    ),
-                    PrimaryYAxisLabelOptions=(
-                        ChartAxisLabelOptions(AxisLabelOptions=[
-                            AxisLabelOptions(
-                                CustomLabel=value_label,
-                                ApplyTo=_axis_label_apply_to(self.values[0]),
-                            ),
-                        ])
-                        if self.value_label is not None else None
-                    ),
-                ),
-                Actions=[a.emit() for a in self.actions] if self.actions else None,
-            ),
-        )
-
-
 @dataclass(eq=False)
 class Sankey:
     """Sankey diagram visual — flows from ``source`` nodes to
@@ -1347,50 +743,6 @@ class Sankey:
                 deps.add(cf)
         return deps
 
-    def emit(self) -> Visual:
-        assert not isinstance(self.visual_id, _AutoSentinel), (
-            "visual_id wasn't resolved — see KPI.emit assertion."
-        )
-        sort_config: Any = None
-        if self.weight is not None or self.items_limit is not None:
-            sort_config_kwargs: dict[str, Any] = {}
-            if self.weight is not None:
-                sort_config_kwargs["WeightSort"] = [
-                    {
-                        "FieldSort": {
-                            "FieldId": resolve_field_id(self.weight),
-                            "Direction": "DESC",
-                        },
-                    },
-                ]
-            if self.items_limit is not None:
-                limit_block = {
-                    "ItemsLimit": self.items_limit,
-                    "OtherCategories": "INCLUDE",
-                }
-                sort_config_kwargs["SourceItemsLimit"] = limit_block
-                sort_config_kwargs["DestinationItemsLimit"] = limit_block
-            sort_config = SankeyDiagramSortConfiguration(**sort_config_kwargs)
-        return Visual(
-            SankeyDiagramVisual=SankeyDiagramVisual(
-                VisualId=self.visual_id,
-                Title=title_label(self.title),
-                Subtitle=subtitle_label(self.subtitle) if self.subtitle else None,
-                ChartConfiguration=SankeyDiagramChartConfiguration(
-                    FieldWells=SankeyDiagramFieldWells(
-                        SankeyDiagramAggregatedFieldWells=SankeyDiagramAggregatedFieldWells(
-                            Source=[self.source.emit()] if self.source else None,
-                            Destination=[self.target.emit()] if self.target else None,
-                            Weight=[self.weight.emit()] if self.weight else None,
-                        ),
-                    ),
-                    SortConfiguration=sort_config,
-                ),
-                Actions=[a.emit() for a in self.actions] if self.actions else None,
-            ),
-        )
-
-
 @dataclass(eq=False)
 class ForceGraph:
     """Force-directed network visual — HTMX-dialect only (X.2 spike
@@ -1436,9 +788,3 @@ class ForceGraph:
     def calc_fields(self) -> set[CalcField]:
         return set()
 
-    def emit(self) -> Visual:
-        raise NotImplementedError(
-            "ForceGraph is an HTMX-dialect-only visual (X.2 spike "
-            "capability test). QS has no force-layout visual; this "
-            "is intentionally not wired to the QS emit path."
-        )

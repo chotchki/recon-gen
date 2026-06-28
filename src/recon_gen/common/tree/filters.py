@@ -25,47 +25,16 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, Protocol, runtime_checkable
 
 from recon_gen.common.ids import FilterGroupId
-from recon_gen.common.models import (
-    CategoryFilterConfiguration,
-    ColumnIdentifier,
-    Filter,
-    FilterScopeConfiguration,
-    NumericRangeFilterValue,
-    SelectedSheetsFilterScopeConfiguration,
-    SheetVisualScopingConfiguration,
-)
-from recon_gen.common.models import CategoryFilter as ModelCategoryFilter
-from recon_gen.common.models import TimeEqualityFilter as ModelTimeEqualityFilter
-from recon_gen.common.models import (
-    DefaultDateTimePickerControlOptions as ModelDefaultDateTimePickerControlOptions,
-)
-from recon_gen.common.models import (
-    DefaultDropdownControlOptions as ModelDefaultDropdownControlOptions,
-)
-from recon_gen.common.models import (
-    DefaultFilterControlConfiguration as ModelDefaultFilterControlConfiguration,
-)
-from recon_gen.common.models import (
-    DefaultFilterControlOptions as ModelDefaultFilterControlOptions,
-)
-from recon_gen.common.models import (
-    DefaultSliderControlOptions as ModelDefaultSliderControlOptions,
-)
-from recon_gen.common.models import FilterGroup as ModelFilterGroup
-from recon_gen.common.models import NumericRangeFilter as ModelNumericRangeFilter
-from recon_gen.common.models import TimeRangeFilter as ModelTimeRangeFilter
 
 from recon_gen.common.tree._helpers import (
     AUTO,
     AutoResolved,
     TimeGranularity,
-    _AutoSentinel,
 )
 from recon_gen.common.tree.calc_fields import (
     CalcField,
     ColumnRef,
     calc_field_in,
-    resolve_column,
 )
 from recon_gen.common.tree.datasets import Dataset
 from recon_gen.common.tree.parameters import ParameterDeclLike
@@ -97,8 +66,6 @@ class FilterLike(Protocol):
     """
     dataset: Dataset
     filter_id: str | AutoResolved
-
-    def emit(self) -> Filter: ...
 
     def calc_field(self) -> CalcField | None: ...
 
@@ -153,43 +120,6 @@ DefaultControl = (
     | DefaultDropdownControl
     | DefaultSliderControl
 )
-
-
-def _emit_default_control(
-    ctrl: DefaultControl | None,
-) -> ModelDefaultFilterControlConfiguration | None:
-    """Translate a typed ``DefaultControl`` to the underlying
-    ``DefaultFilterControlConfiguration`` model, or ``None`` for
-    single-sheet filters that don't carry a default."""
-    if ctrl is None:
-        return None
-    options: ModelDefaultFilterControlOptions
-    match ctrl:
-        case DefaultDateTimePickerControl(title=_, type=t):
-            options = ModelDefaultFilterControlOptions(
-                DefaultDateTimePickerOptions=ModelDefaultDateTimePickerControlOptions(
-                    Type=t,
-                ),
-            )
-        case DefaultDropdownControl(title=_, type=t):
-            options = ModelDefaultFilterControlOptions(
-                DefaultDropdownOptions=ModelDefaultDropdownControlOptions(
-                    Type=t,
-                ),
-            )
-        case DefaultSliderControl():
-            options = ModelDefaultFilterControlOptions(
-                DefaultSliderOptions=ModelDefaultSliderControlOptions(
-                    MaximumValue=ctrl.maximum_value,
-                    MinimumValue=ctrl.minimum_value,
-                    StepSize=ctrl.step_size,
-                    Type=ctrl.type,
-                ),
-            )
-    return ModelDefaultFilterControlConfiguration(
-        Title=ctrl.title,
-        ControlOptions=options,
-    )
 
 
 # Discriminated binding for CategoryFilter — exactly one of values vs
@@ -353,56 +283,6 @@ class CategoryFilter:
         at a real dataset column."""
         return calc_field_in(self.column)
 
-    def emit(self) -> Filter:
-        assert not isinstance(self.filter_id, _AutoSentinel), (
-            "filter_id wasn't resolved — App.resolve_auto_ids() must run."
-        )
-        match self.binding:
-            case _ParameterBinding(parameter=parameter):
-                configuration = CategoryFilterConfiguration(
-                    CustomFilterConfiguration={
-                        "MatchOperator": self.match_operator,
-                        "ParameterName": parameter.name,
-                        "NullOption": self.null_option,
-                    },
-                )
-            case _LiteralBinding(value=value):
-                configuration = CategoryFilterConfiguration(
-                    CustomFilterConfiguration={
-                        "MatchOperator": self.match_operator,
-                        "CategoryValue": value,
-                        "NullOption": self.null_option,
-                    },
-                )
-            case _ValuesBinding(values=values, select_all_options=sa_opts):
-                list_config: dict[str, object] = {
-                    "MatchOperator": self.match_operator,
-                }
-                if values:
-                    list_config["CategoryValues"] = values
-                if sa_opts is not None:
-                    list_config["SelectAllOptions"] = sa_opts
-                # Empty values + no select-all flag = the prior shape.
-                if not values and sa_opts is None:
-                    list_config["CategoryValues"] = values
-                configuration = CategoryFilterConfiguration(
-                    FilterListConfiguration=list_config,
-                )
-        return Filter(
-            CategoryFilter=ModelCategoryFilter(
-                FilterId=self.filter_id,
-                Column=ColumnIdentifier(
-                    DataSetIdentifier=self.dataset.identifier,
-                    ColumnName=resolve_column(self.column),
-                ),
-                Configuration=configuration,
-                DefaultFilterControlConfiguration=_emit_default_control(
-                    self.default_control,
-                ),
-            ),
-        )
-
-
 # Discriminated bound for NumericRangeFilter — each Bound variant carries
 # exactly one piece of data (a static value or a parameter ref), so the
 # "both static_value and parameter set" bug class is structurally gone.
@@ -420,17 +300,6 @@ class ParameterBound:
 
 
 Bound = StaticBound | ParameterBound
-
-
-def _emit_bound(bound: Bound | None) -> NumericRangeFilterValue | None:
-    """Emit a Bound variant to ``NumericRangeFilterValue``, or None."""
-    match bound:
-        case None:
-            return None
-        case StaticBound(value=value):
-            return NumericRangeFilterValue(StaticValue=value)
-        case ParameterBound(parameter=parameter):
-            return NumericRangeFilterValue(Parameter=parameter.name)
 
 
 def _bound_parameter(bound: Bound | None) -> ParameterDeclLike | None:
@@ -482,29 +351,6 @@ class NumericRangeFilter:
     def calc_field(self) -> CalcField | None:
         return calc_field_in(self.column)
 
-    def emit(self) -> Filter:
-        assert not isinstance(self.filter_id, _AutoSentinel), (
-            "filter_id wasn't resolved — App.resolve_auto_ids() must run."
-        )
-        return Filter(
-            NumericRangeFilter=ModelNumericRangeFilter(
-                FilterId=self.filter_id,
-                Column=ColumnIdentifier(
-                    DataSetIdentifier=self.dataset.identifier,
-                    ColumnName=resolve_column(self.column),
-                ),
-                NullOption=self.null_option,
-                RangeMinimum=_emit_bound(self.minimum),
-                RangeMaximum=_emit_bound(self.maximum),
-                IncludeMinimum=self.include_minimum,
-                IncludeMaximum=self.include_maximum,
-                DefaultFilterControlConfiguration=_emit_default_control(
-                    self.default_control,
-                ),
-            ),
-        )
-
-
 @dataclass(eq=False)
 class TimeRangeFilter:
     """Filter on a date / datetime column.
@@ -533,30 +379,6 @@ class TimeRangeFilter:
     def calc_field(self) -> CalcField | None:
         return calc_field_in(self.column)
 
-    def emit(self) -> Filter:
-        assert not isinstance(self.filter_id, _AutoSentinel), (
-            "filter_id wasn't resolved — App.resolve_auto_ids() must run."
-        )
-        return Filter(
-            TimeRangeFilter=ModelTimeRangeFilter(
-                FilterId=self.filter_id,
-                Column=ColumnIdentifier(
-                    DataSetIdentifier=self.dataset.identifier,
-                    ColumnName=resolve_column(self.column),
-                ),
-                NullOption=self.null_option,
-                TimeGranularity=self.time_granularity,
-                RangeMinimumValue=self.minimum,
-                RangeMaximumValue=self.maximum,
-                IncludeMinimum=self.include_minimum,
-                IncludeMaximum=self.include_maximum,
-                DefaultFilterControlConfiguration=_emit_default_control(
-                    self.default_control,
-                ),
-            ),
-        )
-
-
 @dataclass(eq=False)
 class TimeEqualityFilter:
     """Single-day equality filter on a date column.
@@ -582,26 +404,6 @@ class TimeEqualityFilter:
 
     def calc_field(self) -> CalcField | None:
         return calc_field_in(self.column)
-
-    def emit(self) -> Filter:
-        assert not isinstance(self.filter_id, _AutoSentinel), (
-            "filter_id wasn't resolved — App.resolve_auto_ids() must run."
-        )
-        return Filter(
-            TimeEqualityFilter=ModelTimeEqualityFilter(
-                FilterId=self.filter_id,
-                Column=ColumnIdentifier(
-                    DataSetIdentifier=self.dataset.identifier,
-                    ColumnName=resolve_column(self.column),
-                ),
-                ParameterName=self.parameter.name,
-                TimeGranularity=self.time_granularity,
-                DefaultFilterControlConfiguration=_emit_default_control(
-                    self.default_control,
-                ),
-            ),
-        )
-
 
 @dataclass(eq=False)
 class FilterGroup:
@@ -695,54 +497,3 @@ class FilterGroup:
                 f"call scope_visuals() or scope_sheet() before validating."
             )
 
-    def emit(self) -> ModelFilterGroup:
-        assert not isinstance(self.filter_group_id, _AutoSentinel), (
-            "filter_group_id wasn't resolved — App.resolve_auto_ids() "
-            "must run before FilterGroup.emit()."
-        )
-        if not self._scope_entries:
-            raise ValueError(
-                f"FilterGroup {self.filter_group_id!r} has no scope — "
-                f"call scope_visuals() or scope_sheet() before emitting."
-            )
-        configs: list[SheetVisualScopingConfiguration] = []
-        for sheet, visuals in self._scope_entries:
-            if visuals is None:
-                configs.append(SheetVisualScopingConfiguration(
-                    SheetId=sheet.sheet_id,
-                    Scope=SheetVisualScopingConfiguration.ALL_VISUALS,
-                ))
-            else:
-                # Visuals' visual_id is resolved by App.resolve_auto_ids
-                # which runs before emit; the assert above guarantees
-                # this code path only executes after resolution.
-                visual_ids: list[str] = []
-                for v in visuals:
-                    assert not isinstance(v.visual_id, _AutoSentinel), (
-                        "visual_id wasn't resolved — App.resolve_auto_ids() "
-                        "must run before FilterGroup.emit()."
-                    )
-                    visual_ids.append(v.visual_id)
-                configs.append(SheetVisualScopingConfiguration(
-                    SheetId=sheet.sheet_id,
-                    Scope=SheetVisualScopingConfiguration.SELECTED_VISUALS,
-                    VisualIds=visual_ids,
-                ))
-        return ModelFilterGroup(
-            FilterGroupId=self.filter_group_id,
-            CrossDataset=(
-                ModelFilterGroup.SINGLE_DATASET
-                if self.cross_dataset == "SINGLE_DATASET"
-                else ModelFilterGroup.ALL_DATASETS
-            ),
-            ScopeConfiguration=FilterScopeConfiguration(
-                SelectedSheets=SelectedSheetsFilterScopeConfiguration(
-                    SheetVisualScopingConfigurations=configs,
-                ),
-            ),
-            Status=(
-                ModelFilterGroup.ENABLED
-                if self.enabled else ModelFilterGroup.DISABLED
-            ),
-            Filters=[f.emit() for f in self.filters],
-        )

@@ -39,7 +39,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from recon_gen.common.dataset_contract import get_contract
-from recon_gen.common.models import DataSetIdentifierDeclaration
 from recon_gen.common.tree._helpers import AUTO, AutoResolved, TimeGranularity
 
 if TYPE_CHECKING:
@@ -90,12 +89,6 @@ class Dataset:
                 f"{sorted(contract.column_names)}"
             )
         return Column(dataset=self, name=name)
-
-    def emit_declaration(self) -> DataSetIdentifierDeclaration:
-        return DataSetIdentifierDeclaration(
-            Identifier=self.identifier, DataSetArn=self.arn,
-        )
-
 
 @dataclass(frozen=True)
 class Column:

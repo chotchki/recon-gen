@@ -1329,6 +1329,7 @@ class TestTreeQueryHelpers:
 # ---------------------------------------------------------------------------
 
 from recon_gen.common.tree import (
+    FilterDropdown,
     LinkedValues,
     ParameterTextField,
 )
@@ -1418,10 +1419,12 @@ class TestFilterDropdown:
         app.validate()
         # Auto-IDs resolved
         assert f.filter_id == auto_id("f-category-fg0-0")
-        # The dropdown picked it up
-        ctrl_emitted = sheet.filter_controls[0].emit()
-        assert ctrl_emitted.Dropdown is not None
-        assert ctrl_emitted.Dropdown.SourceFilterId == auto_id("f-category-fg0-0")
+        # The dropdown control references that same filter, so it reads the
+        # resolved filter_id as its SourceFilterId at render time.
+        ctrl = sheet.filter_controls[0]
+        assert isinstance(ctrl, FilterDropdown)
+        assert ctrl.filter is f
+        assert ctrl.filter.filter_id == auto_id("f-category-fg0-0")
 
 
 class TestControlAutoIds:

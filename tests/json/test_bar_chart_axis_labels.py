@@ -19,7 +19,7 @@ resolves the label exactly as the renderers do:
   (``get_contract(ds_id).column(name).human_name`` — the same value
   QS stamps as the axis ``CustomLabel`` and App2 paints as the axis
   title), else
-- the ``_field_label`` cascade for a calc-field / bare-string leaf
+- the ``field_label`` cascade for a calc-field / bare-string leaf
   (smart-title — always carries an uppercase, so it can't be snake).
 
 It then asserts no resolved label survives in raw snake_case form. A
@@ -61,7 +61,7 @@ from recon_gen.common.spine._emit_helpers import DEFAULT_PREFIX
 from recon_gen.common.tree import BarChart
 from recon_gen.common.tree.fields import Dim, Measure
 from recon_gen.common.tree.structure import App
-from recon_gen.common.tree.visuals import _field_label
+from recon_gen.common.tree.visuals import field_label
 from tests._test_helpers import make_test_config
 
 
@@ -103,7 +103,7 @@ def _contract_label(leaf: Dim | Measure) -> str:
     explicit override: the contract ``human_name`` for the leaf's
     column (``get_contract(ds_id).column(name).human_name`` — the exact
     value QS stamps as the axis CustomLabel), falling back to the
-    ``_field_label`` smart-title cascade for a calc-field / bare-string
+    ``field_label`` smart-title cascade for a calc-field / bare-string
     leaf that isn't a contract column."""
     name = _leaf_column_name(leaf)
     if name is not None:
@@ -114,7 +114,7 @@ def _contract_label(leaf: Dim | Measure) -> str:
             contract = None
         if contract is not None and name in contract.column_names:
             return contract.column(name).human_name
-    return _field_label(leaf)
+    return field_label(leaf)
 
 
 def _bar_chart_axis_labels(

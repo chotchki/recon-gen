@@ -74,18 +74,6 @@ class CalcField:
     name: str | AutoResolved = AUTO
     shape: ColumnShape | None = None
 
-    def emit(self) -> dict[str, str]:
-        assert not isinstance(self.name, _AutoSentinel), (
-            "name wasn't resolved — App.resolve_auto_ids() must run "
-            "before CalcField.emit()."
-        )
-        return {
-            "Name": self.name,
-            "DataSetIdentifier": self.dataset.identifier,
-            "Expression": self.expression,
-        }
-
-
 # Type alias used everywhere a tree node accepts a column reference.
 # Three forms (the resolver below pulls the column name out at emit
 # time):

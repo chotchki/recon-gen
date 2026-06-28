@@ -11,8 +11,8 @@ This test pins that parity end-to-end for every Table visual in all four
 bundled apps: it runs the real fetcher-side derivation (``_table_column_meta``)
 through ``shape_table`` and asserts each emitted column carries
 
-- ``label`` == the dataset contract's ``human_name`` (the SAME value QS's
-  ``_field_label`` stamps as the column ``CustomLabel``) — pinned to the
+- ``label`` == the dataset contract's ``human_name`` (the SAME value the
+  ``field_label`` helper resolves to) — pinned to the
   contract, not to the deriver, so a regression in either side fails here;
 - ``format`` == ``"currency"`` for every column bound to a ``currency=True``
   measure/dim.

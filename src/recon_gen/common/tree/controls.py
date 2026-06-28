@@ -31,35 +31,10 @@ the App walker assigns position-indexed IDs at emit time
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, ClassVar, Literal, Protocol, runtime_checkable
+from typing import ClassVar, Literal, Protocol, runtime_checkable
 
-from recon_gen.common.models import (
-    FilterControl,
-    ParameterControl,
-)
-from recon_gen.common.models import (
-    FilterCrossSheetControl as ModelFilterCrossSheetControl,
-)
-from recon_gen.common.models import (
-    FilterDateTimePickerControl as ModelFilterDateTimePickerControl,
-)
-from recon_gen.common.models import (
-    FilterDropDownControl as ModelFilterDropDownControl,
-)
-from recon_gen.common.models import (
-    FilterSliderControl as ModelFilterSliderControl,
-)
-from recon_gen.common.models import (
-    ParameterDateTimePickerControl as ModelParameterDateTimePickerControl,
-)
-from recon_gen.common.models import (
-    ParameterDropDownControl as ModelParameterDropDownControl,
-)
-from recon_gen.common.models import (
-    ParameterSliderControl as ModelParameterSliderControl,
-)
 
-from recon_gen.common.tree._helpers import AUTO, AutoResolved, _AutoSentinel
+from recon_gen.common.tree._helpers import AUTO, AutoResolved
 from recon_gen.common.tree.datasets import Column, Dataset
 from recon_gen.common.tree.filters import FilterLike
 from recon_gen.common.tree.parameters import ParameterDeclLike
@@ -74,10 +49,6 @@ from recon_gen.common.tree.parameters import ParameterDeclLike
 class StaticValues:
     """Restrict the dropdown to a fixed list of options."""
     values: list[str]
-
-    def emit(self) -> dict[str, Any]:
-        return {"Values": list(self.values)}
-
 
 @dataclass(frozen=True)
 class LinkedValues:
@@ -117,15 +88,6 @@ class LinkedValues:
         registered ``DatasetContract``."""
         return cls(dataset=dataset, column_name=column_name)
 
-    def emit(self) -> dict[str, Any]:
-        return {
-            "LinkToDataSetColumn": {
-                "DataSetIdentifier": self.dataset.identifier,
-                "ColumnName": self.column_name,
-            },
-        }
-
-
 SelectableValues = StaticValues | LinkedValues
 
 
@@ -144,8 +106,6 @@ class ParameterControlLike(Protocol):
     """
     control_id: str | AutoResolved
 
-    def emit(self) -> ParameterControl: ...
-
     def datasets(self) -> set[Dataset]: ...
 
 
@@ -157,8 +117,6 @@ class FilterControlLike(Protocol):
     same shape as ``ParameterControlLike.datasets()``.
     """
     control_id: str | AutoResolved
-
-    def emit(self) -> FilterControl: ...
 
     def datasets(self) -> set[Dataset]: ...
 
@@ -214,56 +172,6 @@ class ParameterDropdown:
             return {ds}
         return set()
 
-    def emit(self) -> ParameterControl:
-        assert not isinstance(self.control_id, _AutoSentinel), (
-            "control_id wasn't resolved — App.resolve_auto_ids() must run."
-        )
-        display_options: dict[str, Any] | None = None
-        if self.hidden_select_all:
-            display_options = {
-                "SelectAllOptions": {"Visibility": "HIDDEN"},
-            }
-
-        cascading_config = None
-        if self.cascade_source is not None:
-            from recon_gen.common.models import (
-                CascadingControlConfiguration,
-                CascadingControlSource,
-                ColumnIdentifier,
-            )
-            assert not isinstance(self.cascade_source.control_id, _AutoSentinel), (
-                "cascade_source's control_id wasn't resolved before this "
-                "control's emit — auto-ID resolution must visit the source "
-                "control first."
-            )
-            assert self.cascade_match_column is not None, (
-                "cascade_source set without cascade_match_column — QS "
-                "needs to know which column on this dropdown's dataset "
-                "to filter by the source control's selected value."
-            )
-            cascading_config = CascadingControlConfiguration(
-                SourceControls=[CascadingControlSource(
-                    SourceSheetControlId=self.cascade_source.control_id,
-                    ColumnToMatch=ColumnIdentifier(
-                        DataSetIdentifier=self.cascade_match_column.dataset.identifier,
-                        ColumnName=self.cascade_match_column.name,
-                    ),
-                )],
-            )
-
-        return ParameterControl(
-            Dropdown=ModelParameterDropDownControl(
-                ParameterControlId=self.control_id,
-                Title=self.title,
-                SourceParameterName=self.parameter.name,
-                Type=self.type,
-                SelectableValues=self.selectable_values.emit(),
-                DisplayOptions=display_options,
-                CascadingControlConfiguration=cascading_config,
-            ),
-        )
-
-
 @dataclass(eq=False)
 class ParameterSlider:
     """Slider control bound to a numeric parameter."""
@@ -278,22 +186,6 @@ class ParameterSlider:
 
     def datasets(self) -> set[Dataset]:
         return set()
-
-    def emit(self) -> ParameterControl:
-        assert not isinstance(self.control_id, _AutoSentinel), (
-            "control_id wasn't resolved — App.resolve_auto_ids() must run."
-        )
-        return ParameterControl(
-            Slider=ModelParameterSliderControl(
-                ParameterControlId=self.control_id,
-                Title=self.title,
-                SourceParameterName=self.parameter.name,
-                MinimumValue=self.minimum_value,
-                MaximumValue=self.maximum_value,
-                StepSize=self.step_size,
-            ),
-        )
-
 
 @dataclass(eq=False)
 class ParameterDateTimePicker:
@@ -314,19 +206,6 @@ class ParameterDateTimePicker:
 
     def datasets(self) -> set[Dataset]:
         return set()
-
-    def emit(self) -> ParameterControl:
-        assert not isinstance(self.control_id, _AutoSentinel), (
-            "control_id wasn't resolved — App.resolve_auto_ids() must run."
-        )
-        return ParameterControl(
-            DateTimePicker=ModelParameterDateTimePickerControl(
-                ParameterControlId=self.control_id,
-                Title=self.title,
-                SourceParameterName=self.parameter.name,
-            ),
-        )
-
 
 @dataclass(eq=False)
 class ParameterTextField:
@@ -370,20 +249,6 @@ class ParameterTextField:
     def datasets(self) -> set[Dataset]:
         return set()
 
-    def emit(self) -> ParameterControl:
-        from recon_gen.common.models import ParameterTextFieldControl
-        assert not isinstance(self.control_id, _AutoSentinel), (
-            "control_id wasn't resolved — App.resolve_auto_ids() must run."
-        )
-        return ParameterControl(
-            TextField=ParameterTextFieldControl(
-                ParameterControlId=self.control_id,
-                Title=self.title,
-                SourceParameterName=self.parameter.name,
-            ),
-        )
-
-
 # ---------------------------------------------------------------------------
 # Filter controls
 # ---------------------------------------------------------------------------
@@ -412,27 +277,6 @@ class FilterDropdown:
             return {ds}
         return set()
 
-    def emit(self) -> FilterControl:
-        assert not isinstance(self.control_id, _AutoSentinel), (
-            "control_id wasn't resolved — App.resolve_auto_ids() must run."
-        )
-        assert not isinstance(self.filter.filter_id, _AutoSentinel), (
-            "inner filter's filter_id wasn't resolved — App.resolve_auto_ids() must run."
-        )
-        return FilterControl(
-            Dropdown=ModelFilterDropDownControl(
-                FilterControlId=self.control_id,
-                Title=self.title,
-                SourceFilterId=self.filter.filter_id,
-                Type=self.type,
-                SelectableValues=(
-                    self.selectable_values.emit()
-                    if self.selectable_values is not None else None
-                ),
-            ),
-        )
-
-
 @dataclass(eq=False)
 class FilterSlider:
     """Slider control bound to a NumericRangeFilter."""
@@ -449,26 +293,6 @@ class FilterSlider:
     def datasets(self) -> set[Dataset]:
         return set()
 
-    def emit(self) -> FilterControl:
-        assert not isinstance(self.control_id, _AutoSentinel), (
-            "control_id wasn't resolved — App.resolve_auto_ids() must run."
-        )
-        assert not isinstance(self.filter.filter_id, _AutoSentinel), (
-            "inner filter's filter_id wasn't resolved — App.resolve_auto_ids() must run."
-        )
-        return FilterControl(
-            Slider=ModelFilterSliderControl(
-                FilterControlId=self.control_id,
-                Title=self.title,
-                SourceFilterId=self.filter.filter_id,
-                MinimumValue=self.minimum_value,
-                MaximumValue=self.maximum_value,
-                StepSize=self.step_size,
-                Type=self.type,
-            ),
-        )
-
-
 @dataclass(eq=False)
 class FilterDateTimePicker:
     """Date/time picker control bound to a TimeRangeFilter."""
@@ -481,23 +305,6 @@ class FilterDateTimePicker:
 
     def datasets(self) -> set[Dataset]:
         return set()
-
-    def emit(self) -> FilterControl:
-        assert not isinstance(self.control_id, _AutoSentinel), (
-            "control_id wasn't resolved — App.resolve_auto_ids() must run."
-        )
-        assert not isinstance(self.filter.filter_id, _AutoSentinel), (
-            "inner filter's filter_id wasn't resolved — App.resolve_auto_ids() must run."
-        )
-        return FilterControl(
-            DateTimePicker=ModelFilterDateTimePickerControl(
-                FilterControlId=self.control_id,
-                Title=self.title,
-                SourceFilterId=self.filter.filter_id,
-                Type=self.type,
-            ),
-        )
-
 
 @dataclass(eq=False)
 class FilterCrossSheet:
@@ -515,16 +322,3 @@ class FilterCrossSheet:
     def datasets(self) -> set[Dataset]:
         return set()
 
-    def emit(self) -> FilterControl:
-        assert not isinstance(self.control_id, _AutoSentinel), (
-            "control_id wasn't resolved — App.resolve_auto_ids() must run."
-        )
-        assert not isinstance(self.filter.filter_id, _AutoSentinel), (
-            "inner filter's filter_id wasn't resolved — App.resolve_auto_ids() must run."
-        )
-        return FilterControl(
-            CrossSheet=ModelFilterCrossSheetControl(
-                FilterControlId=self.control_id,
-                SourceFilterId=self.filter.filter_id,
-            ),
-        )

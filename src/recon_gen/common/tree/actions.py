@@ -29,17 +29,8 @@ from recon_gen.common.drill import (
     DrillResetSentinel,
     DrillSourceField,
     DrillStaticDateTime,
-    cross_sheet_drill as _emit_cross_sheet_drill,
 )
 from recon_gen.common.drill import DrillParam as _DrillParam
-from recon_gen.common.models import (
-    CustomActionFilterOperation,
-    FilterOperationSelectedFieldsConfiguration,
-    FilterOperationTargetVisualsConfiguration,
-    SameSheetTargetVisualConfiguration,
-    VisualCustomAction,
-    VisualCustomActionOperation,
-)
 
 from recon_gen.common.tree._helpers import AUTO, AutoResolved, _AutoSentinel
 from recon_gen.common.tree.calc_fields import (
@@ -182,28 +173,6 @@ class Drill:
         for _param, source in self.writes:
             _resolve_drill_source(source)
 
-    def emit(self) -> VisualCustomAction:
-        assert not isinstance(self.action_id, _AutoSentinel), (
-            "action_id wasn't resolved — App.resolve_auto_ids() must run."
-        )
-        assert not isinstance(self.target_sheet, _AutoSentinel), (
-            "target_sheet wasn't resolved — App.resolve_auto_ids() must "
-            "run before Drill.emit(). Same-sheet drills get back-filled "
-            "with the owning sheet automatically."
-        )
-        resolved_writes = [
-            (param, _resolve_drill_source(source))
-            for param, source in self.writes
-        ]
-        return _emit_cross_sheet_drill(
-            action_id=self.action_id,
-            name=self.name,
-            target_sheet=self.target_sheet.sheet_id,
-            writes=resolved_writes,
-            trigger=self.trigger,
-        )
-
-
 @dataclass(eq=False)
 class CrossAppDrill:
     """CF.X-infra — drill action that targets a DIFFERENT app's
@@ -241,18 +210,6 @@ class CrossAppDrill:
 
     _AUTO_KIND: ClassVar[str] = "cross_app_drill"
 
-    def emit(self) -> None:
-        """QS emit — intentional no-op. The QS renderer's substitute
-        for a cross-app drill is a sibling ``TextBox`` with a
-        rich-text hyperlink (see ``rich_text.link``); CF.2 wires both
-        on the same sheet. Returning None signals "no QS action" to
-        the emit walker, which the per-Visual action collector
-        filters out (same shape as a same-sheet drill with no writes
-        — produces no VisualCustomAction at the QS layer).
-        """
-        return None
-
-
 # Forward reference — VisualLike is in visuals.py; import via TYPE_CHECKING.
 if TYPE_CHECKING:
     from recon_gen.common.tree.visuals import VisualLike
@@ -278,44 +235,6 @@ class SameSheetFilter:
     action_id: str | AutoResolved = AUTO
 
     _AUTO_KIND: ClassVar[str] = "filter"
-
-    def emit(self) -> VisualCustomAction:
-        assert not isinstance(self.action_id, _AutoSentinel), (
-            "action_id wasn't resolved — App.resolve_auto_ids() must run."
-        )
-        target_ids: list[str] = []
-        for v in self.target_visuals:
-            assert not isinstance(v.visual_id, _AutoSentinel), (
-                f"SameSheetFilter target visual_id wasn't resolved — "
-                f"App.resolve_auto_ids() must run before emit."
-            )
-            target_ids.append(v.visual_id)
-        return VisualCustomAction(
-            CustomActionId=self.action_id,
-            Name=self.name,
-            Trigger=self.trigger,
-            ActionOperations=[
-                VisualCustomActionOperation(
-                    FilterOperation=CustomActionFilterOperation(
-                        SelectedFieldsConfiguration=(
-                            FilterOperationSelectedFieldsConfiguration(
-                                SelectedFieldOptions="ALL_FIELDS",
-                            )
-                        ),
-                        TargetVisualsConfiguration=(
-                            FilterOperationTargetVisualsConfiguration(
-                                SameSheetTargetVisualConfiguration=(
-                                    SameSheetTargetVisualConfiguration(
-                                        TargetVisuals=target_ids,
-                                    )
-                                ),
-                            )
-                        ),
-                    ),
-                ),
-            ],
-        )
-
 
 # Discriminated union of every visual action type. Visual subtypes
 # accept ``actions: list[Action]`` to mix Drills + filters in one list.
