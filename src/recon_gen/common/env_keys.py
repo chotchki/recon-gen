@@ -342,18 +342,8 @@ class EnvVar[T]:
 
 # ---------------------------------------------------------------------------
 # Patterns (used by validators below)
-
-
-# IAM ARN format — ``arn:<partition>:<service>:<region>:<account>:<resource>``.
-# Partition: ``aws`` (commercial) / ``aws-us-gov`` (GovCloud) / ``aws-cn`` (China).
-# Fairly permissive on resource part (QS resource paths use slashes).
-_IAM_ARN_RE: Final = re.compile(
-    r"arn:aws(?:-us-gov|-cn)?:[a-z0-9-]+:[a-z0-9-]*:[0-9]{12}:.+",
-)
-
-
-# AWS region — ``us-east-1`` shape.
-_AWS_REGION_RE: Final = re.compile(r"[a-z]{2}-[a-z]+-\d+")
+# (The _IAM_ARN_RE + _AWS_REGION_RE patterns retired with the AWS env
+# vars they validated — DW dead-config sweep.)
 
 
 # ---------------------------------------------------------------------------
@@ -818,22 +808,6 @@ RECON_E2E_VISUAL_TIMEOUT: Final = EnvVar(
     validator=positive_int,
 )
 
-# config.py — comma-separated list of IAM principal ARNs to grant
-# permissions on generated resources. CSV format; the loader splits
-# + validates each entry.
-RECON_GEN_PRINCIPAL_ARNS: Final = EnvVar(
-    name="RECON_GEN_PRINCIPAL_ARNS",
-    legacy_name="QS_GEN_PRINCIPAL_ARNS",
-    description=(
-        "Comma-separated IAM principal ARNs to grant permissions on "
-        "generated resources. Overrides cfg.aws.principal_arns."
-    ),
-    coercer=str,
-    optional=True,
-    # No validator — the parsed list is checked downstream by the cfg
-    # loader (each ARN runs through the same regex used elsewhere).
-)
-
 # CB.14 — runner override for the Oracle 19c container image. Absent →
 # the runner prefers locally-built ``recon-gen/oracle-19c:local`` if
 # Docker reports it (production-parity RDS SE2 19c via ``tools/oracle-19c/
@@ -894,46 +868,17 @@ RECON_GEN_DB_TESTS: Final = EnvVar(
 # practical. Most are str (cfg loader does its own coercion to
 # Path / int as needed).
 
-RECON_GEN_AWS_ACCOUNT_ID: Final = EnvVar(
-    name="RECON_GEN_AWS_ACCOUNT_ID",
-    legacy_name="QS_GEN_AWS_ACCOUNT_ID",
-    description="AWS account ID — overrides cfg.aws.account_id.",
-    coercer=str,
-    optional=True,
-    validator=matches(re.compile(r"\d{12}")),
-)
-
-RECON_GEN_AWS_REGION: Final = EnvVar(
-    name="RECON_GEN_AWS_REGION",
-    legacy_name="QS_GEN_AWS_REGION",
-    description="AWS region (us-east-1 shape) — overrides cfg.aws.region.",
-    coercer=str,
-    optional=True,
-    validator=matches(_AWS_REGION_RE),
-)
-
-RECON_GEN_DATASOURCE_ARN: Final = EnvVar(
-    name="RECON_GEN_DATASOURCE_ARN",
-    legacy_name="QS_GEN_DATASOURCE_ARN",
-    description=(
-        "QuickSight datasource ARN — overrides cfg.aws.datasource.arn. "
-        "Required only when cfg has no demo_database_url."
-    ),
-    coercer=str,
-    optional=True,
-    validator=matches(_IAM_ARN_RE),
-)
+# DW dead-config sweep — RECON_GEN_AWS_ACCOUNT_ID / AWS_REGION /
+# DATASOURCE_ARN deleted with the QuickSight ARN-synthesis surface
+# (cfg.aws no longer carries account_id / region / datasource).
 
 RECON_GEN_DEPLOYMENT_NAME: Final = EnvVar(
     name="RECON_GEN_DEPLOYMENT_NAME",
     legacy_name="QS_GEN_DEPLOYMENT_NAME",
     description=(
-        "Per-deploy QS namespace (kebab-case) — overrides "
-        "cfg.aws.deployment_name. Z.C: replaces v8.x's RECON_GEN_RESOURCE_PREFIX "
-        "+ RECON_GEN_L2_INSTANCE_PREFIX (those collapsed into one field). "
-        "Used by the Y.2.gate.m runner to namespace per-cell aw-target "
-        "deploys so sister cells (e.g., sp_pg_aw + sp_or_aw) don't "
-        "collide on QS resource IDs."
+        "Per-deploy resource-ID namespace (kebab-case) — overrides "
+        "cfg.aws.deployment_name. ``prefixed()`` weaves it into analysis / "
+        "dashboard IDs so co-tenanted deploys don't collide."
     ),
     coercer=str,
     optional=True,
@@ -1042,40 +987,9 @@ RECON_GEN_APP2_DB_POOL_SIZE: Final = EnvVar(
     # No validator — load_config does the int coercion + range check.
 )
 
-# Y.2.gate.l — RDS identifiers for the start/stop lifecycle commands.
-# RDS identifier rules: 1-63 chars, lowercase alphanumeric + hyphens,
-# starts with a letter, no trailing hyphen, no consecutive hyphens.
-# `cmd_up aws` / `cmd_down aws` / `cmd_status` read these to know which
-# cluster + instance to act on; CI workflows inject them as the CI-side
-# identifiers (separate from operator's local-dev ones — see gate.l.0
-# provisioning runbook).
-_RDS_IDENT_RE: Final = re.compile(r"[a-z][a-z0-9]*(-[a-z0-9]+)*")
-
-RECON_GEN_AWS_PG_CLUSTER_ID: Final = EnvVar(
-    name="RECON_GEN_AWS_PG_CLUSTER_ID",
-    legacy_name="QS_GEN_AWS_PG_CLUSTER_ID",
-    description=(
-        "Aurora PG cluster identifier (e.g., 'database-2' or "
-        "'recon-ci-aurora') — overrides cfg.aws.pg_cluster_id. "
-        "Required for `./run_tests.sh up aws` / `down aws` / `status`."
-    ),
-    coercer=str,
-    optional=True,
-    validator=matches(_RDS_IDENT_RE),
-)
-
-RECON_GEN_AWS_ORACLE_INSTANCE_ID: Final = EnvVar(
-    name="RECON_GEN_AWS_ORACLE_INSTANCE_ID",
-    legacy_name="QS_GEN_AWS_ORACLE_INSTANCE_ID",
-    description=(
-        "Oracle RDS instance identifier (e.g., 'database-3' or "
-        "'recon-ci-oracle') — overrides cfg.aws.oracle_instance_id. "
-        "Required for `./run_tests.sh up aws` / `down aws` / `status`."
-    ),
-    coercer=str,
-    optional=True,
-    validator=matches(_RDS_IDENT_RE),
-)
+# DW dead-config sweep — RECON_GEN_AWS_PG_CLUSTER_ID /
+# AWS_ORACLE_INSTANCE_ID (+ the _RDS_IDENT_RE validator) deleted with the
+# RDS start/stop lifecycle (DW.11 — no `up aws` / `down aws` anymore).
 
 
 # CR.2 — operator-tunable picker search-query length cap. Pre-CR.2 the

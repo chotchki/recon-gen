@@ -18,17 +18,11 @@ import yaml
 from recon_gen.common.as_of_frame import LOCKED_ANCHOR, AsOfFrame
 from recon_gen.common.env_keys import (
     RECON_GEN_APP2_DB_POOL_SIZE,
-    RECON_GEN_AWS_ACCOUNT_ID,
-    RECON_GEN_AWS_ORACLE_INSTANCE_ID,
-    RECON_GEN_AWS_PG_CLUSTER_ID,
-    RECON_GEN_AWS_REGION,
-    RECON_GEN_DATASOURCE_ARN,
     RECON_GEN_DB_TABLE_PREFIX,
     validate_db_table_prefix,
     RECON_GEN_DEMO_DATABASE_URL,
     RECON_GEN_DEPLOYMENT_NAME,
     RECON_GEN_DIALECT,
-    RECON_GEN_PRINCIPAL_ARNS,
 )
 from recon_gen.common.sql import Dialect
 
@@ -805,26 +799,11 @@ def _apply_env_overrides_nested(raw: dict[str, Any]) -> None:  # typing-smell: i
         return cast(dict[str, Any], block)
 
     aws_block = _ensure_dict("aws")
-    if (v := RECON_GEN_AWS_ACCOUNT_ID.get_or_none()) is not None:
-        aws_block["account_id"] = v
-    if (v := RECON_GEN_AWS_REGION.get_or_none()) is not None:
-        aws_block["region"] = v
+    # Post-DW the only live aws field is deployment_name (the resource-ID
+    # namespace). The account_id / region / datasource / principal-arn /
+    # cluster-id env overrides went with QuickSight.
     if (v := RECON_GEN_DEPLOYMENT_NAME.get_or_none()) is not None:
         aws_block["deployment_name"] = v
-    if (v := RECON_GEN_AWS_PG_CLUSTER_ID.get_or_none()) is not None:
-        aws_block["pg_cluster_id"] = v
-    if (v := RECON_GEN_AWS_ORACLE_INSTANCE_ID.get_or_none()) is not None:
-        aws_block["oracle_instance_id"] = v
-    if (v := RECON_GEN_PRINCIPAL_ARNS.get_or_none()) is not None:
-        aws_block["principal_arns"] = [
-            s.strip() for s in v.split(",") if s.strip()
-        ]
-    if (v := RECON_GEN_DATASOURCE_ARN.get_or_none()) is not None:
-        ds_block_raw = aws_block.setdefault("datasource", {})
-        if isinstance(ds_block_raw, dict):
-            ds_block = cast(dict[str, Any], ds_block_raw)
-            ds_block["mode"] = "adopt"
-            ds_block["arn"] = v
 
     db_block = _ensure_dict("db")
     if (v := RECON_GEN_DIALECT.get_or_none()) is not None:
