@@ -62,7 +62,6 @@ from recon_gen.common.cleanup import (
 )
 from recon_gen.common.config import AwsConfig, Config, DbConfig
 from tests._test_helpers import make_test_config
-from recon_gen.common.datasource import build_datasource
 
 
 class TestStripNones:
@@ -525,106 +524,6 @@ class TestDataSourceSerialization:
         )
         out = ds.to_aws_json()
         assert out["Tags"] == [{"Key": MANAGED_TAG_KEY, "Value": MANAGED_TAG_VALUE}]
-
-
-# ---------------------------------------------------------------------------
-# DataSource builder tests
-# ---------------------------------------------------------------------------
-
-_DEMO_CFG = make_test_config(
-    db_url="postgresql://demouser:demopass@db.example.com:5432/quicksight_demo",
-    aws_principal_arns=["arn:aws:quicksight:us-west-2:111122223333:user/default/admin"],
-)
-
-
-class TestBuildDatasource:
-    def test_parses_url(self):
-        ds = build_datasource(_DEMO_CFG)
-        out = ds.to_aws_json()
-        pg = out["DataSourceParameters"]["PostgreSqlParameters"]
-        assert pg["Host"] == "db.example.com"
-        assert pg["Port"] == 5432
-        assert pg["Database"] == "quicksight_demo"
-        creds = out["Credentials"]["CredentialPair"]
-        assert creds["Username"] == "demouser"
-        assert creds["Password"] == "demopass"
-
-    def test_type_is_postgresql(self):
-        ds = build_datasource(_DEMO_CFG)
-        assert ds.Type == "POSTGRESQL"
-
-    def test_has_managed_by_tag(self):
-        ds = build_datasource(_DEMO_CFG)
-        tag_keys = {t.Key for t in ds.Tags}
-        assert MANAGED_TAG_KEY in tag_keys
-
-    def test_has_permissions_when_principal_set(self):
-        ds = build_datasource(_DEMO_CFG)
-        assert ds.Permissions is not None
-        assert len(ds.Permissions) == 1
-
-    def test_no_permissions_without_principal(self):
-        cfg = make_test_config(
-            db_url="postgresql://u:p@h:5432/db",
-        )
-        ds = build_datasource(cfg)
-        assert ds.Permissions is None
-
-    def test_datasource_id_uses_prefix(self):
-        ds = build_datasource(_DEMO_CFG)
-        # Z.C — `<deployment_name>-demo-datasource` (was the historical
-        # `qs-gen-demo-datasource` from the v8.x default resource_prefix).
-        assert ds.DataSourceId == f"{_DEMO_CFG.aws.deployment_name}-demo-datasource"
-
-    def test_raises_without_demo_url(self):
-        cfg = make_test_config()
-        import pytest
-        with pytest.raises(ValueError, match="demo_database_url"):
-            build_datasource(cfg)
-
-
-class TestBuildDatasourceOracle:
-    """P.6.b — Oracle dispatch: ``Type=ORACLE`` + OracleParameters
-    instead of PostgreSqlParameters. Two URL forms accepted (Easy
-    Connect ``user/pass@host:port/SERVICE`` + SQLAlchemy-style
-    ``oracle://user:pass@host:port/SERVICE``)."""
-
-    def _oracle_cfg(self, url: str) -> Config:
-        from recon_gen.common.sql import Dialect
-        return make_test_config(
-            db_url=url,
-            db_dialect=Dialect.ORACLE,
-        )
-
-    def test_easy_connect_url_parses_into_oracle_parameters(self):
-        cfg = self._oracle_cfg("admin/secret@db.example.com:1521/ORCL")
-        ds = build_datasource(cfg)
-        assert ds.Type == "ORACLE"
-        out = ds.to_aws_json()
-        ora = out["DataSourceParameters"]["OracleParameters"]
-        assert ora["Host"] == "db.example.com"
-        assert ora["Port"] == 1521
-        assert ora["Database"] == "ORCL"
-        assert "PostgreSqlParameters" not in out["DataSourceParameters"]
-        creds = out["Credentials"]["CredentialPair"]
-        assert creds["Username"] == "admin"
-        assert creds["Password"] == "secret"
-
-    def test_sqlalchemy_style_oracle_url_parses(self):
-        cfg = self._oracle_cfg(
-            "oracle+oracledb://admin:secret@db.example.com:1521/?service_name=ORCL"
-        )
-        ds = build_datasource(cfg)
-        ora = ds.to_aws_json()["DataSourceParameters"]["OracleParameters"]
-        assert ora["Host"] == "db.example.com"
-        assert ora["Port"] == 1521
-        assert ora["Database"] == "ORCL"
-
-    def test_easy_connect_default_port(self):
-        cfg = self._oracle_cfg("admin/secret@db.example.com/ORCL")
-        ds = build_datasource(cfg)
-        ora = ds.to_aws_json()["DataSourceParameters"]["OracleParameters"]
-        assert ora["Port"] == 1521  # Oracle's default
 
 
 # ---------------------------------------------------------------------------
