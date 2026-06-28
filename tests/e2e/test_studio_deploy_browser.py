@@ -30,7 +30,10 @@ import pytest
 # Skip module if any of these aren't installed.
 pytest.importorskip("testcontainers.postgres")
 pytest.importorskip("playwright.sync_api")
-pytest.importorskip("aiosqlite")
+# (DY.1) The stale `importorskip("aiosqlite")` was removed — SQLite was
+# dropped in CB.8 and aiosqlite is in no extra, so it skipped this whole
+# Postgres-in-Docker integration test at collection EVERYWHERE (incl. CI).
+# The test uses a postgres:17-alpine testcontainer, never sqlite.
 
 # Studio chrome (Deploy button + status indicator + framenavigated reload
 # detection) is operator-app UI distinct from the DashboardDriver verb
