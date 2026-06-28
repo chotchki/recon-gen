@@ -82,9 +82,9 @@ prod = [
     # parsing) + httpx (TestClient + outbound). The browser-side
     # JS/CSS ships inside the wheel — App2 needs no internet at
     # runtime (X.2.p). (was [serve])
-    "starlette>=1.1.0",
+    "starlette>=1.3.1",
     "uvicorn[standard]>=0.30",
-    "python-multipart>=0.0.18",
+    "python-multipart>=0.0.31",
     "httpx>=0.27",
     # DD.1 (Phase DD) — OAuth/OIDC client for Studio + Dashboards
     # auth. authlib drives the issuer-discovery + token exchange +
@@ -131,7 +131,7 @@ prod = [
     # loaded only when cfg.signing is set; absent block = unsigned
     # PDF (back-compat). (was [audit])
     "reportlab>=4.0",
-    "pypdf>=4.0",
+    "pypdf>=6.13.3",
     "pyhanko>=0.30",
     # Docs site build (was [docs] pre-BS.6, then briefly only in [dev]).
     # `recon-gen docs apply --portable` is a production CLI verb — users
@@ -194,7 +194,7 @@ dev = [
     # Phase U — audit PDF generation; pulled into [dev] so tests/audit/
     # runs without a separate install step.
     "reportlab>=4.0",
-    "pypdf>=4.0",
+    "pypdf>=6.13.3",
     "build>=1.0",
     "twine>=5.0",
     "pyright>=1.1.380",
@@ -220,10 +220,15 @@ dev = [
     # unit tests. Pulled into [dev] so the spike's tests run in the
     # default `uv sync --extra dev` developer setup without a separate
     # `--extra prod`.
-    "starlette>=1.1.0",
+    "starlette>=1.3.1",
     "uvicorn[standard]>=0.30",
-    "python-multipart>=0.0.18",
+    "python-multipart>=0.0.31",
     "httpx>=0.27",
+    # starlette 1.3.x's TestClient prefers httpx2 (`import httpx2 as httpx`)
+    # and warns + degrades types when only httpx is present. Pin it in the
+    # test extras so the testclient backend is httpx2 (CVE-2026-54283 forced
+    # the 1.3.1 bump). httpx (above) stays for App2's runtime outbound.
+    "httpx2>=2.5.0",
     # BF.9 — markdown rendering for the Studio editor's textarea
     # Preview tab. Mirror of [serve] (also pinned there). v11.22.1
     # CI failure: adding to [serve] alone wasn't enough; the
@@ -249,7 +254,7 @@ dev = [
     # would drag most of these in transitively, but the explicit pin
     # doesn't rely on transitive bumps.
     "acme>=2.10.0",
-    "cryptography>=41.0",
+    "cryptography>=48.0.1",
     "dnspython>=2.4",
     "requests>=2.31",
     # DD.4 — Dex (test-side OIDC IdP) needs a bcrypt-hashed user
@@ -271,10 +276,12 @@ e2e = [
     # — keep this list in sync with [prod]. (Caught by the nightly
     # e2e-pg-browser cron: `uv sync --extra e2e` without these →
     # ModuleNotFoundError: No module named 'starlette' at collection.)
-    "starlette>=1.1.0",
+    "starlette>=1.3.1",
     "uvicorn[standard]>=0.30",
-    "python-multipart>=0.0.18",
+    "python-multipart>=0.0.31",
     "httpx>=0.27",
+    # starlette 1.3.x testclient backend (see [dev]); CVE-2026-54283.
+    "httpx2>=2.5.0",
     # BF.9 — same mirror as [dev]; the e2e suite spins App2Driver
     # which hits the studio editor's markdown-preview route in some
     # cells. Keep in sync with [serve] + [dev].
