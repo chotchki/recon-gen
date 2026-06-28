@@ -51,7 +51,6 @@ from typing import Any, Final, cast
 
 from recon_gen.common.env_keys import (
     RECON_E2E_PAGE_TIMEOUT,
-    RECON_E2E_USER_ARN,
     RECON_GEN_AS_OF_ANCHOR,
     RECON_GEN_CONFIG,
     RECON_GEN_DB_READ_ONLY,
@@ -198,7 +197,6 @@ _RUN_ID_PATTERN: Final = re.compile(r"^\d{8}T\d{6}Z-\w+(?:-dirty)?$")
 # Probe kinds (matched to _probe_* function names):
 #   "aws"             — AWS creds present + not expired (sts:GetCallerIdentity).
 #   "docker"          — Docker daemon reachable (`docker ps`).
-#   "qs_arn"          — RECON_E2E_USER_ARN set (browser e2e signs embed URLs as this user).
 # CB.11.a.2 (2026-06-01) — `aws_rds_running` probe deleted. RDS Aurora is
 # gone post-CB.12; Docker-on-self-hosted-runner is the only DB substrate.
 #
@@ -283,8 +281,8 @@ def _probe_aws() -> ProbeFailure | None:
     runner injects `AWS_PROFILE` into subprocess env_overrides at variant
     setup, but the probe runs BEFORE that — so without this lookup, a probe
     running on an expired SSO ambient session would fail even when the cfg
-    points at a long-lived IAM-keys profile that would have worked. Same
-    cfg-discovery shape as `_probe_qs_e2e_user_arn`.
+    points at a long-lived IAM-keys profile that would have worked. Uses
+    the default-candidate cfg-discovery list.
     """
     env_overrides: dict[str, str] | None = None
     cfg_path = _resolve_seed_config(_DEFAULT_RUNNER_CFG_CANDIDATES)
@@ -405,123 +403,6 @@ def _probe_docker() -> ProbeFailure | None:
     )
 
 
-def _resolve_qs_user_arn(cfg: Any) -> str | None:  # typing-smell: ignore[explicit-any]: cfg comes from load_config; full type would force a tree → _dev dependency we avoid in this layer
-    """Y.2.gate.h.1 — resolve the QuickSight user ARN the runner should
-    inject as ``RECON_E2E_USER_ARN`` into qs_browser subprocess env.
-
-    Priority order:
-
-    1. **Explicit override.** ``cfg.auth.aws.quicksight_user_arn`` (set by
-       CI via the ``RECON_E2E_USER_ARN`` GH secret). Wins so CI's path
-       stays byte-identical.
-    2. **Derive from aws_profile.** ``cfg.auth.aws.profile`` named
-       boto profile + ``cfg.aws.account_id`` + ``cfg.aws.region`` →
-       ``quicksight.list_users(Namespace='default')`` → first ADMIN
-       user's ARN (falls back to first user). This is the "operator's
-       local cfg with just ``aws_profile`` works" path the spec
-       (docs/audits/y_2_gate_h_i_combined_spike.md §6) promised but
-       hadn't shipped.
-    3. **None.** Caller leaves the env unset; ``qs_driver_or_none``
-       skips QS-leg tests with the standard "QS user ARN unavailable"
-       message.
-
-    Boto failure (expired creds, ListUsers permission denied) → None
-    + stderr breadcrumb. The qs_browser layer still dispatches and
-    skips cleanly; we don't want a transient AWS hiccup to abort the
-    full chain.
-    """
-    if cfg is None:
-        return None
-    # DE.2 commit A — cfg.auth is now always-present (default-factory).
-    explicit = cfg.auth.aws.quicksight_user_arn
-    if explicit is not None and isinstance(explicit, str) and explicit:
-        return explicit
-    aws_profile = cfg.auth.aws.profile
-    if aws_profile is None or not isinstance(aws_profile, str):
-        return None
-    account_id = cfg.aws.account_id
-    region = cfg.aws.region
-    if not account_id or not region:
-        return None
-    try:
-        import boto3  # noqa: PLC0415 — lazy: only imported on the local-derive path
-        session = boto3.Session(profile_name=aws_profile, region_name=str(region))
-        # boto3-stubs huge overload union confuses pyright (X.2.o.5);
-        # mirror the sweep-side pattern that wraps in Any.
-        qs: Any = session.client("quicksight")  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]: boto3-stubs overload union confuses pyright (X.2.o.5)
-        users = qs.list_users(
-            AwsAccountId=str(account_id), Namespace="default",
-        ).get("UserList", [])
-    except Exception as exc:  # noqa: BLE001 — boto-side hiccup is a breadcrumb, not a chain-abort
-        print(
-            f"runner: derive RECON_E2E_USER_ARN failed via aws_profile="
-            f"{aws_profile!r} ({type(exc).__name__}: {exc}); qs_browser "
-            f"layer will skip",
-            file=sys.stderr,
-        )
-        return None
-    if not users:
-        print(
-            f"runner: derive RECON_E2E_USER_ARN found 0 QS users in "
-            f"{account_id}/{region} default namespace via profile="
-            f"{aws_profile!r}; qs_browser layer will skip",
-            file=sys.stderr,
-        )
-        return None
-    # Prefer ADMIN; otherwise first user. The QS embed URL works for
-    # any active user; ADMIN is just the canonical sign-as identity.
-    admin = next((u for u in users if u.get("Role") == "ADMIN"), None)
-    chosen = admin if admin is not None else users[0]
-    return str(chosen.get("Arn", ""))
-
-
-def _probe_qs_e2e_user_arn() -> ProbeFailure | None:
-    """Check that the runner can satisfy ``RECON_E2E_USER_ARN``.
-
-    Three paths are accepted (any one passes the probe):
-
-    1. **Env var set** — operator-managed (legacy / CI).
-    2. **Cfg `auth.quicksight_user_arn` set** — explicit override
-       (combined h+i.0 spike escape hatch).
-    3. **Cfg `auth.aws_profile` set** — h.1 derivation will fire
-       inside ``_run_one_variant`` via ``_derive_qs_user_arn``.
-
-    Y.2.gate.b.15 — registry call also runs the IAM-ARN regex
-    validator on PRESENCE, so a malformed ARN surfaces here instead
-    of inside the boto embed-URL call later.
-
-    Cfg discovery uses the same default-candidate list as
-    ``_resolve_runner_cfg_path("default")`` — handles the common
-    "operator runs against external Aurora with `auth:` block in
-    `run/config.postgres.yaml`" case without per-variant context.
-    """
-    if RECON_E2E_USER_ARN.get_or_none():
-        return None
-    cfg_path = _resolve_seed_config(_DEFAULT_RUNNER_CFG_CANDIDATES)
-    if cfg_path is not None:
-        try:
-            from recon_gen.common.config import load_config  # noqa: PLC0415 — lazy: only load cfg when probing
-            cfg = load_config(str(cfg_path))
-        except Exception:  # noqa: BLE001 — bad cfg surfaces elsewhere; here we just want a yes/no
-            cfg = None
-        # DE.2 commit A — cfg.auth is now always-present (default-factory).
-        if cfg is not None and (
-            cfg.auth.aws.quicksight_user_arn is not None
-            or cfg.auth.aws.profile is not None
-        ):
-            return None
-    return ProbeFailure(
-        kind="qs_arn_unset",
-        message=(
-            "RECON_E2E_USER_ARN unset and no cfg auth block found. "
-            "Either export the QuickSight user ARN, or add an "
-            "`auth: { aws: { profile: <name> } }` block to "
-            "run/config.<dialect>.yaml (combined spike: "
-            "docs/audits/y_2_gate_h_i_combined_spike.md)."
-        ),
-    )
-
-
 # CB.11.a.2 (2026-06-01) — `_probe_aws_rds_running` deleted along with
 # the `aws_rds` module + RDS lifecycle commands. RDS Aurora is gone
 # (CB.12 final); Docker on the self-hosted runner is the only DB
@@ -532,7 +413,6 @@ _ProbeFunc = Callable[[], "ProbeFailure | None"]
 _PROBE_FUNCTIONS: Final[dict[str, _ProbeFunc]] = {
     "aws": _probe_aws,
     "docker": _probe_docker,
-    "qs_arn": _probe_qs_e2e_user_arn,
 }
 
 
@@ -623,63 +503,6 @@ class LayerResult:
 # pytest / pyright don't depend on the bash shim's PATH munging (it doesn't do
 # any; this is just defensive against future changes).
 _VENV_BIN: Final = REPO_ROOT / ".venv" / "bin"
-
-
-def _build_deploy_command(  # pyright: ignore[reportUnusedFunction]: DI phase — runner-internal callsites retired; kept for tests/unit/test_runner_triage.py extraction-parity proofs + future re-use if a runner-side deploy primitive is reintroduced
-    variant_env: dict[str, str],
-    run_dir: Path,
-) -> tuple[list[str], dict[str, str]] | None:
-    """Return ``(cmd, env)`` for ``recon-gen json apply --execute``.
-
-    DI phase — no longer called from inside the runner. Deploy is owned
-    by the session-autouse ``qs_deployed`` fixture in
-    ``tests/e2e/conftest.py``, which builds its own subprocess invocation
-    (parity in shape, lives at the fixture layer to keep the runner free
-    of pytest fixture coupling). Helper retained as a documented
-    extraction so the test suite can prove command-shape parity and
-    re-use if a runner-side deploy primitive comes back.
-
-    Originally extracted from ``_layer_command``'s deploy arm so the
-    triage verb (`cmd_triage`) could spawn the same deploy step without
-    going through the pytest-wrapped dispatch path. Same body, just
-    lifted to module level.
-
-    Cfg-path resolution (in order):
-      1. ``variant_env[RECON_GEN_QS_CONFIG]`` — the hotchkiss.io-routed cfg
-         (CB.11.b — QS in us-east-1 can't reach 127.0.0.1).
-      2. ``variant_env[RECON_GEN_CONFIG]`` — the operator-authored cfg.
-      3. Fall back to ``_resolve_seed_config(_DEFAULT_RUNNER_CFG_CANDIDATES)``
-         so the default variant still finds ``run/config.<dialect>.yaml``.
-
-    L2 path (``RECON_GEN_TEST_L2_INSTANCE``) must be present in
-    ``variant_env`` (the caller — ``cmd_up_to`` or ``cmd_triage`` —
-    derives it from ``cfg.db.default_l2_instance``); without it we
-    genuinely can't deploy and return ``None``.
-
-    The returned ``env`` is empty (no env additions beyond what the
-    caller already builds); kept in the tuple shape for parity with
-    ``_layer_command``'s contract so callers don't special-case the
-    deploy arm vs the pytest arms.
-    """
-    cfg_str = variant_env.get(RECON_GEN_QS_CONFIG.name) or variant_env.get(
-        RECON_GEN_CONFIG.name,
-    )
-    if cfg_str is None:
-        fallback_cfg_path = _resolve_seed_config(_DEFAULT_RUNNER_CFG_CANDIDATES)
-        cfg_str = str(fallback_cfg_path) if fallback_cfg_path is not None else None
-    l2_str = variant_env.get(RECON_GEN_TEST_L2_INSTANCE.name)
-    if cfg_str is None or l2_str is None:
-        return None
-    out_dir = run_dir / "deploy" / "out"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    cmd = [
-        str(_VENV_BIN / "recon-gen"), "json", "apply",
-        "--execute",
-        "-c", cfg_str,
-        "--l2", l2_str,
-        "-o", str(out_dir),
-    ]
-    return (cmd, {})
 
 
 def _layer_command(
@@ -3893,15 +3716,9 @@ def cmd_up_to(args: argparse.Namespace) -> int:
     #
     # Issue #1 fix: delegate to ``_setup_thin_chain_environment`` so the
     # env-shape is built in ONE place (helper is also called by
-    # ``cmd_triage``). Knobs preserve cmd_up_to's byte-identical
-    # behavior:
-    #
-    # - ``warn_on_missing_l2=True`` — print the stderr breadcrumb when
-    #   ``cfg.db.default_l2_instance`` points at a missing file
-    #   (deploy/qs_* layers downstream dispatch-skip).
-    # - ``always_derive_qs_user_arn=True`` — derive RECON_E2E_USER_ARN
-    #   regardless of the entry layer (the chain may transit through
-    #   qs_browser even when args.layer is unit).
+    # ``cmd_triage``). ``warn_on_missing_l2=True`` prints the stderr
+    # breadcrumb when ``cfg.db.default_l2_instance`` points at a missing
+    # file.
     cfg_path = _resolve_seed_config(_DEFAULT_RUNNER_CFG_CANDIDATES)
     if cfg_path is not None:
         # DC.3 — pre-flight TLS cert reconciliation BEFORE any layer
@@ -3918,10 +3735,8 @@ def cmd_up_to(args: argparse.Namespace) -> int:
             return oidc_exit
         runner_variant_env = _setup_thin_chain_environment(
             cfg_path,
-            layer=args.layer,
             as_of_anchor=as_of_anchor,
             warn_on_missing_l2=True,
-            always_derive_qs_user_arn=True,
         )
     else:
         # Helper requires cfg_path; without one we still need the
@@ -4959,10 +4774,8 @@ def _read_triage_state() -> dict[str, Any] | None:
 def _setup_thin_chain_environment(
     cfg_path: Path,
     *,
-    layer: str,
     as_of_anchor: str,
     warn_on_missing_l2: bool = False,
-    always_derive_qs_user_arn: bool = False,
 ) -> dict[str, str]:
     """Build the runner_variant_env dict for the thin chain — mirrors
     the lines 3434-3470 block in ``cmd_up_to``.
@@ -4976,18 +4789,10 @@ def _setup_thin_chain_environment(
     (which calls this helper directly). Single source of truth for the
     env-shape so the two verbs can't drift apart.
 
-    Per-caller knobs (Issue #1):
-
-    - ``warn_on_missing_l2``: when True, prints a stderr warning when
-      ``cfg.db.default_l2_instance`` points at a missing file. cmd_up_to
-      surfaces this (deploy/qs_* layers dispatch-skip downstream);
-      cmd_triage silently elides the L2 env entry (its own dispatch
-      gates handle the missing-L2 path).
-    - ``always_derive_qs_user_arn``: when True, derives RECON_E2E_USER_ARN
-      regardless of layer (cmd_up_to's behavior — chain may include
-      qs_browser even when the entry layer is unit). When False (default),
-      only derives for AWS_TOUCHING_LAYERS layers (cmd_triage's single-
-      layer scope).
+    ``warn_on_missing_l2``: when True, prints a stderr warning when
+    ``cfg.db.default_l2_instance`` points at a missing file. cmd_up_to
+    surfaces this; cmd_triage silently elides the L2 env entry (its own
+    dispatch gates handle the missing-L2 path).
     """
     runner_variant_env: dict[str, str] = {
         RECON_GEN_AS_OF_ANCHOR.name: as_of_anchor,
@@ -5007,24 +4812,15 @@ def _setup_thin_chain_environment(
                 runner_variant_env[RECON_GEN_TEST_L2_INSTANCE.name] = str(l2_path)
             elif warn_on_missing_l2:
                 print(
-                    f"runner: cfg.db.default_l2_instance={l2_default!r} not found on disk; "
-                    f"deploy/qs_* layers will dispatch-skip",
+                    f"runner: cfg.db.default_l2_instance={l2_default!r} not found on disk",
                     file=sys.stderr,
                 )
+        # AWS_PROFILE injection is vestigial post-QuickSight (DW.0.5 =
+        # fully-local; no subprocess reaches AWS). No-op when the cfg
+        # carries no aws.profile; the whole cfg.auth.aws surface retires
+        # in the DW.11 AWS-footprint teardown / config cleanup.
         if peek_cfg.auth.aws.profile is not None:
             runner_variant_env["AWS_PROFILE"] = peek_cfg.auth.aws.profile
-        # DW.5.2 — QuickSight removed: no layer needs a QS user ARN, so
-        # derivation never fires (``AWS_TOUCHING_LAYERS`` is empty). The
-        # ``always_derive_qs_user_arn`` knob + ``_resolve_qs_user_arn``
-        # subsystem are now dead QS plumbing slated for the DW.7 source
-        # sweep; gating on the empty AWS set keeps local runs from poking
-        # STS / ListUsers on a torn-down QS account.
-        _ = always_derive_qs_user_arn  # dead post-QS; see DW.7
-        should_derive = _is_aws_touching_layer(layer)
-        if should_derive and RECON_E2E_USER_ARN.name not in runner_variant_env:
-            arn = _resolve_qs_user_arn(peek_cfg)
-            if arn is not None:
-                runner_variant_env[RECON_E2E_USER_ARN.name] = arn
     except Exception as exc:  # noqa: BLE001 — peek failure shouldn't gate the run
         print(f"runner: cfg peek for L2 discovery failed ({exc!r}); continuing")
     return runner_variant_env
@@ -5166,7 +4962,7 @@ def cmd_triage(args: argparse.Namespace) -> int:
         )
         return EXIT_NEEDS_OPERATOR
     runner_variant_env = _setup_thin_chain_environment(
-        cfg_path, layer=layer, as_of_anchor=as_of_anchor,
+        cfg_path, as_of_anchor=as_of_anchor,
     )
 
     # Container spin (skipped for unit-only triage).
@@ -5547,19 +5343,6 @@ def cmd_triage_down(args: argparse.Namespace) -> int:
 
 
 _HELP_EPILOG = """\
-Auth (Y.2.gate.h+i):
-  AWS profile + QS embed user are read from run/config.<dialect>.yaml's
-  optional auth: block. Set:
-      auth:
-        aws:
-          profile: "recon-gen-local"     # ~/.aws/credentials profile
-          quicksight_user_arn: null       # optional explicit override
-  When set, the runner injects AWS_PROFILE into every layer subprocess and
-  auto-derives RECON_E2E_USER_ARN via STS+ListUsers — no env-var exports.
-  One-time IAM-user setup runbook + IAM policy json:
-      docs/audits/y_2_gate_h_i_combined_spike.md   §6 (runbook), §7 (policy)
-      docs/audits/_iam/recon-gen-local-policy.json
-
 Layer chain (Y.2.gate.b/c/n):
   unit -> db -> app2 -> agreement -> app2_browser
   (DW.5.2: QuickSight removed; the chain is fully local — no AWS tier.

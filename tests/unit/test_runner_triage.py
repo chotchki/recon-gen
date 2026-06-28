@@ -14,8 +14,8 @@ Coverage:
   empty / absolute nodeid, unknown nodeid).
 - ``cmd_triage_down`` gates (--yes required, missing state file is a
   successful no-op).
-- Extraction-correctness checks for the ``_build_deploy_command``
-  refactor + ``_setup_thin_chain_environment`` helper.
+- Layer-chain design locks (post-QuickSight: LAYERS tuple,
+  AWS_TOUCHING_LAYERS empty, deploy arm retired).
 """
 
 from __future__ import annotations
@@ -503,66 +503,8 @@ def test_cmd_triage_down_kills_screen_and_removes_state(
 
 
 # ---------------------------------------------------------------------------
-# Extraction-correctness — _build_deploy_command parity.
+# Layer-chain design locks (post-QuickSight).
 # ---------------------------------------------------------------------------
-
-
-def test_build_deploy_command_returns_none_when_l2_missing(
-    tmp_path: Path,
-) -> None:
-    """No RECON_GEN_TEST_L2_INSTANCE in env → None."""
-    variant_env: dict[str, str] = {
-        r.RECON_GEN_CONFIG.name: "/path/to/cfg.yaml",
-    }
-    result = r._build_deploy_command(variant_env, tmp_path)
-    assert result is None
-
-
-def test_build_deploy_command_with_cfg_and_l2_returns_cmd(
-    tmp_path: Path,
-) -> None:
-    """When cfg + L2 both present, returns the expected argv shape."""
-    cfg = tmp_path / "cfg.yaml"
-    cfg.write_text("placeholder")
-    l2 = tmp_path / "l2.yaml"
-    l2.write_text("placeholder")
-    variant_env = {
-        r.RECON_GEN_CONFIG.name: str(cfg),
-        r.RECON_GEN_TEST_L2_INSTANCE.name: str(l2),
-    }
-    result = r._build_deploy_command(variant_env, tmp_path)
-    assert result is not None
-    cmd, env_addl = result
-    assert "json" in cmd
-    assert "apply" in cmd
-    assert "--execute" in cmd
-    assert str(cfg) in cmd
-    assert str(l2) in cmd
-    assert env_addl == {}
-    # out_dir must have been created.
-    assert (tmp_path / "deploy" / "out").is_dir()
-
-
-def test_build_deploy_command_prefers_qs_cfg_over_local_cfg(
-    tmp_path: Path,
-) -> None:
-    """When both RECON_GEN_QS_CONFIG and RECON_GEN_CONFIG are set, QS wins."""
-    local_cfg = tmp_path / "local.yaml"
-    qs_cfg = tmp_path / "qs.yaml"
-    local_cfg.write_text("placeholder")
-    qs_cfg.write_text("placeholder")
-    l2 = tmp_path / "l2.yaml"
-    l2.write_text("placeholder")
-    variant_env = {
-        r.RECON_GEN_CONFIG.name: str(local_cfg),
-        r.RECON_GEN_QS_CONFIG.name: str(qs_cfg),
-        r.RECON_GEN_TEST_L2_INSTANCE.name: str(l2),
-    }
-    result = r._build_deploy_command(variant_env, tmp_path)
-    assert result is not None
-    cmd, _env = result
-    assert str(qs_cfg) in cmd
-    assert str(local_cfg) not in cmd
 
 
 def test_deploy_retired_from_layers_tuple() -> None:
