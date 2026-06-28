@@ -1,22 +1,19 @@
 """DM.1 + DM.2 — Daily Statement Role picker + Role→Account cascade.
 
-These tests walk the REAL L1 Daily Statement tree (not a synthetic
-fixture like ``test_app2_only_renderer_gate.py``) and lock the
-DM-shape:
+These tests walk the REAL L1 Daily Statement tree and lock the DM-shape:
 
 - **DM.1** — the Daily Statement sheet carries a ``Role`` dropdown,
-  flagged ``app2_only=True``, positioned FIRST in the picker chain
-  (Role → Account → Day). The QS emit drops it (flat Account + Day
-  pair survives); the App2 spec walker keeps it.
+  positioned FIRST in the picker chain (Role → Account → Day); the App2
+  spec walker renders it as the cascade source.
 - **DM.2** — the ``Account`` dropdown declares ``cascade_source`` =
   the Role dropdown + ``cascade_match_column`` = the accounts
   dataset's ``account_role`` column. The App2 spec carries the
-  cascade-source param name (``pL1DsRole``); the QS emit of the
-  Account control carries NO ``CascadingControlConfiguration`` because
-  the cascade source is gated ``app2_only`` (see
-  ``common/tree/controls.py::ParameterDropdown.emit``).
+  cascade-source param name (``pL1DsRole``) so render.py wires the
+  BR.1 HTMX refresh.
 
 Design lock: ``docs/audits/dm_0_daily_statement_app2_cascade.md``.
+(The DM.0.5 ``app2_only`` QS-exclusion gate retired with the QS
+emitter in DW — every control now renders on App2.)
 """
 
 from __future__ import annotations
@@ -69,17 +66,14 @@ def _dropdowns(sheet: Sheet) -> list[ParameterDropdown]:
 # DM.1 — Role picker, App2-only, first in the chain.
 # --------------------------------------------------------------------------
 
-def test_dm1_role_dropdown_present_and_app2_only() -> None:
-    """The Daily Statement sheet carries a ``Role`` dropdown that is
-    flagged ``app2_only=True``."""
+def test_dm1_role_dropdown_present() -> None:
+    """The Daily Statement sheet carries a ``Role`` dropdown bound to the
+    ``pL1DsRole`` parameter."""
     sheet = _daily_statement_sheet(_build_l1_app())
     role = next(
         (d for d in _dropdowns(sheet) if d.title == "Role"), None,
     )
     assert role is not None, "DM.1 Role dropdown missing on Daily Statement"
-    assert role.app2_only is True, (
-        "DM.1 Role dropdown must be app2_only=True so the QS emit skips it"
-    )
     assert role.parameter.name == str(P_L1_DS_ROLE)
 
 
@@ -107,24 +101,9 @@ def test_dm1_role_param_not_pushed_into_datasets() -> None:
     )
 
 
-def test_dm1_role_dropped_from_qs_emit_kept_on_app2() -> None:
-    """QS emit drops the app2_only Role control; the App2 spec walker
-    keeps it (renders all controls)."""
+def test_dm1_role_rendered_on_app2() -> None:
+    """The App2 spec walker renders the Role dropdown (alongside Account)."""
     sheet = _daily_statement_sheet(_build_l1_app())
-
-    # QS side: the emitted SheetDefinition's parameter-control titles
-    # do NOT include "Role"; Account + Business Day survive.
-    emitted = sheet.emit()
-    qs_titles = {
-        c.Dropdown.Title for c in (emitted.ParameterControls or [])
-        if c.Dropdown is not None
-    }
-    assert "Role" not in qs_titles, (
-        "QS emit must NOT carry the app2_only Role control"
-    )
-    assert "Account" in qs_titles
-
-    # App2 side: the spec walker carries a dropdown spec for Role.
     specs = make_filter_specs_for_sheet(sheet)
     app2_labels = {
         s.label for s in specs if isinstance(s, ParameterDropdownSpec)
@@ -132,6 +111,7 @@ def test_dm1_role_dropped_from_qs_emit_kept_on_app2() -> None:
     assert "Role" in app2_labels, (
         "App2 spec walker must render the Role dropdown"
     )
+    assert "Account" in app2_labels
 
 
 # --------------------------------------------------------------------------
@@ -163,25 +143,6 @@ def test_dm2_app2_account_spec_carries_cascade_source_param() -> None:
     )
     assert account_spec.cascade_source_param == str(P_L1_DS_ROLE), (
         "DM.2 App2 Account spec must carry the Role cascade source param"
-    )
-
-
-def test_dm2_qs_account_emit_has_no_cascade_config() -> None:
-    """The QS emit of the Account control carries NO
-    ``CascadingControlConfiguration`` — the cascade source (Role) is
-    app2_only and never emitted to QS, so referencing it from a QS
-    cascade block would dangle. controls.py gates the emit on the
-    source's ``app2_only`` flag."""
-    sheet = _daily_statement_sheet(_build_l1_app())
-    emitted = sheet.emit()
-    account_ctrl = next(
-        c for c in (emitted.ParameterControls or [])
-        if c.Dropdown is not None and c.Dropdown.Title == "Account"
-    )
-    assert account_ctrl.Dropdown is not None
-    assert account_ctrl.Dropdown.CascadingControlConfiguration is None, (
-        "QS Account control must not carry a CascadingControlConfiguration "
-        "pointing at the app2_only Role control"
     )
 
 
@@ -218,19 +179,3 @@ def test_dm3_app2_date_spec_carries_account_param() -> None:
     )
     assert business_day is not None
     assert business_day.day_availability_account_param == str(P_L1_DS_ACCOUNT)
-
-
-def test_dm3_business_day_picker_not_gated_off_qs() -> None:
-    """DM.3 decoration is App2-only via the tree flag (not app2_only) —
-    the Business Day picker STILL emits to QS as a plain picker. (QS
-    keeps Account + Day; only the Role widget is dropped.)"""
-    sheet = _daily_statement_sheet(_build_l1_app())
-    emitted = sheet.emit()
-    dt_titles = {
-        c.DateTimePicker.Title
-        for c in (emitted.ParameterControls or [])
-        if c.DateTimePicker is not None
-    }
-    assert "Business Day" in dt_titles, (
-        "QS must still render the plain Business Day picker"
-    )

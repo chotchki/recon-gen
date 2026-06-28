@@ -3,9 +3,10 @@
 
 The skeleton the rest of the tree hangs off. Authors construct an
 ``App``, attach an ``Analysis`` (which holds the sheet tree),
-optionally attach a ``Dashboard``, and call ``app.emit_analysis()``
-/ ``app.emit_dashboard()`` to get the ``models.py`` instances ready
-for deploy.
+optionally attach a ``Dashboard``, and call ``app.validate()`` to
+resolve auto-IDs + run the structural-invariant walk. The renderers
+(App2 HTMX, audit PDF) consume the validated tree directly — the QS
+emitter that once serialized it to the AWS API is gone (DW phase).
 """
 
 from __future__ import annotations
@@ -23,23 +24,9 @@ from recon_gen.common.ids import (
     SheetId,
     VisualId,
 )
-from recon_gen.common.models import (
-    AnalysisDefinition,
-    DashboardPublishOptions,
-    GridLayoutConfiguration,
-    GridLayoutElement,
-    Layout,
-    LayoutConfiguration,
-    ResourcePermission,
-    SheetDefinition,
-)
-from recon_gen.common.models import Analysis as ModelAnalysis
-from recon_gen.common.models import Dashboard as ModelDashboard
 from recon_gen.common.tree._helpers import (
-    ANALYSIS_ACTIONS,
     AUTO,
     AutoResolved,
-    DASHBOARD_ACTIONS,
     GridLayoutElementType,
     _AutoSentinel,
     auto_id,
@@ -163,24 +150,6 @@ class GridSlot:
     col_index: int
     row_index: int | None = None
 
-    def emit(self) -> GridLayoutElement:
-        # v8.6.9 — Card layout padding (12px) on TEXT_BOX elements so
-        # rendered prose doesn't sit flush against the card edges.
-        # Visuals get QS's bare default (no padding) — they self-render
-        # their own internal padding via ChartConfiguration title /
-        # subtitle / data-area styling.
-        padding = "12px" if self.element.element_type == "TEXT_BOX" else None
-        return GridLayoutElement(
-            ElementId=self.element.element_id,
-            ElementType=self.element.element_type,
-            ColumnSpan=self.col_span,
-            RowSpan=self.row_span,
-            ColumnIndex=self.col_index,
-            RowIndex=self.row_index,
-            Padding=padding,
-        )
-
-
 # ---------------------------------------------------------------------------
 # Sheet — child of Analysis.
 # ---------------------------------------------------------------------------
@@ -288,7 +257,6 @@ class Sheet:
         hidden_select_all: bool = False,
         cascade_source: ParameterDropdown | None = None,
         cascade_match_column: Column | None = None,
-        app2_only: bool = False,
         control_id: str | AutoResolved = AUTO,
     ) -> ParameterDropdown:
         """Construct + register a parameter dropdown control on this sheet.
@@ -300,9 +268,6 @@ class Sheet:
         any CategoryFilter using it matches nothing. Caught the L1
         Daily Statement account-dropdown footgun (v8.3.3 hotfix); the
         type makes it unrepresentable going forward.
-
-        ``app2_only`` (DM.0.5) — when True, the QS emitter walk skips
-        this control entirely; App2 renders it normally. Default False.
         """
         ctrl = ParameterDropdown(
             parameter=parameter, title=title, type=type,
@@ -310,7 +275,6 @@ class Sheet:
             hidden_select_all=hidden_select_all,
             cascade_source=cascade_source,
             cascade_match_column=cascade_match_column,
-            app2_only=app2_only,
             control_id=control_id,
         )
         self.parameter_controls.append(ctrl)
@@ -340,23 +304,19 @@ class Sheet:
         *,
         parameter: ParameterDeclLike,
         title: str,
-        app2_only: bool = False,
         day_availability_account_param: str | None = None,
         control_id: str | AutoResolved = AUTO,
     ) -> ParameterDateTimePicker:
         """Construct + register a parameter datetime picker control.
 
-        ``app2_only`` (DM.0.5) — when True, the QS emitter walk skips
-        this control entirely; App2 renders it normally. Default False.
-
         ``day_availability_account_param`` (DM.3) — when set to an
         account-picker parameter name, the App2 Flatpickr decorates
         calendar days with activity markers from the day-availability
         endpoint, reading the picked account off the named sibling
-        control. ``None`` (default) = no decoration. App2-only.
+        control. ``None`` (default) = no decoration.
         """
         ctrl = ParameterDateTimePicker(
-            parameter=parameter, title=title, app2_only=app2_only,
+            parameter=parameter, title=title,
             day_availability_account_param=day_availability_account_param,
             control_id=control_id,
         )
@@ -504,55 +464,6 @@ class Sheet:
                 f"narrow the criteria."
             )
         return matches[0]
-
-    def emit(self) -> SheetDefinition:
-        return SheetDefinition(
-            SheetId=self.sheet_id,
-            Name=self.name,
-            Title=self.title,
-            Description=self.description,
-            ContentType="INTERACTIVE",
-            Visuals=[v.emit() for v in self.visuals] if self.visuals else None,
-            FilterControls=(
-                [fc.emit() for fc in self.filter_controls]
-                if self.filter_controls else []
-            ),
-            # DM.0.5 — ``app2_only=True`` controls skip QS emission
-            # entirely. The cascade primitive (Role → Account narrow)
-            # silently fails on QS (cascading dataset parameter +
-            # URL-param-no-control-sync); App2's per-request server
-            # query handles it cleanly. See
-            # ``docs/audits/dm_0_daily_statement_app2_cascade.md``.
-            ParameterControls=(
-                [
-                    c.emit() for c in self.parameter_controls
-                    if not getattr(c, "app2_only", False)
-                ]
-                if self.parameter_controls else None
-            ),
-            TextBoxes=(
-                [tb.emit() for tb in self.text_boxes]
-                if self.text_boxes else None
-            ),
-            Layouts=[
-                Layout(
-                    Configuration=LayoutConfiguration(
-                        GridLayout=GridLayoutConfiguration(
-                            Elements=[s.emit() for s in self.grid_slots],
-                            # M.4.4.10ab — QS UI emits this on every
-                            # GridLayout; its absence breaks the editor.
-                            CanvasSizeOptions={
-                                "ScreenCanvasSizeOptions": {
-                                    "ResizeOption": "FIXED",
-                                    "OptimizedViewPortWidth": "1600px",
-                                },
-                            },
-                        ),
-                    ),
-                ),
-            ],
-        )
-
 
 # ---------------------------------------------------------------------------
 # L.1.21 — Layout DSL. Sheet's grid layout factored into a separate
@@ -1020,10 +931,10 @@ class Analysis:
     tree node keeps the per-app naming under the tree's control while
     leaving the global resource-prefix in the Config.
 
-    ``emit_definition()`` returns the ``models.AnalysisDefinition`` —
-    the App combines this with metadata (``AwsAccountId``,
-    ``ThemeArn``, ``Permissions``, dataset declarations) to produce
-    the full ``models.Analysis`` ready for deploy.
+    The sheet tree this node holds (``sheets`` + ``filter_groups`` +
+    ``parameters`` + ``calc_fields``) is what the renderers walk
+    directly — App2 reads it off the tree; the QS emitter that once
+    serialized it to a ``models.AnalysisDefinition`` is gone (DW phase).
     """
     analysis_id_suffix: str
     name: str
@@ -1214,67 +1125,6 @@ class Analysis:
             deps.update(fg.calc_fields())
         return deps
 
-    def emit_definition(
-        self,
-        *,
-        datasets: list[Dataset],
-    ) -> AnalysisDefinition:
-        return AnalysisDefinition(
-            DataSetIdentifierDeclarations=[
-                d.emit_declaration() for d in datasets
-            ],
-            Sheets=[s.emit() for s in self.sheets],
-            FilterGroups=(
-                [fg.emit() for fg in self.filter_groups]
-                if self.filter_groups else None
-            ),
-            CalculatedFields=(
-                [c.emit() for c in self.calc_fields]
-                if self.calc_fields else None
-            ),
-            ParameterDeclarations=(
-                [p.emit() for p in self.parameters]
-                if self.parameters else None
-            ),
-            # M.4.4.10ab — three top-level fields QS UI populates on
-            # every analysis. Their absence loads but breaks the editor
-            # when adding visuals/sheets. Shapes mirror the QS-UI
-            # control analysis verified against on 2026-04-29.
-            Options={
-                "WeekStart": "SUNDAY",
-                "QBusinessInsightsStatus": "DISABLED",
-                "ExcludedDataSetArns": [],
-                "CustomActionDefaults": {
-                    "highlightOperation": {
-                        "Trigger": "DATA_POINT_CLICK",
-                    },
-                },
-            },
-            AnalysisDefaults={
-                "DefaultNewSheetConfiguration": {
-                    "InteractiveLayoutConfiguration": {
-                        "Grid": {
-                            "CanvasSizeOptions": {
-                                "ScreenCanvasSizeOptions": {
-                                    "ResizeOption": "FIXED",
-                                    "OptimizedViewPortWidth": "1600px",
-                                },
-                            },
-                        },
-                    },
-                    "SheetContentType": "INTERACTIVE",
-                },
-            },
-            # QueryExecutionOptions: NOT EMITTED. boto3 1.42.97's model
-            # claims the field is accepted on CreateAnalysis but the
-            # serializer raises KeyError mid-serialize. Both with and
-            # without parameter_validation=False. QS auto-fills the
-            # field server-side to {QueryExecutionMode: AUTO} anyway —
-            # the working hand-built control analysis showed the same
-            # value on describe even though it was never sent.
-        )
-
-
 # ---------------------------------------------------------------------------
 # Dashboard — references an Analysis (object ref) so they share the
 # same definition.
@@ -1306,22 +1156,19 @@ class Dashboard:
 @dataclass(eq=False)
 class App:
     """Top-level tree node — coordinates an Analysis + Dashboard plus
-    the deploy-time context (theme, dataset arns, permissions) drawn
-    from the Config.
+    the render-time context (theme, dataset arns) drawn from the Config.
 
     Authors construct an App, attach the Analysis (which holds the
     sheet tree), optionally attach the Dashboard (most apps do — they
-    publish what they author), and call ``emit_analysis()`` /
-    ``emit_dashboard()`` to get the ``models.py`` instances ready for
-    deploy.
+    publish what they author), and call ``validate()`` to resolve
+    auto-IDs + run the structural-invariant walk. The renderers (App2,
+    audit PDF) consume the validated tree directly.
 
     Datasets are registered on the App via ``add_dataset()`` and
-    referenced from visuals / filters by object ref. At emit time
-    the App walks the tree's ``dataset_dependencies()`` and includes
-    only the datasets actually used in the emitted
-    ``DataSetIdentifierDeclarations`` — selective by construction.
-    Validation: if a visual or filter references a Dataset that
-    isn't registered on the App, ``emit_analysis`` raises with the
+    referenced from visuals / filters by object ref;
+    ``dataset_dependencies()`` walks the tree for the datasets actually
+    used. Validation: if a visual or filter references a Dataset that
+    isn't registered on the App, ``validate()`` raises with the
     offending identifiers.
     """
     name: str
@@ -1331,7 +1178,7 @@ class App:
     datasets: list[Dataset] = field(default_factory=list[Dataset])
     # Bare-string column refs (``Dim(ds, "amount")`` instead of
     # ``ds["amount"].dim()``) are typo-prone — they bypass the dataset
-    # contract validation. ``emit_analysis`` raises on any bare-string
+    # contract validation. ``validate()`` raises on any bare-string
     # column ref unless this flag is set. Test fixtures + datasets
     # without a registered contract (kitchen-sink) opt in via
     # ``allow_bare_strings=True``.
@@ -1415,10 +1262,9 @@ class App:
 
     def resolve_auto_ids(self) -> None:
         """Walk the tree and assign auto-IDs to nodes that left their
-        IDs unset. Called from emit_analysis / emit_dashboard before
-        any validation or emission, and exposed publicly so non-QS
-        renderers (HTML, future X.4 editor) can resolve IDs without
-        going through the full QS emit path.
+        IDs unset. Called first thing from ``validate()``, and exposed
+        publicly so renderers (App2 HTML, the X.4 editor) can resolve
+        IDs on their own.
 
         Idempotent — re-runs are no-ops once IDs are filled in.
 
@@ -1887,8 +1733,8 @@ class App:
         unregistered = referenced - registered
         if unregistered:
             # Names are populated by resolve_auto_ids before validation
-            # runs (see emit_analysis); fall back to "<unnamed>" for
-            # safety.
+            # runs (validate() calls it first); fall back to "<unnamed>"
+            # for safety.
             names = sorted(
                 "<unnamed>" if isinstance(c.name, _AutoSentinel) else c.name
                 for c in unregistered
@@ -1899,23 +1745,6 @@ class App:
                 f"app.analysis.add_calc_field() first."
             )
 
-    def _permissions(self, actions: list[str]) -> list[ResourcePermission] | None:
-        if not self.cfg.aws.principal_arns:
-            return None
-        return [
-            ResourcePermission(Principal=arn, Actions=actions)
-            for arn in self.cfg.aws.principal_arns
-        ]
-
-    def _theme_arn(self) -> str:
-        return self.cfg.aws.theme_arn(self.cfg.aws.prefixed("theme"))
-
-    def _used_datasets(self) -> list[Dataset]:
-        """Datasets the analysis emits declarations for — only those
-        actually referenced by the tree, in registration order."""
-        referenced = self.dataset_dependencies()
-        return [d for d in self.datasets if d in referenced]
-
     def validate(self) -> None:
         """Run the full tree-validation walk — resolve auto-IDs, then
         every structural invariant: dataset / calc-field / parameter /
@@ -1923,10 +1752,10 @@ class App:
         Phase DB.2 App2-completeness gate, and the no-bare-string-columns
         check. Raises on the first violation.
 
-        Public so non-QS renderers (App2) and tests can validate the tree
-        without going through the QS emitter; ``emit_analysis`` delegates
-        here. The emitter is being removed (DW phase), so the validation
-        walk lives on the App, not bundled inside emit.
+        The single validation entry point for every renderer (App2,
+        audit PDF) and the tests. The QS emitter that once wrapped this
+        walk is gone (DW phase) — validation lives on the App now, not
+        bundled inside an emit method.
         """
         if self.analysis is None:
             raise ValueError(
@@ -1950,47 +1779,3 @@ class App:
         check_app2_parity(self)
         self._validate_no_bare_string_columns()
 
-    def emit_analysis(self) -> ModelAnalysis:
-        self.validate()
-        assert self.analysis is not None  # validate() raises if None
-        return ModelAnalysis(
-            AwsAccountId=self.cfg.aws.account_id,
-            AnalysisId=self.cfg.aws.prefixed(self.analysis.analysis_id_suffix),
-            Name=self.analysis.name,
-            ThemeArn=self._theme_arn(),
-            Definition=self.analysis.emit_definition(
-                datasets=self._used_datasets(),
-            ),
-            Permissions=self._permissions(ANALYSIS_ACTIONS),
-            Tags=self.cfg.aws.tags(),
-        )
-
-    def emit_dashboard(self) -> ModelDashboard:
-        if self.dashboard is None:
-            raise ValueError(
-                "App has no Dashboard — call create_dashboard() first."
-            )
-        self.resolve_auto_ids()
-        self._validate_dataset_references()
-        self._validate_calc_field_references()
-        self._validate_parameter_references()
-        self._validate_filter_param_settability()
-        self._validate_drill_destinations()
-        self._validate_no_bare_string_columns()
-        return ModelDashboard(
-            AwsAccountId=self.cfg.aws.account_id,
-            DashboardId=self.cfg.aws.prefixed(self.dashboard.dashboard_id_suffix),
-            Name=self.dashboard.name,
-            ThemeArn=self._theme_arn(),
-            Definition=self.dashboard.analysis.emit_definition(
-                datasets=self._used_datasets(),
-            ),
-            Permissions=self._permissions(DASHBOARD_ACTIONS),
-            Tags=self.cfg.aws.tags(),
-            VersionDescription="Generated by recon-gen",
-            DashboardPublishOptions=DashboardPublishOptions(
-                AdHocFilteringOption={"AvailabilityStatus": "ENABLED"},
-                ExportToCSVOption={"AvailabilityStatus": "ENABLED"},
-                SheetControlsOption={"VisibilityState": "EXPANDED"},
-            ),
-        )

@@ -1053,16 +1053,15 @@ def get_picker_matview_hint(
 
 # DM.2 — App2-side cascade narrowing for the options-search fetcher.
 #
-# The QS-side cascade (``CascadingControlConfiguration``) can't be
-# emitted when the source dropdown is ``app2_only`` (DM.0.5 renderer
-# gate) — and CQ.4.a de-parameterized the picker dataset (so there's no
-# ``<<$pRole>>`` placeholder to substitute) because QS's
-# ``GetUniqueAttributeValuesSyncForAnalysis`` can't execute parameterized
-# picker datasets. App2 therefore narrows the picker's option universe
-# DYNAMICALLY in the fetcher: the dataset SQL stays unparameterized
-# (QS keeps working), and App2 wraps the same SQL with an extra
-# ``AND <match_column> IN (<source picked values>)`` predicate built from
-# the live form state at fetch time. Generic over any cascade dropdown
+# CQ.4.a de-parameterized the picker dataset (so there's no
+# ``<<$pRole>>`` placeholder to substitute) — QS's
+# ``GetUniqueAttributeValuesSyncForAnalysis`` couldn't execute
+# parameterized picker datasets, and the QS-side cascade never worked.
+# App2 narrows the picker's option universe DYNAMICALLY in the fetcher:
+# the dataset SQL stays unparameterized, and App2 wraps the same SQL
+# with an extra ``AND <match_column> IN (<source picked values>)``
+# predicate built from the live form state at fetch time. Generic over
+# any cascade dropdown
 # — driven by the tree-derived ``CascadeMap``, not hardcoded to
 # ``pL1DsRole`` / ``account_role``.
 class CascadeRule(NamedTuple):

@@ -203,16 +203,6 @@ class ParameterDropdown:
     # where this column equals the source value, then re-distincts
     # the dropdown's options. Required when cascade_source is set.
     cascade_match_column: "Column | None" = None
-    # DM.0.5 — App2-only renderer gate. When True, the QS emitter walk
-    # (``Sheet.emit()``) skips this control entirely; the App2
-    # renderer (``common/html/_tree_filter_specs.py``) ignores the
-    # field and renders the control normally. Use when the cascade /
-    # picker UX a QS-side primitive can't honor (cascading dataset
-    # parameter silent-fail + URL-param no-control-sync) but App2's
-    # per-request server query handles cleanly. Default False keeps
-    # today's both-renderer behavior. See
-    # ``docs/audits/dm_0_daily_statement_app2_cascade.md``.
-    app2_only: bool = False
     control_id: str | AutoResolved = AUTO
 
     _AUTO_KIND: ClassVar[str] = "dropdown"
@@ -235,17 +225,7 @@ class ParameterDropdown:
             }
 
         cascading_config = None
-        # DM.2 — gate the QS CascadingControlConfiguration emit on the
-        # source control's renderer disposition. When the cascade source
-        # is ``app2_only`` (DM.0.5 renderer-gate), it is dropped from the
-        # QS emitter walk (``Sheet.emit()`` skips app2_only controls), so
-        # a QS cascade block pointing at ``SourceSheetControlId`` would
-        # dangle (reference a control QS never sees). App2 still cascades
-        # correctly because its renderer reads ``cascade_source`` directly
-        # off the tree (``common/html/_tree_filter_specs.py``) and wires
-        # the BR.1 server-side refresh — independent of this QS emit. See
-        # ``docs/audits/dm_0_daily_statement_app2_cascade.md``.
-        if self.cascade_source is not None and not self.cascade_source.app2_only:
+        if self.cascade_source is not None:
             from recon_gen.common.models import (
                 CascadingControlConfiguration,
                 CascadingControlSource,
@@ -319,22 +299,14 @@ class ParameterSlider:
 class ParameterDateTimePicker:
     """Date/time picker control bound to a DateTime parameter.
 
-    ``app2_only`` (DM.0.5) — see ``ParameterDropdown.app2_only``. When
-    True, the QS emitter walk skips this control; App2 renders it
-    normally. Use for the day-availability decorated picker shape
-    (DM.3) where the App2 renderer adds CSS markers QS can't.
-
     ``day_availability_account_param`` (DM.3) — when set to a source
     account-picker parameter name (e.g. ``pL1DsAccount``), the App2
     renderer wires the Flatpickr ``onDayCreate`` decoration against the
     ``day-availability`` endpoint, reading the picked account from the
-    named sibling control. ``None`` (default) = no decoration. App2-only
-    (the QS emit ignores it; the QS ``ParameterDateTimePickerControl``
-    API has no per-day decoration surface).
+    named sibling control. ``None`` (default) = no decoration.
     """
     parameter: ParameterDeclLike
     title: str
-    app2_only: bool = False
     day_availability_account_param: str | None = None
     control_id: str | AutoResolved = AUTO
 

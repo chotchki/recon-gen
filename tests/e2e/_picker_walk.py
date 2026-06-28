@@ -158,7 +158,7 @@ def _build_apps(cfg: Config | None = None) -> Sequence[tuple[str, App]]:
             effective_cfg, l2_instance=l2)),
     ]
     for _, app in apps:
-        app.emit_analysis()  # resolves auto-IDs
+        app.validate()  # resolves auto-IDs + runs the full validation walk
     return apps
 
 

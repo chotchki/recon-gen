@@ -221,9 +221,9 @@ class TreeValidator:
         filter_ctrls: list[Any] = getattr(sheet, "filter_controls", None) or []
         param_ctrls: list[Any] = getattr(sheet, "parameter_controls", None) or []
         _renderer_divergent = {"datetime"}
-        # DW.5.2 — the DM.0.5 ``app2_only`` QS-exclusion is gone with
-        # QuickSight: App2 is the only renderer, so every declared control
-        # (including the app2_only Daily Statement Role picker, DM.1) is
+        # DW — the DM.0.5 ``app2_only`` QS-exclusion gate retired with the
+        # QS emitter (DW.8): App2 is the only renderer, so every declared
+        # control (including the Daily Statement Role picker, DM.1) is
         # compared. Only the genuinely renderer-divergent datetime pickers
         # stay excluded (App2 collapses the date range to one widget).
         comparable: list[Any] = [

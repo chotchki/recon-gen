@@ -200,19 +200,11 @@ P_L1_DATE_END = ParameterName(_P_L1_DATE_END)
 # both the summary KPIs and the transactions detail table.
 P_L1_DS_ACCOUNT = ParameterName("pL1DsAccount")
 P_L1_DS_BALANCE_DATE = ParameterName("pL1DsBalanceDate")
-# DM.1 — Role picker RE-INTRODUCED as the App2-only top-of-chain control
-# (Role → Account → Day). The CQ.4.a note below records why the ORIGINAL
-# ``pL1DsRole`` cascade was dropped: QS's
-# ``GetUniqueAttributeValuesSyncForAnalysis`` can't execute parameterized
-# datasets, so the cascade only ever worked on App2. DM accepts that
-# asymmetry intentionally and gates the Role dropdown ``app2_only=True``
-# (DM.0.5 renderer-gate) — QS keeps the flat Account + Day pair, App2
-# gains the Role narrow via the existing BR.1 cascade endpoint. The Role
-# param is a cascade SOURCE only; it is NOT pushed into the Daily
+# DM.1 — Role picker, top-of-chain control (Role → Account → Day). The
+# Role param is a cascade SOURCE only; it is NOT pushed into the Daily
 # Statement datasets (no ``mapped_dataset_params``) — the narrow happens
-# in the App2 server-side cascade query, not via QS's
-# MappedDataSetParameters bridge (which the gate skips emitting anyway).
-# Sentinel default ``__l1_no_role_selected__`` = "match all roles".
+# in the App2 server-side BR.1 cascade query. Sentinel default
+# ``__l1_no_role_selected__`` = "match all roles".
 # See ``docs/audits/dm_0_daily_statement_app2_cascade.md``.
 P_L1_DS_ROLE = ParameterName("pL1DsRole")
 _L1_DS_ROLE_SENTINEL = "__l1_no_role_selected__"
@@ -2686,19 +2678,16 @@ def _wire_daily_statement_filters(
     # against-parameterized-dataset blocker is gone), so QS's native
     # typeahead works without the pL1DsRole bridge. App2's CQ.2
     # server-side typeahead picks up the same wider universe.
-    # DM.1 — Role picker (App2-only), FIRST in the chain (Role → Account
-    # → Day). ``app2_only=True`` (DM.0.5 renderer-gate) drops it from the
-    # QS emitter walk so QS keeps the flat Account + Day pair; App2
-    # renders it as the cascade source. Options source from the L2-derived
-    # DISTINCT account-roles dataset. DM.2 captures it as ``role_dd`` and
-    # wires it as the Account dropdown's ``cascade_source``.
+    # DM.1 — Role picker, FIRST in the chain (Role → Account → Day),
+    # rendered by App2 as the cascade source. Options source from the
+    # L2-derived DISTINCT account-roles dataset. DM.2 captures it as
+    # ``role_dd`` and wires it as the Account dropdown's ``cascade_source``.
     role_dd = daily_statement_sheet.add_parameter_dropdown(
         parameter=ds_role, title="Role",
         type="SINGLE_SELECT",
         selectable_values=LinkedValues.from_column(
             datasets[DS_ACCOUNT_ROLES]["account_role"],
         ),
-        app2_only=True,
         # SINGLE_SELECT semantically requires picking exactly one —
         # "All" doesn't apply.
         hidden_select_all=True,
@@ -2713,15 +2702,11 @@ def _wire_daily_statement_filters(
             # || ' (' || account_id || ')') = <<$pL1DsAccount>>``).
             datasets[DS_L1_DS_ACCOUNTS]["account_display"],
         ),
-        # DM.2 — Role → Account cascade. When the (App2-only) Role picker
-        # changes, the Account dropdown re-narrows to accounts whose
-        # ``account_role`` matches the picked role. App2 reads
-        # ``cascade_source`` off the tree (render.py →
-        # _tree_filter_specs) and wires the BR.1 ``dropdown-options``
-        # HTMX refresh; the QS emit of the CascadingControlConfiguration
-        # is gated OFF because ``role_dd.app2_only`` is True (the source
-        # control isn't emitted to QS, so a QS cascade block would
-        # dangle — see ``common/tree/controls.py::ParameterDropdown.emit``).
+        # DM.2 — Role → Account cascade. When the Role picker changes, the
+        # Account dropdown re-narrows to accounts whose ``account_role``
+        # matches the picked role. App2 reads ``cascade_source`` off the
+        # tree (render.py → _tree_filter_specs) and wires the BR.1
+        # ``dropdown-options`` HTMX refresh.
         cascade_source=role_dd,
         cascade_match_column=datasets[DS_L1_DS_ACCOUNTS]["account_role"],
         # SINGLE_SELECT semantically requires picking exactly one —

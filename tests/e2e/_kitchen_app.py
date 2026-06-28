@@ -74,10 +74,10 @@ from recon_gen.common.tree import (
 def build_kitchen_app(cfg: Config) -> App:
     """Construct the kitchen-sink App.
 
-    Returns the App ready for ``app.emit_analysis()`` /
-    ``app.emit_dashboard()``. Caller may register additional datasets
-    or modify before emitting; the default returned shape is
-    self-contained and exercises every primitive at least once.
+    Returns the App ready for ``app.validate()``. Caller may register
+    additional datasets or modify before validating; the default
+    returned shape is self-contained and exercises every primitive at
+    least once.
     """
     # Kitchen sink doesn't register a DatasetContract for its datasets,
     # so ds["col"] can't validate. Opt into the bare-string escape
