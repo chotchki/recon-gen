@@ -14,9 +14,9 @@ QS but **silently no-op'd on App2** because the drill param never reached
 a SQL ``<<$pL2ftRailDrill>>`` placeholder. The fix flipped the drill to
 write the destination sheet's own user-facing picker parameter
 (``pL2ftRail`` / ``pL2ftChainsChain``) so the existing dataset-param
-pushdown narrows on both renderers.
+pushdown narrows the destination.
 
-Parametrized over ``[qs, app2]`` via ``l2ft_dashboard_driver``. Test
+Drives App2 via ``l2ft_dashboard_driver``. Test
 shape mirrors L1's cross-sheet drill coverage
 (``test_l1_cross_sheet_drill_date_widening.py``) — driver verb is
 ``drill_from_first_row_via_menu`` (renderer-agnostic), assertion is

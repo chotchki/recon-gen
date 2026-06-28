@@ -1,6 +1,6 @@
 """Tests for the L1 dashboard row-count extractor (U.8.b.2).
 
-The function itself talks to a live QuickSight dashboard via
+The function itself drives the App2 dashboard via
 Playwright, so the full integration test (open dashboard, apply
 period filter, count rows) lives in U.8.b.3 alongside the
 end-to-end fixture that deploys the L1 app + seeds the DB.

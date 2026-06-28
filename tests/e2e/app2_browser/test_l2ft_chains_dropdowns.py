@@ -1,8 +1,8 @@
 """Browser test: L2FT Chains sheet dropdowns narrow the Chain Instances table.
 
 X.1.g regression guard — see ``_l2ft_dropdown_walk`` for the shared
-mechanics and the failure modes. Parametrized over ``[qs, app2]``
-(X.2.u.3) via ``l2ft_dashboard_driver``. spec_example declares one chain
+mechanics and the failure modes. Drives App2 (X.2.u.3) via
+``l2ft_dashboard_driver``. spec_example declares one chain
 (``ExternalReconciliationCycle → ReconciliationClosing``, Required) whose
 auto-scenario firings exercise both completion outcomes — firing 2 (the
 closing leg doesn't fire) is 'Incomplete', firings 1 & 3 are 'Completed'

@@ -1,5 +1,5 @@
 """Browser e2e: parameter-anchored sheets surface their anchor control
-identically on QuickSight and App 2 (u.4.e.4).
+correctly on App 2 (u.4.e.4).
 
 Three sheets across two apps render *blank-until-you-pick* on default
 load — each is driven by a value the analyst sets first:
@@ -12,11 +12,11 @@ load — each is driven by a value the analyst sets first:
 - **L2 Flow Tracing Transfer Templates** — ``Template`` (multi-select
   dropdown over the L2's declared template names).
 
-Neither renderer pre-picks a default — the bound analysis parameter
-declares none — so the parity invariant this test guards is structural:
+App 2 doesn't pre-pick a default — the bound analysis parameter
+declares none — so the invariant this test guards is structural:
 the anchor control is present in the filter bar with a non-empty option
-universe, populated from its dataset, the same on both renderers
-(parametrised ``[qs, app2]`` via the ``<app>_dashboard_driver`` fixtures).
+universe, populated from its dataset (via the ``<app>_dashboard_driver``
+fixtures).
 
 **L1 Daily Statement** (``Account`` single-select, options from the
 accounts companion) is the fourth such sheet but is *not* exercised here:

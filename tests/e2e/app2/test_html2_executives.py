@@ -9,8 +9,8 @@ Stub fetcher (not live PG) keeps the test fast + DB-free. The live-PG
 variant is ``test_html2_executives_live.py`` — same shape with
 ``make_live_db_fetcher_for_app`` plumbed in.
 
-What's left here is the App2-*internal* wire shape — there is no QS
-analogue, so a parametrized ``[qs, app2]`` body can't cover it:
+What's left here is the App2-*internal* wire shape — App2-specific,
+with no cross-renderer analogue:
 
 - the rich-text → HTML render of TextBox content (``_qs_richtext_to_html``);
 - per-sheet filter-form emit vs. suppress (a text-box-only sheet shows no
@@ -20,13 +20,12 @@ analogue, so a parametrized ``[qs, app2]`` body can't cover it:
 - the dev-log POST → uvicorn logging → ``$RECON_GEN_RUN_DIR/app2/server.log``
   capture path.
 
-What's NOT here anymore (X.2.u.3 / u.5 — covered by the parametrized
-``[qs, app2]`` bodies): the KPI-auto-load smoke check
+What's NOT here anymore (X.2.u.3 / u.5 — covered by the ``[app2]``
+bodies): the KPI-auto-load smoke check
 (``test_dashboard_driver::test_showcase_kpi_renders_a_value``), and the
 "sheet tabs render with the executives names" check (``test_exec_sheet_visuals::
 test_exec_dashboard_structure_matches_tree[app2]`` — its ``TreeValidator``
-walk asserts ``driver.sheet_names()`` against the tree's sheets on both
-renderers).
+walk asserts ``driver.sheet_names()`` against the tree's sheets).
 """
 
 from __future__ import annotations

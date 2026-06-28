@@ -8,16 +8,16 @@ table"), and the result comes back as plain Python — never a Playwright
     driver.open("l1-dashboard", sheet="Drift")
     assert driver.table_rows("Drift Detail") == expected
 
-Two impls: ``QsEmbedDriver`` (the embedded QuickSight iframe — the QS
-quirks: cell virtualization, racy tab switches, the page-size-bump for
-true row counts, the ``ParameterDropDownControl`` grey-bar click — live
-*inside* the driver, not in your test) and ``App2Driver`` (the
-self-hosted HTMX/d3 page). e2e tests ``@pytest.mark.parametrize`` over
-``[qs, app2]`` via a ``driver`` fixture, so one body verifies both
-renderers; QS-only or App2-only checks just ``pytest.skip`` the
-irrelevant param. ``X.2.j``'s 4-way agreement gate compares the ``qs``
-and ``app2`` drivers' ``table_rows()`` against each other (and against
-the audit PDF's numbers).
+One impl: ``App2Driver`` (the self-hosted HTMX/d3 page) — its quirks
+(cell rendering, tab-switch timing, param-write settle) live *inside* the
+driver, not in your test. The agreement gate compares the driver's
+``table_rows()`` against the direct-DB matview recompute + the audit PDF.
+
+(QuickSight was a second renderer through v15.x via ``QsEmbedDriver``,
+with test bodies parametrized over ``[qs, app2]`` and a 4-way agreement
+gate; both the driver and the parametrize were removed in Phase DW, so
+the gate is now the 3-way ``scenario ⊆ direct == App2 == PDF`` check and
+this protocol is unconditionally App2.)
 
 Playwright must not leak past the driver layer — ``tests/e2e/**`` (and
 any caller of this protocol) talks ``DashboardDriver``, not ``Page`` /
@@ -37,8 +37,8 @@ from recon_gen.common.models import DatasetParameter
 
 
 def _title_case_header(sql_column: str) -> str:
-    """Mirror the auto-derived ``human_name`` rule QS uses for column
-    headers: ``account_id`` → ``"Account ID"``, ``rail_name`` →
+    """Mirror the auto-derived ``human_name`` rule QuickSight used for
+    column headers: ``account_id`` → ``"Account ID"``, ``rail_name`` →
     ``"Rail Name"``. Preserves common all-caps initialisms (ID / SQL /
     URL / API) so display labels match the dataset contract's
     ``human_name`` default."""
@@ -61,13 +61,13 @@ def rekey_by_columns(
 
     1. the raw SQL name verbatim (``"account_id"``) — what App2 stamps
        on its ``<th>``; and
-    2. the title-case display label (``"Account ID"``) — what QS stamps
-       on its ``sn-table-column-N .title`` span (mirrors the dataset
-       contract's auto-derived ``human_name``).
+    2. the title-case display label (``"Account ID"``) — the dataset
+       contract's auto-derived ``human_name`` form (what QuickSight
+       stamped on its table-column ``.title`` span).
 
-    Cells outside ``columns`` are dropped. Renderers that show extra
-    columns (App2 currently renders the full dataset projection, not
-    just visual-declared columns) are handled cleanly — the test only
+    Cells outside ``columns`` are dropped. App2 renders the full dataset
+    projection (not just visual-declared columns), so extra cells are
+    handled cleanly — the test only
     sees what it asked for. Raises ``KeyError`` (with the row's actual
     keys) when a column isn't findable under either form, so a typo or
     a renamed column surfaces loudly."""
@@ -97,22 +97,24 @@ def query_db_via_cfg(
     binds: Mapping[str, str] | None = None,
     dataset_parameters: Sequence[DatasetParameter] = (),
 ) -> list[dict[str, Any]]:  # typing-smell: ignore[explicit-any]: cell values are heterogeneous per-column — coercion happens at the assert site
-    """BG.1 — ground-truth direct-SQL helper shared by both
-    ``DashboardDriver`` impls. Runs ``sql`` against ``cfg.db.url``
-    (the same DB the deployed dashboard reads), with ``binds`` substituted
-    via the same ``_sql_executor`` pipeline App2 uses, and returns rows
+    """BG.1 — ground-truth direct-SQL helper for the ``DashboardDriver``.
+    Runs ``sql`` against ``cfg.db.url`` (the same DB the deployed
+    dashboard reads), with ``binds`` substituted via the same
+    ``_sql_executor`` pipeline App2 renders through, and returns rows
     as ``{column: value}`` dicts.
 
-    Why a shared helper, not per-driver impl: identity assertions
-    (``rendered_kpi == query_db(sql, binds=…)``) compare against ONE
-    ground truth. Differences between QS and App2 must be wire-shape
-    differences, not different SQL paths to the same answer.
+    Why a shared helper: identity assertions
+    (``rendered_kpi == query_db(sql, binds=…)``) compare the rendered
+    value against ONE ground truth — the same ``_sql_executor`` path
+    App2 renders through, so a mismatch is a real wire-shape bug, not
+    two SQL paths diverging.
 
     ``binds`` keys map to App2's URL convention (``param_<name>`` for
-    QS ``<<$pName>>`` placeholders; ``date_from`` / ``date_to`` for the
-    universal date filter; ``filter_<col>`` for ``IN``-list narrows).
-    ``execute_visual_sql`` translates ``<<$pName>>`` → ``:param_pName``
-    + applies ``dataset_parameters`` defaults for unsupplied ones.
+    ``<<$pName>>`` placeholders — the retained QuickSight CustomSql
+    form; ``date_from`` / ``date_to`` for the universal date filter;
+    ``filter_<col>`` for ``IN``-list narrows). ``execute_visual_sql``
+    translates ``<<$pName>>`` → ``:param_pName`` + applies
+    ``dataset_parameters`` defaults for unsupplied ones.
     """
     url_params: dict[str, list[str]] = {
         key: [value] for key, value in (binds or {}).items()
@@ -128,13 +130,12 @@ def query_db_via_cfg(
 
 
 class DashboardDriver(Protocol):
-    """The cross-renderer dashboard-driving interface (see module
-    docstring). All reads return plain Python; all writes block until
-    the affected visuals have re-fetched."""
+    """The dashboard-driving test interface (see module docstring). All
+    reads return plain Python; all writes block until the affected
+    visuals have re-fetched."""
 
-    #: ``"qs"`` for the embedded QuickSight dashboard, ``"app2"`` for the
-    #: self-hosted HTMX renderer. Tests use this to ``pytest.skip``
-    #: dialect-specific checks.
+    #: Always ``"app2"`` now — the self-hosted HTMX renderer (the
+    #: ``"qs"`` value went with QuickSight in DW).
     dialect: str
 
     # -- navigation ------------------------------------------------------
@@ -153,9 +154,8 @@ class DashboardDriver(Protocol):
     # -- reads -----------------------------------------------------------
 
     def sheet_names(self) -> list[str]:
-        """The dashboard's sheet-tab names, in tab order. (QS reads the
-        ``[role="tab"]`` strip; App2 the ``<nav>`` link text — both are
-        the tree's ``Sheet.name``, so the two renderers agree.)"""
+        """The dashboard's sheet-tab names, in tab order. Reads the
+        ``<nav>`` link text (the tree's ``Sheet.name``)."""
         ...
 
     def visual_titles(self) -> list[str]:
@@ -164,9 +164,8 @@ class DashboardDriver(Protocol):
 
     def filter_labels(self) -> list[str]:
         """Visible labels of the filter / parameter controls on the
-        current sheet. (QS reads the ``sheet_control_name`` strip; App2
-        the ``#filter-form`` control labels — both are the tree's
-        control ``.title``.)"""
+        current sheet. Reads the ``#filter-form`` control labels (the
+        tree's control ``.title``)."""
         ...
 
     def filter_options(self, label: str) -> list[str]:
@@ -174,10 +173,8 @@ class DashboardDriver(Protocol):
         filter control labelled ``label``, in display order. Sentinel
         entries (``"All"`` / ``"Select all"`` / blanks) are filtered
         out, so the result is the data-derived option universe — what a
-        data-agnostic test picks from without hardcoding values. (QS
-        opens the ``ParameterDropDownControl`` popover and reads the
-        ``[role="option"]`` labels; App2 reads the ``<select>``'s
-        ``<option>`` text.)
+        data-agnostic test picks from without hardcoding values. Reads
+        the ``<select>``'s ``<option>`` text.
 
         For typeahead-backed pickers (LinkedValues sourced server-side)
         this returns the SEED PAGE only (empty query). Use
@@ -211,15 +208,14 @@ class DashboardDriver(Protocol):
         *,
         columns: Sequence[str] | None = None,
     ) -> list[dict[str, str]]:
-        """Like ``table_rows`` but **de-virtualizes** — for renderers that
-        virtualize (QS), scroll through the table and accumulate every
-        row. Returns the FULL set, not just the DOM window.
+        """Like ``table_rows`` but returns the FULL row set, not just the
+        DOM window. App2 renders every row in the DOM, so the body
+        matches ``table_rows`` exactly.
 
-        Use for row-identity checks (the audit-agreement validator's
-        QS-side row keying). For App2 the body matches ``table_rows``
-        exactly (App2 renders all rows in DOM). Added in the BO.1 fix
-        when overdraft's 119-row table broke the row-identity check
-        against the 37-row DOM window.
+        (The de-virtualize verb survives from the QuickSight era, where
+        it scrolled + accumulated past QS's virtualized window — the
+        BO.1 fix, when overdraft's 119-row table broke the row-identity
+        check against the ~37-row DOM window.)
         """
         ...
 
@@ -231,35 +227,28 @@ class DashboardDriver(Protocol):
     ) -> list[dict[str, str]]:
         """Rows of a Table visual as dicts keyed by header text, in
         display order; cell values are the rendered (formatted) strings.
-        Returns the *currently-rendered* window (QS virtualizes ~10 rows;
-        App2 renders all rows in DOM). When the caller needs the
-        post-filter total row count for a table that may exceed the
-        viewport, ``table_row_count`` does the page-size-bump + scroll-
-        accumulate dance to surface the full number. For the FULL row
-        set on QS (de-virtualized), use ``table_rows_full``.
+        App2 renders every row in the DOM, so this returns the full set.
+        ``table_row_count`` gives just the post-filter total; the
+        equivalent ``table_rows_full`` is retained for API symmetry.
 
-        AA.A.995 — by default rows are keyed by the rendered header text,
-        which differs by renderer: QS stamps ``column.human_name``
-        (``"Account ID"``); App2 stamps the raw SQL column name
-        (``"account_id"``). Tests that need to look up cells by a known
-        identity should pass ``columns`` — a sequence of raw SQL column
-        names. The driver projects each row to JUST those cells, looking
-        each one up by raw name (App2's path) or title-case display
-        label (QS's path). Cells outside ``columns`` are dropped, so
-        renderer differences in which columns get shown at all (App2
-        renders the full dataset projection; QS shows only visual-
-        declared columns) don't leak. ``KeyError`` (with the row's
-        actual keys) if a column isn't findable under either form.
+        AA.A.995 — by default rows are keyed by the rendered header text:
+        App2 stamps the raw SQL column name (``"account_id"``). Tests
+        that need to look up cells by a known identity should pass
+        ``columns`` — a sequence of raw SQL column names. The driver
+        projects each row to JUST those cells, looking each one up by
+        raw SQL name (App2's ``<th>``) or the title-case display label
+        (the ``human_name`` form QuickSight stamped). Cells outside
+        ``columns`` are dropped, so App2 rendering the full dataset
+        projection (not just visual-declared columns) doesn't leak extra
+        cells. ``KeyError`` (with the row's actual keys) if a column
+        isn't findable under either form.
         """
         ...
 
     def table_row_count(self, visual_title: str) -> int:
-        """The full (post-filter) row count of a table visual, surfacing
-        the rows past the rendered window. On QS that's the page-size-
-        bump + scroll-accumulate path through the ``simplePagedDisplayNav_*``
-        controls (~3-5s per call vs ``len(table_rows())``'s ~0.8s, so
-        prefer the latter when you only need the window or know the
-        table is small). Returns 0 for an empty table (not a sentinel)."""
+        """The full (post-filter) row count of a table visual. App2
+        renders every row in the DOM, so this counts them directly.
+        Returns 0 for an empty table (not a sentinel)."""
         ...
 
     def find_row(
@@ -268,8 +257,8 @@ class DashboardDriver(Protocol):
         """Walk the table looking for a row whose visible cells subset-
         match ``predicate`` (header → value). Return the first matching
         row as a header-keyed dict, or ``None`` if no row matches after
-        walking the entire table (scroll-accumulated on QS, page-walked
-        on App2). Early-exits on first match — the inverse-picker test
+        walking the entire table. Early-exits on first match — the
+        inverse-picker test
         only needs "is there ANY offending row?", not the full set.
 
         The predicate's keys are column-header DISPLAY labels (the
@@ -289,11 +278,10 @@ class DashboardDriver(Protocol):
         cleared). Used by the DM cascade-clear test to assert the Account
         picker drops its stale value when the Role source changes.
 
-        App2-only — the Role→Account cascade-clear is an App2 affordance
-        (QS can't execute a parameterized picker dataset, so it never had
-        a working cascade source; see
-        ``[[project_qs_no_searchfilter_cascading]]``). ``QsEmbedDriver``
-        raises ``NotImplementedError``."""
+        The Role→Account cascade-clear is an App2 affordance —
+        QuickSight couldn't execute a parameterized picker dataset, so it
+        never had a working cascade source (see
+        ``[[project_qs_no_searchfilter_cascading]]``)."""
         ...
 
     def day_availability(
@@ -308,12 +296,11 @@ class DashboardDriver(Protocol):
         seeded data window — the picker's default month is the as_of-frame
         anchor, which can be far from a LOCKED_ANCHOR-seeded DB.
 
-        App2-only (DM.3) — the per-day decoration is added by the App2
-        Flatpickr ``onDayCreate`` callback from the server's
-        ``day-availability`` endpoint. QuickSight's
-        ``ParameterDateTimePickerControl`` has no per-day decoration
-        surface (see ``[[project_qs_no_searchfilter_cascading]]``), so
-        ``QsEmbedDriver`` raises ``NotImplementedError``."""
+        The per-day decoration (DM.3) is added by the App2 Flatpickr
+        ``onDayCreate`` callback from the server's ``day-availability``
+        endpoint. (QuickSight's ``ParameterDateTimePickerControl`` had no
+        per-day decoration surface — see
+        ``[[project_qs_no_searchfilter_cascading]]``.)"""
         ...
 
     def query_db(
@@ -328,17 +315,16 @@ class DashboardDriver(Protocol):
         Runs ``sql`` against the same DB the deployed dashboard reads
         (``cfg.db.url`` stored on the driver at factory time),
         with ``binds`` substituted via the same ``_sql_executor``
-        pipeline App2 uses, and returns rows as ``{column: value}``
-        dicts. Both impls delegate to the shared
-        ``query_db_via_cfg`` helper so the QS and App2 legs of an
-        identity assertion compare against ONE ground truth — wire-shape
-        differences are real bugs, not "two SQL paths produced two
-        answers."
+        pipeline App2 renders through, and returns rows as
+        ``{column: value}`` dicts. Delegates to the shared
+        ``query_db_via_cfg`` helper so an identity assertion compares
+        the rendered value against ONE ground truth — a mismatch is a
+        real wire-shape bug, not "two SQL paths produced two answers."
 
-        ``binds`` keys: ``param_<name>`` for QS ``<<$pName>>``
-        placeholders, ``date_from`` / ``date_to`` for the universal
-        date filter, ``filter_<col>`` for ``IN``-list narrows. Mirror
-        the App2 URL contract.
+        ``binds`` keys: ``param_<name>`` for ``<<$pName>>`` placeholders
+        (the retained QuickSight CustomSql form), ``date_from`` /
+        ``date_to`` for the universal date filter, ``filter_<col>`` for
+        ``IN``-list narrows. Mirror the App2 URL contract.
         """
         ...
 
@@ -412,7 +398,7 @@ class DashboardDriver(Protocol):
         destination's expected visual to lock in the new sheet."""
         ...
 
-    # -- metadata popup (CY.9 — App2-only per operator lock 7) -----------
+    # -- metadata popup (CY.9) ------------------------------------------
 
     def open_metadata_panel(
         self, visual_title: str, row_index: int = 0,
@@ -424,47 +410,40 @@ class DashboardDriver(Protocol):
         on the indicated row, waits for the synthetic ``{} View metadata``
         ctxmenu entry, clicks it, and blocks until ``#side-panel``
         slides in (loses ``translate-x-full``).
-
-        App2-only — ``QsEmbedDriver`` raises ``NotImplementedError`` per
-        CY.5 operator lock 7 (metadata popup is an App2 affordance; QS
-        path is unaffected because its dataset never projects the
-        ``metadata`` column).
         """
         ...
 
     def close_metadata_panel(self) -> None:
         """Dismiss the metadata side-panel via Escape and block until
-        the drawer re-acquires ``translate-x-full``. App2-only."""
+        the drawer re-acquires ``translate-x-full``."""
         ...
 
     def metadata_panel_expand_all(self) -> None:
         """Click the ``[data-metadata-expand-all]`` toolbar button —
-        opens every ``<details data-json-node>`` in the rendered tree.
-        App2-only."""
+        opens every ``<details data-json-node>`` in the rendered tree."""
         ...
 
     def metadata_panel_collapse_all(self) -> None:
         """Click the ``[data-metadata-collapse-all]`` toolbar button —
-        closes every ``<details data-json-node>`` in the rendered tree.
-        App2-only."""
+        closes every ``<details data-json-node>`` in the rendered tree."""
         ...
 
     def metadata_panel_text(self) -> str:
         """Return the ``[data-metadata-raw]`` ``<textarea>`` value — the
         pretty-printed canonical JSON the Copy button reads. Tests
         assert on substrings of this for content-presence checks
-        (cheaper than walking the rendered ``<details>`` tree). App2-only.
+        (cheaper than walking the rendered ``<details>`` tree).
         """
         ...
 
     def metadata_panel_open_details_count(self) -> int:
         """Count ``details[open][data-json-node]`` nodes in the rendered
         tree — the default-open depth verifier (``depth ≤ 2`` per CY.5
-        operator lock; deeper levels collapsed by default). App2-only.
+        operator lock; deeper levels collapsed by default).
         """
         ...
 
-    # -- OIDC auth (DD.4 — App2-only; QS embed is pre-signed at mint) ----
+    # -- OIDC auth (DD.4) -----------------------------------------------
 
     def sign_in_via_oidc(self, *, email: str, password: str) -> None:
         """Drive the App2 → Dex → App2 OIDC code-flow login.
@@ -482,11 +461,11 @@ class DashboardDriver(Protocol):
         Playwright context's cookie jar this returns without driving the
         form (mirrors ``pick_filter`` peek-before-act).
 
-        App2-only. ``QsEmbedDriver`` raises ``NotImplementedError`` per
-        ``[[project_qs_embed_url_presigned_no_oidc]]`` — QS embed URLs
-        are pre-signed at mint time (``cfg.auth.aws.profile`` → STS →
-        ``generate_embed_url_for_registered_user``) so OIDC verbs never
-        apply on the QS side."""
+        (QuickSight embed URLs were pre-signed at mint time —
+        ``cfg.auth.aws.profile`` → STS →
+        ``generate_embed_url_for_registered_user`` — so OIDC verbs never
+        applied on the QS side; see
+        ``[[project_qs_embed_url_presigned_no_oidc]]``.)"""
         ...
 
     def sign_out_via_oidc(self) -> None:
@@ -498,8 +477,9 @@ class DashboardDriver(Protocol):
         Idempotent: if no ``recon_gen_session`` cookie is present this
         returns without driving the logout URL.
 
-        App2-only. ``QsEmbedDriver`` raises ``NotImplementedError`` per
-        ``[[project_qs_embed_url_presigned_no_oidc]]``."""
+        (OIDC verbs never applied on the QuickSight side — its embed
+        URLs were pre-signed at mint; see
+        ``[[project_qs_embed_url_presigned_no_oidc]]``.)"""
         ...
 
     def inspect_jwt_cookie(self) -> dict[str, str] | None:
@@ -511,16 +491,16 @@ class DashboardDriver(Protocol):
         ``assert cookie["value"].startswith(\"eyJ\")`` without importing
         Playwright types — matches the no-Playwright-leak lint.
 
-        App2-only. ``QsEmbedDriver`` raises ``NotImplementedError`` per
-        ``[[project_qs_embed_url_presigned_no_oidc]]``."""
+        (OIDC verbs never applied on the QuickSight side — its embed
+        URLs were pre-signed at mint; see
+        ``[[project_qs_embed_url_presigned_no_oidc]]``.)"""
         ...
 
     # -- artifacts -------------------------------------------------------
 
     def screenshot(self, path: str | Path | None = None) -> bytes:
         """Capture the current dashboard view as PNG bytes (also write
-        to ``path`` when given). QS captures the embedded iframe content;
-        App2 captures the page."""
+        to ``path`` when given). Captures the page."""
         ...
 
     # -- lifecycle -------------------------------------------------------

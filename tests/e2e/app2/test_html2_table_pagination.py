@@ -16,9 +16,9 @@ file is the **browser round-trip** — click → refetch-with-the-right-
 params → re-render — driven through ``App2Driver`` against the bundled
 smoke app's Showcase "Account Balances" table (its stub fetcher honors
 ``page_offset`` / ``page_size`` / ``sort_column``, so the demo is
-interactive without a DB / AWS). App2-only — QuickSight does its own
-client-side virtualization, not server-side page-offset, so there's no
-``[qs, app2]`` parametrization here.
+interactive without a DB / AWS). App2-only — QuickSight did its own
+client-side virtualization, not server-side page-offset, so this was
+never a cross-renderer body (QuickSight removed in Phase DW).
 
 Skips cleanly (DJ.1 retired the RECON_GEN_E2E gate;
 without Playwright. Runs in the runner's ``app2`` layer.

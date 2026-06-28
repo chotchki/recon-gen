@@ -1,13 +1,14 @@
 """Browser e2e: Supersession Audit interactions (DR.4 + DR.5 + DR.6).
 
-Parametrized over ``[qs, app2]`` via ``l1_dashboard_driver``.
+Drives App2 via ``l1_dashboard_driver``.
 
 DR.4 — the same-sheet transaction self-filter is a ``DATA_POINT_CLICK``
 drill (``drill_from_first_row``) that writes the ``pL1SaTransaction``
 pushdown param and re-renders the SAME sheet — narrowing the Transactions
 Audit table to one logical transaction's full entry trail. Because it's a
-control-write (not a cross-sheet URL nav) it sidesteps the QS
-URL-param-no-control-sync quirk, so both renderers narrow identically.
+control-write (not a cross-sheet URL nav) it sidestepped the QS
+URL-param-no-control-sync quirk (QS removed in Phase DW); the table
+narrows in place.
 Clearing the focus is the DR.6 Transaction ID dropdown's job (empty it →
 back to all), so there's no right-click "Clear" action to exercise here.
 

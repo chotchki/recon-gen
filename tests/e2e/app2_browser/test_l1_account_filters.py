@@ -1,6 +1,5 @@
 """Browser tests: AA.B (Daily Statement Role cascade) + AA.E (account
-search-by-name-AND-id) — parametrized over ``[qs, app2]`` via
-``l1_dashboard_driver``.
+search-by-name-AND-id) — drives App2 via ``l1_dashboard_driver``.
 
 Pairs naturally with ``test_l1_filters.py`` (which covers the universal
 date filter + the L1 Exceptions Check Type dropdown). This file
@@ -118,17 +117,16 @@ def test_dn5_posted_money_records_running_balance(
     l1_dashboard_driver: tuple["DashboardDriver", str], cfg: Config,
 ) -> None:
     """DN.5 (iv) — the Posted Money Records table renders a "Running
-    Balance" column (DN.1/DN.2) on BOTH renderers, and its values are
-    the cumulative running sum of the per-leg signed amount in display
-    order.
+    Balance" column (DN.1/DN.2), and its values are the cumulative
+    running sum of the per-leg signed amount in display order.
 
-    Parametrized over ``[qs, app2]`` via ``l1_dashboard_driver``; both
-    renderers issue the same window-function dataset SQL, so a column-
-    missing or value-mismatch outcome here is a real renderer wiring
-    divergence. The unit-tier ``test_dn5_running_balance`` proves the SQL
-    produces the right sequence against DuckDB; this proves the rendered
-    table surfaces it correctly. NEEDS a qs_browser run to verify
-    behaviorally (not exercised in the unit/audit run that authored it).
+    Drives App2 via ``l1_dashboard_driver``; App2 issues the
+    window-function dataset SQL, so a column-missing or value-mismatch
+    outcome here is a real renderer wiring divergence. The unit-tier
+    ``test_dn5_running_balance`` proves the SQL produces the right
+    sequence against DuckDB; this proves the rendered table surfaces it
+    correctly. NEEDS an app2_browser run to verify behaviorally (not
+    exercised in the unit/audit run that authored it).
     """
     driver, dashboard_arg = l1_dashboard_driver
     driver.open(dashboard_arg, sheet=_DAILY_STATEMENT_NAME)

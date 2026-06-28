@@ -1760,7 +1760,7 @@ class _NoInlineProductionConstantsVisitor(ast.NodeVisitor):
     - ``ast.Call`` args + keywords — BE.2 extension (followup to
       `test_qs_table_rows_well_formed` Matview-title drift in CI
       2026-05-27): catches the same shape when the literal is passed
-      to a driver verb (``qs_driver.wait_loaded("Matview Status")``,
+      to a driver verb (``driver.wait_loaded("Matview Status")``,
       ``driver.pick_filter("Account", "cust-001")``) rather than
       compared in an assert. Same hit shape, same import-the-constant
       fix.

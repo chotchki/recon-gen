@@ -1,13 +1,13 @@
-"""Browser test: walk every L1 sheet, verify visuals render — both renderers.
+"""Browser test: walk every L1 sheet, verify visuals render on App 2.
 
-Parametrized over ``[qs, app2]`` (X.2.u.2 — the ``l1_dashboard_driver``
-fixture yields ``(driver, dashboard_arg)``: the deployed QS dashboard,
-or a locally-spun App 2 server built from the same ``l1_app`` tree
-reading the same DB). ``TreeValidator(l1_app, driver).validate_structure()``
+Drives App2 (X.2.u.2 — the ``l1_dashboard_driver``
+fixture yields ``(driver, dashboard_arg)``: a locally-spun App 2 server
+built from the ``l1_app`` tree reading the DB).
+``TreeValidator(l1_app, driver).validate_structure()``
 walks every sheet, asserts each declared visual title + control label is
 in the DOM; failures across sheets accumulate into one AssertionError.
-Running it against App 2 too surfaces any renderer gap (a tree visual
-kind App 2 doesn't render → the validator fails on the ``app2`` param).
+It surfaces any renderer gap (a tree visual kind App 2 doesn't render →
+the validator fails).
 
 The 90 s per-visual budget: the L1 dashboard's KPI-heavy Daily Statement
 (5 KPIs + 1 table, all backed by the multi-CTE summary SQL) consistently

@@ -1,13 +1,10 @@
 """Shared failure-capture hook for browser e2e driver fixtures.
 
 AA.H.6 bridged the pytest yield-fixture semantics gap by capturing 6
-diagnostic artifacts (screenshot, DOM, console, network, qs-error
-overlay, trace.zip) from a fixture's teardown after a failed test.
-Originally lived in ``conftest.py`` and was wired only into
-``_parametrized_dashboard_driver`` — ``qs_driver`` (in the same
-conftest) silently dropped artifacts on failure. AA.H.10 lifts the
-helper here so both conftest fixtures (and any future driver fixture)
-can import it from a single import path.
+diagnostic artifacts (screenshot, DOM, console, network, db_counts,
+trace.zip) from a fixture's teardown after a failed test. Originally
+lived in ``conftest.py``; AA.H.10 lifts the helper here so any driver
+fixture can import it from a single import path.
 
 The bug it fixes: pytest doesn't re-throw the test-body exception back
 into the generator-fixture's ``yield`` — the ``with`` block exits
@@ -35,15 +32,14 @@ def _maybe_capture_impl(request: Any, driver: Any) -> None:
     when the test body actually failed. No-op on pass / skip /
     fixture-setup-failure.
 
-    Driver duck-typing: ``QsEmbedDriver`` exposes ``._page``,
-    ``App2Driver`` exposes ``.page``. Try both; if neither resolves to
-    a Playwright Page, the capture is silently skipped (a non-browser
+    ``App2Driver`` exposes ``.page``. If it doesn't resolve to a
+    Playwright Page, the capture is silently skipped (a non-browser
     driver has nothing to dump).
     """
     rep = getattr(request.node, "rep_call", None)
     if rep is None or not rep.failed:
         return
-    page = getattr(driver, "_page", None) or getattr(driver, "page", None)
+    page = getattr(driver, "page", None)
     if page is None:
         return
     # typing-smell: ignore[no-playwright-leak]: this is the dedicated
@@ -51,8 +47,8 @@ def _maybe_capture_impl(request: Any, driver: Any) -> None:
     # ISN'T an e2e test reaching into Playwright, it's a shared helper
     # gluing the fixture-yield-semantics gap. trigger_failure_capture
     # IS the DashboardDriver-friendly verb — it takes the Page from
-    # ``driver._page`` / ``driver.page`` and writes 6 artifacts. There's
-    # nowhere else to invoke it from.
+    # ``driver.page`` and writes 6 artifacts. There's nowhere else to
+    # invoke it from.
     from recon_gen.common.browser.helpers import (  # typing-smell: ignore[no-playwright-leak]: shared capture-bridge module
         _sanitize_test_id,
         trigger_failure_capture,

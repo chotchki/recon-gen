@@ -54,7 +54,7 @@ class TestTestIdFromPytestEnv:
         ) == "tests_e2e_test_foo__test_bar[case_x]"
 
     def test_sanitizes_parametrize_id_with_spaces_and_emdash(self):
-        # The real-world failure that bit us: an [qs, app2]-parametrized
+        # The real-world failure that bit us: a parametrized
         # test whose parametrize ID interpolates sheet titles and visual
         # names that contain spaces and em-dashes. The filename can land
         # OK on macOS APFS, but downstream consumers (GHA artifact zip,

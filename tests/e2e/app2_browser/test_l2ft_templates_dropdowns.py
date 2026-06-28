@@ -5,7 +5,7 @@ case — one parameter narrows BOTH the Sankey (built from tt-legs) and
 the Template Instances table (built from tt-instances); the table is the
 more sensitive instrument (the Sankey has no row-count primitive), so
 that's what ``walk_dropdown`` asserts on. See ``_l2ft_dropdown_walk``
-for the shared mechanics. Parametrized over ``[qs, app2]`` (X.2.u.3) via
+for the shared mechanics. Drives App2 (X.2.u.3) via
 ``l2ft_dashboard_driver``. spec_example declares two templates — one
 SingleLegRail-first (every firing 'Imbalanced') and one TwoLegRail-first
 chain-parent (firings 'Complete'/'Orphaned') — so the auto-scenario fires
