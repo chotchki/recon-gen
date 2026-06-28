@@ -41,12 +41,12 @@ pytest.importorskip("playwright.sync_api")
 # renderer-agnostic *dashboard* operations. Playwright is the right
 # level for chrome-driven assertions; ported tests still go through
 # DashboardDriver.
-from playwright.sync_api import sync_playwright  # typing-smell: ignore[no-playwright-leak]: studio chrome is not a dashboard verb
 from testcontainers.postgres import PostgresContainer  # type: ignore[import-untyped]: third-party library lacks PEP 561 stubs
 
 from recon_gen.cli._html_serve import REAL_APPS
 
 from tests._marks import Need, Tier, needs, tier
+from tests.e2e._drivers.studio_browser_editor import StudioBrowserEditorDriver
 from tests.e2e._studio_deploy_helpers import (
     QUICKSIGHT_GEN_BIN,
     SASQUATCH_YAML,
@@ -138,63 +138,52 @@ def test_deploy_button_drives_pipeline_and_dashboards_render(
     )
     apply_schema_to(cfg)
 
-    with studio_server(cfg) as base_url, sync_playwright() as p:
-        browser = p.webkit.launch(headless=True)
-        page = browser.new_page()
-        try:
-            # X.4.j.2.b — click Deploy and wait for the ok status.
-            page.goto(f"{base_url}/", wait_until="domcontentloaded")
-            page.wait_for_selector("#deploy-btn", timeout=10000)
+    with (
+        studio_server(cfg) as base_url,
+        StudioBrowserEditorDriver.attached(base_url) as driver,
+    ):
+        # X.4.j.2.b — deploy via the Studio chrome verb (navigates /data,
+        # clicks Deploy changes, waits for the ok status). The route +
+        # selectors live in the driver now, so a Studio refactor (like the
+        # / → /data move that silently broke this) touches one place.
+        status_text = driver.deploy_changes()
+        # Match shape: "Deployed (gen N, M tx)"
+        assert re.match(
+            r"Deployed \(gen \d+, \d+ tx\)", status_text,
+        ), f"unexpected status text: {status_text!r}"
 
-            page.click("#deploy-btn")
-            # Status flips to running, then ok. Wait for the ok
-            # data-state. AM.2 step 1 (2026-05-25): switched from
-            # `.deploy-status--ok` class to `[data-state="ok"]`
-            # semantic attribute so the selector doesn't couple to
-            # the Tailwind utility classes the JS writes for color.
-            # Deploy takes ~30-60s on sasquatch_pr (etl_hook re-runs
-            # data apply). 120s is comfortable headroom.
-            page.wait_for_selector(
-                '#deploy-status[data-state="ok"]',
-                timeout=120_000,
+        # X.4.j.2.c — each dashboard renders. driver.page is the documented
+        # escape hatch (mirrors App2Driver.page) for these low-level wiring
+        # checks — HTTP 200 + the poller-baseline meta + a non-empty title,
+        # not dashboard-content verbs.
+        page = driver.page
+        for app_name in REAL_APPS:
+            response = page.goto(
+                f"{base_url}/dashboards/{app_name}",
+                wait_until="domcontentloaded",
             )
-            status_text = page.locator("#deploy-status").text_content() or ""
-            # Match shape: "Deployed (gen N, M tx)"
-            assert re.match(
-                r"Deployed \(gen \d+, \d+ tx\)", status_text,
-            ), f"unexpected status text: {status_text!r}"
-
-            # X.4.j.2.c — each dashboard renders.
-            for app_name in REAL_APPS:
-                response = page.goto(
-                    f"{base_url}/dashboards/{app_name}",
-                    wait_until="domcontentloaded",
-                )
-                # All four apps land on a Getting Started sheet that's
-                # text-only — no filter form, no visual sections in
-                # the initial markup. The signals we CAN rely on for
-                # every landing page:
-                # 1. HTTP 200 (no 404 / 500 from a wiring bug).
-                # 2. The data-generation-id meta (proves the studio
-                #    threaded the deploy counter through, and the
-                #    dashboard route picked up the right cfg).
-                # 3. The dashboard's title in the <title> tag (proves
-                #    we landed on the right app, not a redirect).
-                assert response is not None and response.status == 200, (
-                    f"{app_name} dashboard returned "
-                    f"{response.status if response else 'no response'}"
-                )
-                content = page.content()
-                assert (
-                    '<meta name="data-generation-id"' in content
-                ), f"{app_name} dashboard missing poller baseline meta"
-                # Title exists + non-empty (rules out blank error page)
-                title = page.title()
-                assert title and title.strip(), (
-                    f"{app_name} dashboard rendered with empty title"
-                )
-        finally:
-            browser.close()
+            # All four apps land on a Getting Started sheet that's
+            # text-only — no filter form, no visual sections in the
+            # initial markup. The signals we CAN rely on for every
+            # landing page:
+            # 1. HTTP 200 (no 404 / 500 from a wiring bug).
+            # 2. The data-generation-id meta (proves the studio threaded
+            #    the deploy counter through + the route picked the cfg).
+            # 3. The dashboard's title in the <title> tag (proves we
+            #    landed on the right app, not a redirect).
+            assert response is not None and response.status == 200, (
+                f"{app_name} dashboard returned "
+                f"{response.status if response else 'no response'}"
+            )
+            content = page.content()
+            assert (
+                '<meta name="data-generation-id"' in content
+            ), f"{app_name} dashboard missing poller baseline meta"
+            # Title exists + non-empty (rules out blank error page)
+            title = page.title()
+            assert title and title.strip(), (
+                f"{app_name} dashboard rendered with empty title"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -236,65 +225,67 @@ def test_dashboard_auto_reloads_when_data_generation_id_bumps(
         nonlocal nav_count
         nav_count += 1
 
-    with studio_server(cfg) as base_url, sync_playwright() as p:
-        browser = p.webkit.launch(headless=True)
-        page = browser.new_page()
-        try:
-            # 1. Open the L1 dashboard. Initial goto fires one
-            #    framenavigated event — capture the listener AFTER goto
-            #    so it doesn't count.
-            page.goto(
-                f"{base_url}/dashboards/l1_dashboard",
-                wait_until="domcontentloaded",
-            )
-            # The poller's first immediate pollOnce fires inside
-            # DOMContentLoaded — at this point baseline == server
-            # value, so no reload. Confirm by reading the meta:
-            baseline_meta = page.locator(
-                'meta[name="data-generation-id"]',
-            ).get_attribute("content")
-            assert baseline_meta is not None
-            baseline = int(baseline_meta)
+    with (
+        studio_server(cfg) as base_url,
+        StudioBrowserEditorDriver.attached(base_url) as driver,
+    ):
+        # driver.page escape hatch — this test drives the poller's
+        # auto-reload contract (framenavigated events + a wait_for_function
+        # on the bumped meta), browser internals there's no dashboard verb
+        # for. attached() owns the WebKit lifecycle, so the test holds no
+        # raw Playwright.
+        page = driver.page
+        # 1. Open the L1 dashboard. Initial goto fires one framenavigated
+        #    event — capture the listener AFTER goto so it doesn't count.
+        page.goto(
+            f"{base_url}/dashboards/l1_dashboard",
+            wait_until="domcontentloaded",
+        )
+        # The poller's first immediate pollOnce fires inside
+        # DOMContentLoaded — at this point baseline == server value, so
+        # no reload. Confirm by reading the meta:
+        baseline_meta = page.locator(
+            'meta[name="data-generation-id"]',
+        ).get_attribute("content")
+        assert baseline_meta is not None
+        baseline = int(baseline_meta)
 
-            # NOW attach the listener so we only count reload-triggered
-            # navigations, not the initial goto.
-            page.on("framenavigated", _on_framenavigated)
+        # NOW attach the listener so we only count reload-triggered
+        # navigations, not the initial goto (or attached()'s open()).
+        page.on("framenavigated", _on_framenavigated)
 
-            # 2. Fire POST /deploy from a separate HTTP context.
-            #    `urllib` is stdlib so no extra dep; the studio's
-            #    POST /deploy returns synchronously after the pipeline
-            #    completes — this blocks ~5-10s.
-            req = urllib.request.Request(
-                f"{base_url}/deploy", method="POST",
-            )
-            with urllib.request.urlopen(req, timeout=120) as resp:  # noqa: S310 — local bound url, not user input
-                assert resp.status == 200
+        # 2. Fire POST /deploy from a separate HTTP context. `urllib` is
+        #    stdlib so no extra dep; the studio's POST /deploy returns
+        #    synchronously after the pipeline completes — blocks ~5-10s.
+        req = urllib.request.Request(
+            f"{base_url}/deploy", method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=120) as resp:  # noqa: S310 — local bound url, not user input
+            assert resp.status == 200
 
-            # 3. Wait for the poller's next tick (3s) + the page reload
-            #    + DOMContentLoaded handler to re-run. Give it 8s of
-            #    headroom because the poll interval drifts and reload
-            #    + page-shell parse takes a beat.
-            page.wait_for_function(
-                f"() => parseInt("
-                f"document.querySelector('meta[name=\"data-generation-id\"]')"
-                f".getAttribute('content'), 10) > {baseline}",
-                timeout=8_000,
-            )
+        # 3. Wait for the poller's next tick (3s) + the page reload +
+        #    DOMContentLoaded handler to re-run. 8s of headroom because
+        #    the poll interval drifts and reload + page-shell parse takes
+        #    a beat.
+        page.wait_for_function(
+            f"() => parseInt("
+            f"document.querySelector('meta[name=\"data-generation-id\"]')"
+            f".getAttribute('content'), 10) > {baseline}",
+            timeout=8_000,
+        )
 
-            # 4. Assert: at least one navigation fired (the reload).
-            assert nav_count >= 1, (
-                f"poller should have triggered a reload but nav_count={nav_count}"
-            )
+        # 4. Assert: at least one navigation fired (the reload).
+        assert nav_count >= 1, (
+            f"poller should have triggered a reload but nav_count={nav_count}"
+        )
 
-            # 5. The fresh page's meta should reflect the bumped
-            #    counter (proves we re-rendered, not just polled).
-            new_meta = page.locator(
-                'meta[name="data-generation-id"]',
-            ).get_attribute("content")
-            assert new_meta is not None
-            assert int(new_meta) > baseline, (
-                f"reloaded page's meta ({new_meta}) should exceed "
-                f"baseline ({baseline})"
-            )
-        finally:
-            browser.close()
+        # 5. The fresh page's meta should reflect the bumped counter
+        #    (proves we re-rendered, not just polled).
+        new_meta = page.locator(
+            'meta[name="data-generation-id"]',
+        ).get_attribute("content")
+        assert new_meta is not None
+        assert int(new_meta) > baseline, (
+            f"reloaded page's meta ({new_meta}) should exceed "
+            f"baseline ({baseline})"
+        )
