@@ -509,15 +509,16 @@ def test_cmd_triage_down_kills_screen_and_removes_state(
 
 def test_deploy_retired_from_layers_tuple() -> None:
     """DW.5.2: the QS tiers (``qs_api`` / ``qs_browser``) are gone from
-    the LAYERS chain along with ``deploy``; ``app2_browser`` is the new
-    terminal tier. Locks the design lock here so a future
-    re-introduction of any of them trips this test.
+    the LAYERS chain along with ``deploy``. DW.11 made ``agreement`` the
+    terminal layer (the final cross-renderer cross-check), with
+    ``app2_browser`` the browser tier below it. Locks the chain order so
+    a future re-introduction or re-shuffle trips this test.
     """
     assert "deploy" not in r.LAYERS
     assert "qs_api" not in r.LAYERS
     assert "qs_browser" not in r.LAYERS
     assert r.LAYERS == (
-        "unit", "db", "app2", "agreement", "app2_browser",
+        "unit", "db", "app2", "app2_browser", "agreement",
     )
 
 
@@ -555,25 +556,27 @@ def test_is_aws_touching_layer_always_false_post_quicksight() -> None:
     assert r._is_aws_touching_layer("unit") is False
 
 
-def test_chain_through_app2_browser_is_full_chain() -> None:
-    """``up_to=app2_browser`` runs the full 5-layer chain — the terminal
-    browser tier post-DW.5.2 (no ``deploy`` / ``qs_api`` / ``qs_browser``)."""
+def test_chain_through_app2_browser_stops_before_agreement() -> None:
+    """DW.11: ``up_to=app2_browser`` runs unit→db→app2→app2_browser and
+    stops short of the terminal ``agreement`` layer (no ``deploy`` /
+    ``qs_api`` / ``qs_browser``)."""
     chain = r.chain_through("app2_browser")
     assert chain == [
-        "unit", "db", "app2", "agreement", "app2_browser",
+        "unit", "db", "app2", "app2_browser",
     ]
+    assert "agreement" not in chain
     assert "deploy" not in chain
     assert "qs_api" not in chain
     assert "qs_browser" not in chain
 
 
-def test_chain_through_agreement_is_aws_free() -> None:
-    """``up_to=agreement`` stops short of the terminal browser tier —
-    the DW.3 design intent (the supported fast gate)."""
+def test_chain_through_agreement_is_full_chain() -> None:
+    """DW.11: ``agreement`` is the terminal layer, so ``up_to=agreement``
+    runs the full 5-layer chain — the comprehensive gate that closes with
+    the cross-renderer agreement check after everything has rendered."""
     chain = r.chain_through("agreement")
-    assert chain == ["unit", "db", "app2", "agreement"]
-    assert "app2_browser" not in chain
-    assert not any(layer in r.AWS_TOUCHING_LAYERS for layer in chain)
+    assert chain == ["unit", "db", "app2", "app2_browser", "agreement"]
+    assert chain[-1] == "agreement"
 
 
 # ---------------------------------------------------------------------------

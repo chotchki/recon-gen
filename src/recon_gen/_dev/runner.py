@@ -6,11 +6,12 @@ Invoked via the ``./run_tests.sh`` bash shim at repo root; the shim
 
 Verbs:
     up_to <layer>     Run the chain up to and including <layer>.
-                      Layers: unit | db | app2 | agreement | app2_browser
+                      Layers: unit | db | app2 | app2_browser | agreement
                       (pyright folds into unit via the conftest sessionstart
                       gate). DW.5.2 — QuickSight removed; the ``qs_api`` +
-                      ``qs_browser`` tiers are gone and ``app2_browser`` is
-                      the terminal browser tier. ``unit``
+                      ``qs_browser`` tiers are gone. ``app2_browser`` is the
+                      browser tier and DW.11 made ``agreement`` the terminal
+                      layer (the final cross-renderer cross-check). ``unit``
                       is variant-independent — it runs ONCE as a prelude
                       before the matrix fans out (Y.2.gate.n), not once
                       per cell. Equivalent forms: ``up_to=<layer>`` and
@@ -80,19 +81,22 @@ LAYERS: Final[tuple[str, ...]] = (
     "unit",
     "db",
     "app2",
-    "agreement",
     "app2_browser",
+    "agreement",
 )
 # DW.5.2 — QuickSight removed: the ``qs_api`` + ``qs_browser`` tiers are
-# gone. ``app2_browser`` is the new terminal layer — Playwright/WebKit
-# against locally-spun App 2 servers (the root ``tests/e2e/test_*.py``
-# parametrized browser tests, now app2-only post-DW.6). It carries no AWS
-# dep; the whole chain is fully local.
-# DW.3 — ``agreement`` sits AFTER app2 and BEFORE app2_browser on purpose:
-# it reads the JSON artifacts the db + app2 layers wrote (the cross-renderer
-# high-watermark validators), so it needs neither a browser nor AWS. Its
-# slot keeps ``up_to=agreement`` as the fast gate that runs
-# unit→db→app2→agreement and stops short of the slower browser tier.
+# gone. ``app2_browser`` is the Playwright/WebKit browser tier — the root
+# ``tests/e2e/test_*.py`` parametrized browser tests against locally-spun
+# App 2 servers (app2-only post-DW.6). No AWS dep; the whole chain is
+# fully local.
+# DW.11 — ``agreement`` is the TERMINAL layer. It reads the JSON artifacts
+# the db + app2 layers wrote (the cross-renderer high-watermark
+# validators), needing neither a browser nor AWS, and runs LAST as the
+# final cross-renderer cross-check. So ``up_to=agreement`` runs the whole
+# chain (the comprehensive gate); ``up_to=app2`` is the fast gate that
+# stops short of the browser tier. (DW.3 originally tucked agreement under
+# app2_browser to keep it a fast gate; DW.11 promoted it to the top so the
+# agreement check is the last word, after everything has rendered.)
 # v14.0.0 fast-fail — per-layer stdout-stuck thresholds in seconds.
 # When subprocess stdout hasn't grown in N seconds, the watchdog kills
 # the layer. Calibrated against observed wall-clock times of clean runs
@@ -123,12 +127,12 @@ _HANG_THRESHOLDS: Final[dict[str, int]] = {
     "unit": 180,        # ~60s clean; faulthandler kicks at 180s
     "db": 240,          # ~40s clean; matview refresh can sprawl
     "app2": 1800,       # ~19m clean, ~30m memory-pressured 3-dialect concurrent
+    # DW.5.2 — app2_browser replaces qs_browser as the browser tier.
+    # App 2 server spin + Playwright loads + reruns dominate (no QS embed
+    # now, but the root e2e suite is still heavy).
+    "app2_browser": 900,
     "agreement": 240,   # ~seconds: JSON-artifact reads + set comparisons,
                         #           no DB / browser / AWS. db-like ceiling.
-    # DW.5.2 — app2_browser replaces qs_browser as the terminal browser
-    # tier. Same ceiling: App 2 server spin + Playwright loads + reruns
-    # dominate (no QS embed now, but the root e2e suite is still heavy).
-    "app2_browser": 900,
 }
 # CB.11.a.3 (2026-06-02) — renamed `api` → `qs_api`, `browser` →
 # `qs_browser` to match the `Tier.QS_API` / `Tier.QS_BROWSER` marks
@@ -610,7 +614,7 @@ def _layer_command(
     # bespoke staging. The runs/<id>/ tree stays focused on triage
     # artifacts (cmd.json, stdout.log, timings.json).
     _is_pytest_layer = layer in (
-        "unit", "db", "app2", "agreement", "app2_browser",
+        "unit", "db", "app2", "app2_browser", "agreement",
     )
     _cov_args: list[str] = (
         ["--cov=recon_gen", "--cov-report="]
