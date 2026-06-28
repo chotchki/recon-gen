@@ -925,65 +925,6 @@ def _build_test_nested(raw: dict[str, Any]) -> "TestConfig":  # typing-smell: ig
     )
 
 
-_QS_USER_ARN_CACHE: dict[tuple[str, str, str], str | None] = {}
-
-
-def resolve_qs_user_arn(cfg: "Config") -> str | None:
-    """Lazy resolve the QuickSight user ARN for e2e tests.
-
-    Priority:
-    1. ``cfg.auth.aws.quicksight_user_arn`` (explicit override).
-    2. Derive from ``cfg.auth.aws.profile`` + ``cfg.aws.account_id`` +
-       ``cfg.aws.region`` via ``quicksight.list_users(Namespace='default')``;
-       first ADMIN user's ARN (falls back to first user).
-    3. None (caller's qs_browser layer is skipped).
-
-    Cached per ``(profile, account_id, region)`` so per-cell subprocesses
-    share lookups. Boto failure → None + stderr breadcrumb.
-    """
-    explicit = cfg.auth.aws.quicksight_user_arn
-    if explicit:
-        return explicit
-    profile = cfg.auth.aws.profile
-    if not profile:
-        return None
-    account_id = cfg.aws.account_id
-    region = cfg.aws.region
-    cache_key = (profile, account_id, region)
-    if cache_key in _QS_USER_ARN_CACHE:
-        return _QS_USER_ARN_CACHE[cache_key]
-    import sys  # noqa: PLC0415
-    try:
-        import boto3  # noqa: PLC0415 — lazy: only on the derive path
-        session = boto3.Session(profile_name=profile, region_name=region)
-        qs: Any = session.client("quicksight")  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]: boto3-stubs overload union confuses pyright  # typing-smell: ignore[explicit-any]: boto3-stubs overload union — wrap to Any per X.2.o.5 pattern
-        users = qs.list_users(
-            AwsAccountId=account_id, Namespace="default",
-        ).get("UserList", [])
-    except Exception as exc:  # noqa: BLE001
-        print(
-            f"config: derive QS user ARN failed via aws_profile="
-            f"{profile!r} ({type(exc).__name__}: {exc}); qs_browser will skip",
-            file=sys.stderr,
-        )
-        _QS_USER_ARN_CACHE[cache_key] = None
-        return None
-    if not users:
-        print(
-            f"config: derive QS user ARN found 0 users in "
-            f"{account_id}/{region} default namespace via profile="
-            f"{profile!r}; qs_browser will skip",
-            file=sys.stderr,
-        )
-        _QS_USER_ARN_CACHE[cache_key] = None
-        return None
-    admins = [u for u in users if u.get("Role") == "ADMIN"]
-    target = admins[0] if admins else users[0]
-    arn = target.get("Arn")
-    _QS_USER_ARN_CACHE[cache_key] = arn
-    return arn
-
-
 def _apply_env_overrides_nested(raw: dict[str, Any]) -> None:  # typing-smell: ignore[explicit-any]: heterogeneous YAML payload
     """Apply RECON_GEN_* env var overrides to the nested raw cfg dict.
 

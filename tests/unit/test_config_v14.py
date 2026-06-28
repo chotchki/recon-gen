@@ -22,9 +22,7 @@ from recon_gen.common.config import (
     CycleError,
     LegacyFieldError,
     MissingFieldError,
-    _QS_USER_ARN_CACHE,
     load_config,
-    resolve_qs_user_arn,
 )
 from recon_gen.common.sql import Dialect
 
@@ -320,28 +318,6 @@ def test_explicit_table_prefix_overrides_derived(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_qs_user_arn_explicit_override(tmp_path: Path) -> None:
-    """``cfg.auth.aws.quicksight_user_arn`` wins; boto NOT fired."""
-    cfg_text = _MIN_CFG + """\
-auth:
-  aws:
-    profile: some-profile
-    quicksight_user_arn: arn:aws:quicksight:us-east-1:123:user/default/explicit
-"""
-    p = _write(tmp_path, "cfg.yaml", cfg_text)
-    cfg = load_config(p)
-    arn = resolve_qs_user_arn(cfg)
-    assert arn == "arn:aws:quicksight:us-east-1:123:user/default/explicit"
-
-
-def test_resolve_qs_user_arn_no_profile_returns_none(tmp_path: Path) -> None:
-    """``cfg.auth.aws.profile`` absent ⇒ resolver returns None without
-    firing boto. Runner uses None signal to skip qs_browser layer."""
-    p = _write(tmp_path, "cfg.yaml", _MIN_CFG)
-    cfg = load_config(p)
-    assert resolve_qs_user_arn(cfg) is None
-
-
 def test_partition_defaults_to_commercial_aws(tmp_path: Path) -> None:
     """No principal_arns + no datasource.arn ⇒ ``aws`` (commercial).
     Preserves pre-DE behavior for fuzz fixtures that don't carry
@@ -384,25 +360,6 @@ def test_partition_derives_china_from_adopted_datasource_arn(tmp_path: Path) -> 
     # datasource.arn wins (preserves pre-DE precedence: explicit
     # account-bound ARN beats principal_arns).
     assert cfg.aws.partition == "aws-cn"
-
-
-def test_resolve_qs_user_arn_cache_hit_returns_cached(tmp_path: Path) -> None:
-    """Pre-populated cache entry is returned without firing boto.
-    Pins the cache-key shape ``(profile, account_id, region)`` so the
-    runner's per-cell subprocesses share lookups."""
-    cfg_text = _MIN_CFG + """\
-auth:
-  aws:
-    profile: cached-profile
-"""
-    p = _write(tmp_path, "cfg.yaml", cfg_text)
-    cfg = load_config(p)
-    cache_key = ("cached-profile", "123456789012", "us-east-1")
-    _QS_USER_ARN_CACHE[cache_key] = "arn:aws:quicksight:cached:user/test"
-    try:
-        assert resolve_qs_user_arn(cfg) == "arn:aws:quicksight:cached:user/test"
-    finally:
-        _QS_USER_ARN_CACHE.pop(cache_key, None)
 
 
 # ---------------------------------------------------------------------------
