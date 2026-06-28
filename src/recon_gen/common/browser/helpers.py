@@ -1,14 +1,10 @@
-"""Helpers for driving QuickSight dashboards in a Playwright browser.
+"""Helpers for driving dashboards in a Playwright browser.
 
 Used by both the e2e test suite (``tests/e2e/test_*.py``) and
 production CLI code (the screenshot pipeline that renders handbook
-images against a deployed dashboard). Promoted out of
+images against a running dashboard). Promoted out of
 ``tests/e2e/`` in M.1.10 so production no longer has to import
 from ``tests/``.
-
-The QuickSight identity region (us-east-1) is where embed URL
-generation and user operations live, even when the dashboard
-itself is deployed in another region.
 """
 
 from __future__ import annotations
@@ -25,7 +21,6 @@ from typing import TYPE_CHECKING, Callable, Generator, TypeVar, cast
 from recon_gen.common.env_keys import (
     EnvVarInvalid,
     RECON_E2E_SCREENSHOT_DIR,
-    RECON_E2E_USER_ARN,
     RECON_GEN_RUN_DIR,
     RECON_GEN_TRACE_ALL,
 )
@@ -37,12 +32,6 @@ if TYPE_CHECKING:
     # (the helpers that touch it lazy-import inside the function body).
     from playwright.sync_api import Page
 
-    # boto3-stubs[quicksight] provides this — typed client surface for
-    # the QuickSight API. Used by ``generate_dashboard_embed_url`` to
-    # avoid the partial-Unknown that bare ``boto3.client("quicksight")``
-    # returns in pyright (the Literal-overload set is too large to resolve).
-    from mypy_boto3_quicksight import QuickSightClient
-
 T = TypeVar("T")
 
 
@@ -51,91 +40,10 @@ T = TypeVar("T")
 # directory (pytest runs from repo root per pyproject.toml's
 # ``testpaths = ["tests"]``); override via ``RECON_E2E_SCREENSHOT_DIR``
 # if you need a different sink. Production CLI screenshot capture
-# uses an explicit ``output_dir`` arg to ``ScreenshotHarness`` and
-# does NOT touch this constant.
+# uses an explicit ``output_dir`` arg and does NOT touch this constant.
 SCREENSHOT_DIR = (
     RECON_E2E_SCREENSHOT_DIR.get_or_none() or Path("tests/e2e/screenshots")
 ).resolve()
-
-
-def get_user_arn() -> str:
-    """Return the QuickSight user ARN to embed dashboards for.
-
-    Reads ``RECON_E2E_USER_ARN``. Raises ``RuntimeError`` when unset —
-    the previous silent fallback to a hardcoded account-specific
-    ARN string masked CI misconfiguration (Phase W's ``ci-bot`` user
-    has a different ARN than the local-dev default; the fallback
-    produced an embed URL the bot couldn't view) and burned a
-    project AWS account ID into the source. Fail-loud is the
-    contract.
-    """
-    # Use the registry's get_or_none() (NOT require()) so we keep the
-    # historical RuntimeError contract — unit tests assert the exact
-    # error type + message + runbook reference, and EnvVarRequired
-    # would be a behavior change. The registry's IAM-ARN regex
-    # validator still runs on the present value, surfacing
-    # malformed-ARN bugs at this boundary instead of inside boto.
-    arn = RECON_E2E_USER_ARN.get_or_none()
-    if not arn:
-        raise RuntimeError(
-            "RECON_E2E_USER_ARN is not set. Embedding requires a "
-            "QuickSight user ARN to sign the URL for. Export the "
-            "ARN of the user whose session you want the embed to "
-            "render under (locally: your default-namespace IAM "
-            "user; CI: the ci-bot user). See "
-            "`.github/E2E_SETUP.md` for the CI setup."
-        )
-    return arn
-
-
-def generate_dashboard_embed_url(
-    *,
-    aws_account_id: str,
-    aws_region: str,
-    dashboard_id: str,  # typing-smell: ignore[bare-str-id]: QS API resource id, not the App2 routing slug DashboardId NewType
-    user_arn: str | None = None,
-    session_lifetime_minutes: int = 60,
-) -> str:
-    """Generate a pre-authenticated embed URL for a dashboard.
-
-    Builds a boto3 QuickSight client in ``aws_region`` (the dashboard's
-    region) and signs the URL with it. Embed URLs MUST be signed by a
-    client whose region matches the dashboard's region — using the
-    identity region (us-east-1) for a dashboard deployed elsewhere
-    returns a URL QuickSight rejects with "We can't open that
-    dashboard, another Quick account or it was deleted" — a confusing
-    error that suggests permission/account/deletion when the actual
-    cause is region mismatch. The M.4.1.i first AWS-side dry-run
-    burned an hour on this when the harness called this helper with
-    the identity-region client.
-
-    Earlier the signature took a pre-built client which made it
-    possible to pass the wrong region's client. This version requires
-    callers to pass ``aws_region`` and constructs the client itself,
-    making the bug class unrepresentable.
-
-    All args keyword-only — protects against positional-arg drift if
-    the parameter list ever changes again.
-    """
-    import boto3
-
-    # boto3-stubs[quicksight] picks the right overload — the inferred
-    # client type is QuickSightClient — but ``boto3.client`` itself is
-    # an enormous Literal-overload set whose type pyright reports as
-    # "partially unknown". The ignore is for THAT specific complaint;
-    # the resolved RHS type is fully typed.
-    qs: QuickSightClient = boto3.client(  # pyright: ignore[reportUnknownMemberType]: boto3-stubs huge overload union confuses pyright (X.2.o.5)
-        "quicksight", region_name=aws_region,
-    )
-    resp = qs.generate_embed_url_for_registered_user(
-        AwsAccountId=aws_account_id,
-        SessionLifetimeInMinutes=session_lifetime_minutes,
-        UserArn=user_arn or get_user_arn(),
-        ExperienceConfiguration={
-            "Dashboard": {"InitialDashboardId": dashboard_id},
-        },
-    )
-    return resp["EmbedUrl"]
 
 
 @contextmanager

@@ -88,8 +88,7 @@ Four checks today, all extensible — drop a new ``Check`` into
 - **no-playwright-leak** (X.2.q.5) — ``import playwright`` /
   ``from playwright[.x] import …`` OR
   ``from recon_gen.common.browser{.helpers|.screenshot} import …``
-  (the Playwright-primitives layer; the AWS-only helpers
-  ``get_user_arn`` / ``generate_dashboard_embed_url`` are exempt) in
+  (the Playwright-primitives layer) in
   any ``tests/e2e/`` file outside the driver layer
   (``tests/e2e/_drivers/``). Playwright stays sealed behind
   ``DashboardDriver`` — e2e tests talk driver verbs (``open`` /
@@ -1050,12 +1049,10 @@ class TreeDataclassCheck(Check):
 
 
 # Names that live in ``common/browser/helpers.py`` but aren't
-# Playwright-coupled — AWS plumbing that happens to share the file.
-# A test importing ONLY these is fine; importing ``webkit_page`` /
-# ``wait_for_*`` / ``screenshot`` / etc. is bypassing the driver layer.
+# Playwright-coupled. A test importing ONLY these is fine; importing
+# ``webkit_page`` / ``wait_for_*`` / ``screenshot`` / etc. is bypassing
+# the driver layer.
 _NON_PLAYWRIGHT_BROWSER_HELPERS = frozenset({
-    "get_user_arn",
-    "generate_dashboard_embed_url",
     # AA.A.qs-triage.5.followon — failure-capture sidecar; writes
     # `<capture_dir>/sql_trace.txt`. No Playwright coupling. Lives in
     # helpers.py because that's where the rest of the per-test capture
