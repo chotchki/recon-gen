@@ -55,13 +55,16 @@ from recon_gen.common.models import (
     Visual,
     VisualTitleLabelOptions,
 )
-from recon_gen.common.cleanup import (
-    DEPLOYMENT_TAG_KEY,
-    MANAGED_TAG_KEY,
-    MANAGED_TAG_VALUE,
-)
 from recon_gen.common.config import AwsConfig, Config, DbConfig
 from tests._test_helpers import make_test_config
+
+# The QS resource-tag keys cfg.aws.tags() / Tag.to_aws_json() emit. Once
+# lived in common/cleanup.py (deleted with QuickSight, DW.7); the AWS Tag
+# dataclass + cfg.aws.tags() retire in DW.8.1 / the config cleanup —
+# these locals keep the tag-serialization tests green until then.
+MANAGED_TAG_KEY = "ManagedBy"
+MANAGED_TAG_VALUE = "recon-gen"
+DEPLOYMENT_TAG_KEY = "Deployment"
 
 
 class TestStripNones:

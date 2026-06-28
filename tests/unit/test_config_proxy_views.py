@@ -17,11 +17,6 @@ from datetime import date
 
 import pytest
 
-from recon_gen.common.cleanup import (
-    DEPLOYMENT_TAG_KEY,
-    MANAGED_TAG_KEY,
-    MANAGED_TAG_VALUE,
-)
 from recon_gen.common.config import (
     AuthConfig,
     AwsConfig,
@@ -30,6 +25,14 @@ from recon_gen.common.config import (
     TestGeneratorConfig,
 )
 from recon_gen.common.sql import Dialect
+
+# The QS resource-tag keys cfg.aws.tags() emits. Once lived in
+# common/cleanup.py (deleted with QuickSight, DW.7); the cfg.aws.tags()
+# surface itself is QS-dead and retires in the config cleanup that
+# follows — these locals keep the proxy-view test green until then.
+MANAGED_TAG_KEY = "ManagedBy"
+MANAGED_TAG_VALUE = "recon-gen"
+DEPLOYMENT_TAG_KEY = "Deployment"
 
 
 def _make_cfg(**overrides: object) -> Config:
