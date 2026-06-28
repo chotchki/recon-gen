@@ -197,7 +197,6 @@ def test_table_column_meta_returns_decoration_map_for_drillable() -> None:
     with isolated_dataset_registries():
         ds = Dataset(
             identifier="da-deco-ds",
-            arn="arn:aws:quicksight:::dataset/da-deco-ds",
         )
         register_contract(
             ds.identifier,

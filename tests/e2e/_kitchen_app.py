@@ -91,11 +91,9 @@ def build_kitchen_app(cfg: Config) -> App:
     # DataSetIdentifierDeclarations.
     ds_main = app.add_dataset(Dataset(
         identifier="kitchen-main-ds",
-        arn="arn:aws:quicksight:::dataset/kitchen-main",
     ))
     ds_categories = app.add_dataset(Dataset(
         identifier="kitchen-categories-ds",
-        arn="arn:aws:quicksight:::dataset/kitchen-categories",
     ))
 
     # ------ Analysis -------------------------------------------------

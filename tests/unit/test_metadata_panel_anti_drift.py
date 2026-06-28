@@ -153,7 +153,6 @@ def test_table_metadata_popup_true_raises_when_contract_lacks_metadata() -> (
     with isolated_dataset_registries():
         ds_no_meta = Dataset(
             identifier="cy7-drift-no-meta",
-            arn="arn:aws:quicksight:::dataset/cy7-drift-no-meta",
         )
         # Contract carries an ``id`` column only — explicitly NO
         # ``metadata`` (simulates the rename / drop case).
@@ -219,7 +218,6 @@ def anti_drift_app() -> Iterator[tuple[Any, str, str]]:
     with isolated_dataset_registries():
         ds_with_meta = Dataset(
             identifier="cy7-with-meta",
-            arn="arn:aws:quicksight:::dataset/cy7-with-meta",
         )
         register_contract(
             ds_with_meta.identifier,

@@ -57,7 +57,7 @@ def test_kpi_with_only_registered_fields_passes_gate() -> None:
     # Build a Measure that the KPI can hold without exercising dataset
     # resolution (we never call validate() here — direct gate call).
     from recon_gen.common.tree.structure import Dataset
-    ds = Dataset(identifier="gate-ds", arn="arn:aws:quicksight:::dataset/gate-ds")
+    ds = Dataset(identifier="gate-ds")
     measure = Measure(dataset=ds, column="n", kind="sum")
     kpi = KPI(
         title="T", subtitle="s",
@@ -170,7 +170,7 @@ def test_registry_entries_use_only_typed_dispositions() -> None:
 
 def test_gate_is_idempotent_on_clean_app() -> None:
     from recon_gen.common.tree.structure import Dataset
-    ds = Dataset(identifier="idem-ds", arn="arn:aws:quicksight:::dataset/idem-ds")
+    ds = Dataset(identifier="idem-ds")
     measure = Measure(dataset=ds, column="n", kind="sum")
     kpi = KPI(
         title="T", subtitle="s",

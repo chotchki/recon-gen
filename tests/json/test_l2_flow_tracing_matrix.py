@@ -139,23 +139,13 @@ def test_dataset_count_is_fourteen_per_instance(
     assert len(app.datasets) == 14
 
 
-def test_every_dataset_id_carries_deployment_prefix(
-    l2_instance: L2Instance,
-) -> None:
-    """Z.C — every dataset ID is prefixed by ``cfg.aws.deployment_name``
-    so multiple deploys (dev/staging/prod, or co-tenanted L2s with
-    distinct cfg.yaml) don't collide in the same QS account. Mirrors
-    `test_l1_dashboard_structure.py`'s prefix check."""
-    app = build_l2_flow_tracing_app(_CFG, l2_instance=l2_instance)
-    expected_prefix = f"{_CFG.aws.deployment_name}-"
-    for ds in app.datasets:
-        # The arn carries the dataset ID; pull it out of the ARN's
-        # `:dataset/<id>` suffix.
-        ds_id = ds.arn.rsplit("/", 1)[-1]
-        assert ds_id.startswith(expected_prefix), (
-            f"dataset {ds.identifier!r} ID {ds_id!r} doesn't carry "
-            f"the deployment prefix {expected_prefix!r}"
-        )
+# DW (dead-config sweep) — retired `test_every_dataset_id_carries_deployment_prefix`
+# + `test_deployments_produce_different_dataset_id_namespaces`. Both asserted
+# the deployment-prefixed dataset ID via `ds.arn` (the QuickSight DataSetArn),
+# whose whole purpose was avoiding collisions in a shared QS account. QuickSight
+# is gone, the arn field is gone, and the tree Dataset.identifier is the logical
+# const (never prefixed). The analysis/dashboard-ID prefix test below STAYS —
+# those IDs really are prefixed + URL-facing.
 
 
 def test_analysis_and_dashboard_ids_carry_deployment_prefix(
@@ -255,32 +245,6 @@ def test_metadata_key_dropdown_binds_to_shared_metadata_keys_dataset(
 
 
 # -- Cross-instance differentiation ------------------------------------------
-
-
-def test_deployments_produce_different_dataset_id_namespaces() -> None:
-    """Sanity: building the same app against two distinct cfgs (different
-    ``deployment_name``) produces non-overlapping dataset ID sets — so a
-    multi-deploy QuickSight account can host both without collision.
-
-    Z.C — the per-deployment namespace lives on cfg.aws.deployment_name (was
-    previously auto-stamped from ``L2Instance.instance``), so the test
-    swaps the cfg per build, not the L2 instance. Two integrators
-    pointing at the same L2 yaml MUST still get isolated namespaces by
-    setting different deployment_names in their cfg.yamls."""
-    from pathlib import Path
-    from recon_gen.common.l2 import load_instance
-
-    sasq = load_instance(
-        Path(__file__).parent.parent / "l2" / "sasquatch_pr.yaml"
-    )
-    cfg_a = make_test_config(aws_deployment_name="recon-deploy-a")
-    cfg_b = make_test_config(aws_deployment_name="recon-deploy-b")
-    a_app = build_l2_flow_tracing_app(cfg_a, l2_instance=sasq)
-    b_app = build_l2_flow_tracing_app(cfg_b, l2_instance=sasq)
-
-    a_ds_ids = {ds.arn.rsplit("/", 1)[-1] for ds in a_app.datasets}
-    b_ds_ids = {ds.arn.rsplit("/", 1)[-1] for ds in b_app.datasets}
-    assert a_ds_ids.isdisjoint(b_ds_ids), (
-        "Deployment-prefix isolation broken — dataset IDs overlap "
-        "between two cfgs with distinct deployment_name values"
-    )
+# (The dataset-ID-namespace-isolation test retired with the QS DataSetArn —
+# see the note above the analysis/dashboard-prefix test. Cross-deployment
+# isolation now rides the analysis/dashboard IDs, which are still prefixed.)

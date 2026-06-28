@@ -51,8 +51,8 @@ class Dataset:
 
     ``identifier`` is the logical identifier visuals/filters reference
     (the existing per-app DS_INV_ACCOUNT_NETWORK / DS_AR_TRANSACTIONS
-    strings — values like ``"inv-account-network-ds"``). ``arn`` is
-    the AWS QuickSight DataSetArn the deployed analysis points at.
+    strings — values like ``"inv-account-network-ds"``). It IS the
+    DataSetId the renderer keys on.
 
     Frozen because Dataset acts as the dependency-graph KEY: it must
     be hashable so visuals/filters that reference it can be collected
@@ -63,7 +63,6 @@ class Dataset:
     — see Column docstring for the chained factory pattern.
     """
     identifier: str
-    arn: str
 
     def __getitem__(self, name: str) -> Column:
         """Return a typed ``Column`` ref for ``name``.

@@ -302,7 +302,6 @@ def _build_recipient_fanout_sheet(
 
     ds_fanout = app.add_dataset(Dataset(
         identifier=DS_INV_RECIPIENT_FANOUT,
-        arn=app.cfg.aws.dataset_arn(app.cfg.aws.prefixed("inv-recipient-fanout-dataset")),
     ))
 
     # Y.3.a — bridge the analyst-facing slider param into the
@@ -455,7 +454,6 @@ def _build_volume_anomalies_sheet(
 
     ds_anomalies = app.add_dataset(Dataset(
         identifier=DS_INV_VOLUME_ANOMALIES,
-        arn=app.cfg.aws.dataset_arn(app.cfg.aws.prefixed("inv-volume-anomalies-dataset")),
     ))
     # Y.1.b.companion — same matview, no σ pushdown. Distribution
     # chart binds to this so it stays unfiltered while KPI + Table
@@ -463,9 +461,6 @@ def _build_volume_anomalies_sheet(
     # filter.
     ds_anomalies_distribution = app.add_dataset(Dataset(
         identifier=DS_INV_VOLUME_ANOMALIES_DISTRIBUTION,
-        arn=app.cfg.aws.dataset_arn(
-            app.cfg.aws.prefixed("inv-volume-anomalies-distribution-dataset"),
-        ),
     ))
 
     # Y.1.c — bridge the analysis-level parameter into the
@@ -639,7 +634,6 @@ def _build_money_trail_sheet(
 
     ds_money_trail = app.add_dataset(Dataset(
         identifier=DS_INV_MONEY_TRAIL,
-        arn=app.cfg.aws.dataset_arn(app.cfg.aws.prefixed("inv-money-trail-dataset")),
     ))
     # Y.2.a.companion — unfiltered roots dataset feeding only the
     # chain-root dropdown's LinkedValues. Without it, the dropdown's
@@ -648,9 +642,6 @@ def _build_money_trail_sheet(
     # sentinel default (i.e. nothing).
     ds_money_trail_roots = app.add_dataset(Dataset(
         identifier=DS_INV_MONEY_TRAIL_ROOTS,
-        arn=app.cfg.aws.dataset_arn(
-            app.cfg.aws.prefixed("inv-money-trail-roots-dataset"),
-        ),
     ))
 
     # Y.2.a — bridge each analysis-level parameter to its
@@ -841,7 +832,6 @@ def _build_account_network_sheet(
 
     ds_anet = app.add_dataset(Dataset(
         identifier=DS_INV_ACCOUNT_NETWORK,
-        arn=app.cfg.aws.dataset_arn(app.cfg.aws.prefixed("inv-account-network-dataset")),
     ))
     # BO.2 — directional siblings of ds_anet. The bidirectional ds_anet
     # feeds the Touching-Edges table; each Sankey reads its own pre-
@@ -850,19 +840,12 @@ def _build_account_network_sheet(
     # split exists.
     ds_anet_inbound = app.add_dataset(Dataset(
         identifier=DS_INV_ACCOUNT_NETWORK_INBOUND,
-        arn=app.cfg.aws.dataset_arn(
-            app.cfg.aws.prefixed("inv-account-network-inbound-dataset"),
-        ),
     ))
     ds_anet_outbound = app.add_dataset(Dataset(
         identifier=DS_INV_ACCOUNT_NETWORK_OUTBOUND,
-        arn=app.cfg.aws.dataset_arn(
-            app.cfg.aws.prefixed("inv-account-network-outbound-dataset"),
-        ),
     ))
     ds_accounts = app.add_dataset(Dataset(
         identifier=DS_INV_ANETWORK_ACCOUNTS,
-        arn=app.cfg.aws.dataset_arn(app.cfg.aws.prefixed("inv-anetwork-accounts-dataset")),
     ))
 
     # Y.2.b — bridge each analysis-level parameter to its dataset-level
@@ -1171,24 +1154,23 @@ def _build_app_info_sheet(
     # ``common.l2.schema``. Using the unprefixed bare names slipped past
     # all unit + integration tests because nothing actually executed
     # the dataset's CustomSQL until QS rendered the visual.
-    liveness_aws = build_liveness_dataset(cfg, app_segment="inv")
-    matviews_aws = build_matview_status_dataset(
+    # Build for the registry side-effects (contract + SQL); the returned
+    # BuiltDataset is no longer consumed post-DW.
+    build_liveness_dataset(cfg, app_segment="inv")
+    build_matview_status_dataset(
         cfg, app_segment="inv", view_specs=inv_matview_specs(cfg),
     )
-    latest_balance_day_aws = build_latest_balance_day_dataset(
+    build_latest_balance_day_dataset(
         cfg, app_segment="inv",
     )
     liveness_ds = app.add_dataset(Dataset(
         identifier=_DS_APP_INFO_LIVENESS,
-        arn=cfg.aws.dataset_arn(liveness_aws.DataSetId),
     ))
     matviews_ds = app.add_dataset(Dataset(
         identifier=_DS_APP_INFO_MATVIEWS,
-        arn=cfg.aws.dataset_arn(matviews_aws.DataSetId),
     ))
     latest_balance_day_ds = app.add_dataset(Dataset(
         identifier=_DS_APP_INFO_LATEST_BALANCE_DAY,
-        arn=cfg.aws.dataset_arn(latest_balance_day_aws.DataSetId),
     ))
     sheet = analysis.add_sheet(Sheet(
         sheet_id=SHEET_INV_APP_INFO,

@@ -672,7 +672,7 @@ def test_emit_html_bakes_table_sort_by_into_hx_get_url() -> None:
     except Exception:
         pass  # already registered (test re-run in same process)
 
-    ds = Dataset(identifier=ds_id, arn=f"arn::{ds_id}")
+    ds = Dataset(identifier=ds_id)
     sheet = Sheet(
         sheet_id=SheetId("sort-sheet"),
         name="Sort",
@@ -732,7 +732,7 @@ def test_emit_html_threads_page_size_url_param_into_filter_form() -> None:
     except Exception:
         pass
 
-    ds = Dataset(identifier=ds_id, arn=f"arn::{ds_id}")
+    ds = Dataset(identifier=ds_id)
     sheet = Sheet(
         sheet_id=SheetId("ps-sheet"),
         name="PS",

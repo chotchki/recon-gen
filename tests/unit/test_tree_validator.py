@@ -34,7 +34,7 @@ from tests.e2e.tree_validator import TreeValidator, ValidationFailure
 _TEST_CFG = make_test_config()
 
 
-_DS = Dataset(identifier="ds", arn="arn:test:ds")
+_DS = Dataset(identifier="ds")
 
 
 def _make_app() -> App:

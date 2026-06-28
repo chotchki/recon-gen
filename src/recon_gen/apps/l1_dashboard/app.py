@@ -599,9 +599,10 @@ def _l1_datasets(
     list; their order matches `build_all_l1_dashboard_datasets`'s
     appended App Info pair.
     """
-    aws_datasets = build_all_l1_dashboard_datasets(cfg, l2_instance)
-    # `build_all_l1_dashboard_datasets` returns AWS DataSets in the same
-    # order as the visual identifiers below; map each to a tree Dataset.
+    # Register every dataset's contract + SQL (build side-effects); the
+    # returned BuiltDataset list is no longer consumed post-DW (the tree
+    # Dataset keys on its identifier, not an ARN).
+    build_all_l1_dashboard_datasets(cfg, l2_instance)
     visual_ids = [
         DS_DRIFT, DS_LEDGER_DRIFT, DS_OVERDRAFT,
         DS_LIMIT_BREACH, DS_L1_EXCEPTIONS,
@@ -622,8 +623,8 @@ def _l1_datasets(
         _DS_APP_INFO_LATEST_BALANCE_DAY,
     ]
     return {
-        vid: Dataset(identifier=vid, arn=cfg.aws.dataset_arn(aws.DataSetId))
-        for vid, aws in zip(visual_ids, aws_datasets)
+        vid: Dataset(identifier=vid)
+        for vid in visual_ids
     }
 
 

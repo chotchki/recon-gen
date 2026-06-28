@@ -363,7 +363,7 @@ class TestValidationHooksAudit:
         ),
         db=DbConfig(table_prefix="kitchen"),
     )
-    _DS_X = _DS(identifier="ds-x", arn="arn:aws:quicksight:::dataset/x")
+    _DS_X = _DS(identifier="ds-x")
 
     def _app(self) -> _A:
         app = _A(name="t", cfg=self._CFG)

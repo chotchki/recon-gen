@@ -289,7 +289,9 @@ def _datasets(cfg: Config) -> dict[str, Dataset]:
     M.4.4.5 — last 2 entries are the App Info datasets, mirroring the
     order in `build_all_datasets`.
     """
-    built = build_all_datasets(cfg)
+    # Register every dataset's contract + SQL (build side-effects); the
+    # returned BuiltDataset list is no longer consumed post-DW.
+    build_all_datasets(cfg)
     names = [
         DS_EXEC_TRANSACTION_SUMMARY,
         # AO.5 — per-active-day rollup for the avg-daily KPI.
@@ -307,8 +309,8 @@ def _datasets(cfg: Config) -> dict[str, Dataset]:
         _DS_APP_INFO_LATEST_BALANCE_DAY,
     ]
     return {
-        name: Dataset(identifier=name, arn=cfg.aws.dataset_arn(ds.DataSetId))
-        for name, ds in zip(names, built)
+        name: Dataset(identifier=name)
+        for name in names
     }
 
 

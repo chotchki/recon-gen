@@ -49,10 +49,10 @@ from recon_gen.common.tree import (
 # Real apps use a per-app dataset registry on the App; tests use these
 # stand-ins. The identifiers ("ds", "ds-foo", "ds-anomalies") match
 # the strings the pre-L.1.7 tests passed.
-_DS = Dataset(identifier="ds", arn="arn:aws:quicksight:::dataset/ds")
-_DS_FOO = Dataset(identifier="ds-foo", arn="arn:aws:quicksight:::dataset/ds-foo")
+_DS = Dataset(identifier="ds")
+_DS_FOO = Dataset(identifier="ds-foo")
 _DS_ANOMALIES = Dataset(
-    identifier="ds-anomalies", arn="arn:aws:quicksight:::dataset/ds-anomalies",
+    identifier="ds-anomalies",
 )
 
 
@@ -172,7 +172,6 @@ class TestMeasure:
 
         ds = Dataset(
             identifier="ds-v11241-guard-test",
-            arn="arn:aws:quicksight:::dataset/ds-v11241-guard-test",
         )
         register_contract("ds-v11241-guard-test", DatasetContract(columns=[
             ColumnSpec("posting", "DATETIME"),
@@ -352,7 +351,6 @@ class TestTableVisual:
         with isolated_dataset_registries():
             ds = Dataset(
                 identifier="cy4-no-meta-ds",
-                arn="arn:aws:quicksight:::dataset/cy4-no-meta-ds",
             )
             register_contract(
                 ds.identifier,
@@ -384,7 +382,6 @@ class TestTableVisual:
         with isolated_dataset_registries():
             ds = Dataset(
                 identifier="cy4-with-meta-ds",
-                arn="arn:aws:quicksight:::dataset/cy4-with-meta-ds",
             )
             register_contract(
                 ds.identifier,
@@ -418,7 +415,6 @@ class TestTableVisual:
 
         ds = Dataset(
             identifier="da-gate-ds",
-            arn="arn:aws:quicksight:::dataset/da-gate-ds",
         )
         col_id = Dim(dataset=ds, field_id="f-id", column="id")
         with pytest.raises(
@@ -443,7 +439,6 @@ class TestTableVisual:
 
         ds = Dataset(
             identifier="da-gate-mismatch-ds",
-            arn="arn:aws:quicksight:::dataset/da-gate-mismatch-ds",
         )
         col_a = Dim(dataset=ds, field_id="f-a", column="a")
         col_b = Dim(dataset=ds, field_id="f-b", column="b")
@@ -498,7 +493,6 @@ class TestTableVisual:
 
         ds = Dataset(
             identifier="da-gate-pass-ds",
-            arn="arn:aws:quicksight:::dataset/da-gate-pass-ds",
         )
         col_account = Dim(dataset=ds, field_id="f-acct", column="account_id")
         from recon_gen.common.drill import ColumnShape
@@ -755,8 +749,8 @@ class TestDataset:
     def test_dataset_is_hashable(self):
         """Dataset is the dependency-graph KEY — must be hashable so
         visuals/filters' refs can be collected into set[Dataset]."""
-        a = Dataset(identifier="a", arn="arn:a")
-        b = Dataset(identifier="b", arn="arn:b")
+        a = Dataset(identifier="a")
+        b = Dataset(identifier="b")
         s = {a, b, a}
         assert len(s) == 2
 
@@ -770,7 +764,7 @@ class TestDataset:
             DatasetContract,
             register_contract,
         )
-        ds = Dataset(identifier="ds-with-contract", arn="arn:x")
+        ds = Dataset(identifier="ds-with-contract")
         register_contract(ds.identifier, DatasetContract(columns=[
             ColumnSpec(name="amount", type="DECIMAL"),
         ]))
@@ -792,9 +786,9 @@ class TestAppDatasetRegistry:
         """Same shadow-bug class as duplicate parameters: two registrations
         sharing an identifier silently let one win at deploy."""
         app = App(name="test", cfg=_TEST_CFG, allow_bare_strings=True)
-        app.add_dataset(Dataset(identifier="ds-x", arn="arn:1"))
+        app.add_dataset(Dataset(identifier="ds-x"))
         with pytest.raises(ValueError, match="already registered"):
-            app.add_dataset(Dataset(identifier="ds-x", arn="arn:2"))
+            app.add_dataset(Dataset(identifier="ds-x"))
 
 
 class TestAppDatasetDependencies:
@@ -1347,7 +1341,7 @@ class TestLinkedValues:
             DatasetContract,
             register_contract,
         )
-        ds_a = Dataset(identifier="lv-fromcol-a", arn="arn:a")
+        ds_a = Dataset(identifier="lv-fromcol-a")
         register_contract(ds_a.identifier, DatasetContract(columns=[
             ColumnSpec(name="col", type="STRING"),
         ]))
@@ -1356,7 +1350,7 @@ class TestLinkedValues:
         assert lv.column_name == "col"
 
     def test_from_string_takes_explicit_dataset(self):
-        ds = Dataset(identifier="lv-fromstr", arn="arn:s")
+        ds = Dataset(identifier="lv-fromstr")
         lv = LinkedValues.from_string(dataset=ds, column_name="bare_col")
         assert lv.dataset is ds
         assert lv.column_name == "bare_col"
