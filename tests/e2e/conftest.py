@@ -304,11 +304,6 @@ def _pin_cfg_to_kv_as_of(cfg: Config) -> Config:
 
 
 @pytest.fixture(scope="session")
-def region(cfg: Config) -> str:
-    return cfg.aws.region
-
-
-@pytest.fixture(scope="session")
 def deployment_name(cfg: Config) -> str:
     """Z.C — replaces the prior ``resource_prefix`` fixture; the
     deployment_name IS the single per-deploy QS-resource-ID prefix."""

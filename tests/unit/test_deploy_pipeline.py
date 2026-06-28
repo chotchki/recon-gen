@@ -25,7 +25,7 @@ from typing import Any
 
 import pytest
 
-from recon_gen.common.config import AwsConfig, Config, DatasourceConfig, DbConfig
+from recon_gen.common.config import AwsConfig, Config, DbConfig
 from recon_gen.common.db import connect_demo_db, duckdb_path, execute_script, fetch_one_required, make_demo_database_url
 from recon_gen.common.config import (
     AwsConfig,
@@ -57,14 +57,7 @@ def _base_cfg() -> Config:
     return Config(
         # Z.C — Config requires deployment_name + db_table_prefix.
         # spec_example matches the bundled L2 fixture used downstream.
-        aws=AwsConfig(
-            account_id="111122223333", region="us-east-1",
-            deployment_name="recon-spec-example",
-            datasource=DatasourceConfig(
-                mode="adopt",
-                arn="arn:aws:quicksight:us-east-1:111122223333:datasource/x",
-            ),
-        ),
+        aws=AwsConfig(deployment_name="recon-spec-example"),
         db=DbConfig(table_prefix=DEFAULT_PREFIX),
     )
 
@@ -81,14 +74,7 @@ def _duckdb_cfg(tmp_path: Path) -> Config:
     return Config(
         # Z.C — Config requires deployment_name + db_table_prefix.
         # spec_example matches the bundled L2 fixture used downstream.
-        aws=AwsConfig(
-            account_id="111122223333", region="us-east-1",
-            deployment_name="recon-spec-example",
-            datasource=DatasourceConfig(
-                mode="adopt",
-                arn="arn:aws:quicksight:us-east-1:111122223333:datasource/x",
-            ),
-        ),
+        aws=AwsConfig(deployment_name="recon-spec-example"),
         db=DbConfig(table_prefix=DEFAULT_PREFIX, url=make_demo_database_url(Dialect.DUCKDB, db_path), dialect=Dialect.DUCKDB),
     )
 

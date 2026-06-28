@@ -36,11 +36,9 @@ from starlette.staticfiles import StaticFiles
 from starlette.testclient import TestClient
 
 from recon_gen.common.config import (
-    AuthAwsConfig,
     AuthConfig,
     AwsConfig,
     Config,
-    DatasourceConfig,
     DbConfig,
     OidcConfig,
     SessionConfig,
@@ -69,19 +67,13 @@ def set_secret_envs(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _make_cfg() -> Config:
     return Config(
-        aws=AwsConfig(
-            account_id="000000000000",
-            region="us-east-1",
-            deployment_name="test-deploy",
-            datasource=DatasourceConfig(mode="skip", arn=None),
-        ),
+        aws=AwsConfig(deployment_name="test-deploy"),
         db=DbConfig(
             url="duckdb:///tmp/test.duckdb",
             dialect=Dialect.DUCKDB,
             table_prefix="test_deploy",
         ),
         auth=AuthConfig(
-            aws=AuthAwsConfig(),
             oidc=OidcConfig(
                 issuer_url="https://hotchkiss.io:5557/dex",
                 client_id="recon-gen-app2",

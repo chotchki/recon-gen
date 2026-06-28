@@ -111,8 +111,8 @@ def test_patched_config_returns_fresh_clone() -> None:
     # Patched is a *clone*, not the same object.
     assert patched is not cfg
     # Other cfg fields propagate.
-    assert patched.aws.account_id == cfg.aws.account_id
-    assert patched.aws.region == cfg.aws.region
+    assert patched.aws.deployment_name == cfg.aws.deployment_name
+    assert patched.db.table_prefix == cfg.db.table_prefix
 
 
 def test_multiple_updates_compose() -> None:

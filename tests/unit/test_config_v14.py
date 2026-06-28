@@ -6,10 +6,14 @@ Covers:
 - ``extends:`` cycle detection.
 - Derive-on-load (``db.table_prefix`` from ``aws.deployment_name``).
 - Legacy-key detection raises ``LegacyFieldError``.
-- ``aws.datasource.mode`` literal + ``adopt`` requires arn.
 - Required-field absence raises ``MissingFieldError``.
 
 Pinned per DE.0 lock; DE.2 phase sweep migrates all callsites to this shape.
+
+Note (dead-config sweep): the AWS account/region/datasource/partition
+surface was removed from ``AwsConfig`` with the QuickSight deploy path —
+a cfg carrying those keys still loads (they're ignored), so the loader
+tests that pinned their presence/derivation/validation retired here.
 """
 
 from __future__ import annotations
@@ -48,15 +52,12 @@ def test_minimal_cfg_loads(tmp_path: Path) -> None:
     """Minimum-field cfg loads + auto-derives table_prefix."""
     p = _write(tmp_path, "cfg.yaml", _MIN_CFG)
     cfg = load_config(p)
-    assert cfg.aws.account_id == "123456789012"
-    assert cfg.aws.region == "us-east-1"
     assert cfg.aws.deployment_name == "test-deploy"
     assert cfg.db.dialect is Dialect.POSTGRES
     assert cfg.db.url == "postgresql://u:p@h:5432/d"
     # Derived from deployment_name (`-` → `_`)
     assert cfg.db.table_prefix == "test_deploy"
     # All optional blocks default to empty.
-    assert cfg.auth.aws.profile is None
     assert cfg.auth.oidc is None
     assert cfg.app2.tls is None
     assert cfg.audit.signing is None
@@ -70,19 +71,14 @@ def test_extends_deep_merges_child_over_parent(tmp_path: Path) -> None:
 extends: [./base.yaml]
 aws:
   deployment_name: prod-deploy
-  qs_disable_pg_ssl: true
 db:
   app2_pool_size: 30
 """
     p = _write(tmp_path, "overlay.yaml", overlay)
     cfg = load_config(p)
-    # Inherited from base
-    assert cfg.aws.account_id == "123456789012"
-    assert cfg.aws.region == "us-east-1"
     # Overlaid by child
     assert cfg.aws.deployment_name == "prod-deploy"
-    assert cfg.aws.qs_disable_pg_ssl is True
-    # db.url inherited; app2_pool_size overlaid
+    # db.url inherited from base; app2_pool_size overlaid by child
     assert cfg.db.url == "postgresql://u:p@h:5432/d"
     assert cfg.db.app2_pool_size == 30
     # Derived from the *merged* deployment_name
@@ -123,77 +119,6 @@ auth:
 """
     p = _write(tmp_path, "legacy.yaml", legacy)
     with pytest.raises(LegacyFieldError, match="auth.aws_profile.*auth.aws.profile"):
-        load_config(p)
-
-
-def test_missing_required_field_raises(tmp_path: Path) -> None:
-    """Missing ``aws.account_id`` raises ``MissingFieldError``."""
-    incomplete = """\
-aws:
-  region: us-east-1
-  deployment_name: test
-db:
-  dialect: postgres
-  url: postgresql://u:p@h:5432/d
-"""
-    p = _write(tmp_path, "incomplete.yaml", incomplete)
-    with pytest.raises(MissingFieldError, match="aws.account_id"):
-        load_config(p)
-
-
-def test_datasource_mode_defaults_to_create(tmp_path: Path) -> None:
-    """``aws.datasource`` block absent ⇒ mode=create. DE.5 — when
-    mode=create + db.url is set, the loader auto-derives the arn
-    (matches pre-DE Config.__post_init__ behavior so deploy emitters
-    get a synthesized ARN without per-callsite logic)."""
-    p = _write(tmp_path, "cfg.yaml", _MIN_CFG)
-    cfg = load_config(p)
-    assert cfg.aws.datasource.mode == "create"
-    # Auto-derived: arn:aws:quicksight:<region>:<account>:datasource/<prefix>-demo-datasource
-    assert cfg.aws.datasource.arn == (
-        "arn:aws:quicksight:us-east-1:123456789012:datasource/test-deploy-demo-datasource"
-    )
-
-
-def test_datasource_mode_adopt_requires_arn(tmp_path: Path) -> None:
-    """``aws.datasource.mode=adopt`` without arn raises
-    ``MissingFieldError``."""
-    cfg_text = _MIN_CFG + """\
-  datasource:
-    mode: adopt
-"""
-    # Inject under aws: block by replacing the block close
-    cfg_text = _MIN_CFG.replace(
-        "deployment_name: test-deploy\n",
-        "deployment_name: test-deploy\n  datasource:\n    mode: adopt\n",
-    )
-    p = _write(tmp_path, "cfg.yaml", cfg_text)
-    with pytest.raises(MissingFieldError, match="aws.datasource.arn"):
-        load_config(p)
-
-
-def test_datasource_mode_skip_is_accepted(tmp_path: Path) -> None:
-    """``aws.datasource.mode=skip`` (the test-mode escape per DE.0
-    operator comment) loads cleanly + carries the enum value."""
-    cfg_text = _MIN_CFG.replace(
-        "deployment_name: test-deploy\n",
-        "deployment_name: test-deploy\n  datasource:\n    mode: skip\n",
-    )
-    p = _write(tmp_path, "cfg.yaml", cfg_text)
-    cfg = load_config(p)
-    assert cfg.aws.datasource.mode == "skip"
-    assert cfg.aws.datasource.arn is None
-
-
-def test_invalid_datasource_mode_raises(tmp_path: Path) -> None:
-    """Unknown mode value raises ``CfgError``."""
-    from recon_gen.common.config import CfgError
-    cfg_text = _MIN_CFG.replace(
-        "deployment_name: test-deploy\n",
-        "deployment_name: test-deploy\n  datasource:\n    mode: nonsense\n",
-    )
-    p = _write(tmp_path, "cfg.yaml", cfg_text)
-    with pytest.raises(CfgError, match="datasource.mode"):
         load_config(p)
 
 
@@ -314,72 +239,9 @@ def test_explicit_table_prefix_overrides_derived(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# DE.1 sub-B — QS user ARN lazy resolver (no-boto paths)
-# ---------------------------------------------------------------------------
-
-
-def test_partition_defaults_to_commercial_aws(tmp_path: Path) -> None:
-    """No principal_arns + no datasource.arn ⇒ ``aws`` (commercial).
-    Preserves pre-DE behavior for fuzz fixtures that don't carry
-    AWS-side identity material."""
-    p = _write(tmp_path, "cfg.yaml", _MIN_CFG)
-    cfg = load_config(p)
-    assert cfg.aws.partition == "aws"
-
-
-def test_partition_derives_govcloud_from_principal_arn(tmp_path: Path) -> None:
-    """First ``arn:aws-us-gov:``-prefixed principal ARN ⇒ govcloud.
-    Covers the customer-supplied role/user case where region is
-    operator-set + matches partition."""
-    cfg_text = _MIN_CFG.replace(
-        "deployment_name: test-deploy\n",
-        "deployment_name: test-deploy\n"
-        "  principal_arns:\n"
-        "    - arn:aws-us-gov:iam::123456789012:role/RegOpsAdmin\n",
-    )
-    p = _write(tmp_path, "cfg.yaml", cfg_text)
-    cfg = load_config(p)
-    assert cfg.aws.partition == "aws-us-gov"
-
-
-def test_partition_derives_china_from_adopted_datasource_arn(tmp_path: Path) -> None:
-    """Explicit ``aws.datasource.arn`` (mode=adopt) wins over
-    principal_arns — covers the pre-provisioned-datasource case where
-    the operator's pinned ARN is authoritative."""
-    cfg_text = _MIN_CFG.replace(
-        "deployment_name: test-deploy\n",
-        "deployment_name: test-deploy\n"
-        "  principal_arns:\n"
-        "    - arn:aws:iam::123456789012:role/SomeAdmin\n"
-        "  datasource:\n"
-        "    mode: adopt\n"
-        "    arn: arn:aws-cn:quicksight:cn-north-1:123456789012:datasource/preexisting\n",
-    )
-    p = _write(tmp_path, "cfg.yaml", cfg_text)
-    cfg = load_config(p)
-    # datasource.arn wins (preserves pre-DE precedence: explicit
-    # account-bound ARN beats principal_arns).
-    assert cfg.aws.partition == "aws-cn"
-
-
-# ---------------------------------------------------------------------------
 # DE.5.config_v14_consolidation.C — env-var overrides + run/*.yaml smoke
 # (absorbed from the retired tests/unit/test_config_loader.py)
 # ---------------------------------------------------------------------------
-
-
-def test_env_var_overrides_aws_account_id(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """``RECON_GEN_AWS_ACCOUNT_ID`` overrides the yaml's ``aws.account_id``.
-
-    The runner injects per-cell env vars to point a single cfg.yaml at
-    multiple test cells without rewriting the file.
-    """
-    monkeypatch.setenv("RECON_GEN_AWS_ACCOUNT_ID", "999999999999")  # typing-smell: ignore[envvar-bypass]: cfg-loader env-var contract
-    p = _write(tmp_path, "cfg.yaml", _MIN_CFG)
-    cfg = load_config(p)
-    assert cfg.aws.account_id == "999999999999"
 
 
 def test_env_var_overrides_demo_database_url(
@@ -403,41 +265,6 @@ def test_env_var_overrides_dialect(
     p = _write(tmp_path, "cfg.yaml", _MIN_CFG)
     cfg = load_config(p)
     assert cfg.db.dialect is Dialect.DUCKDB
-
-
-def test_env_var_overrides_datasource_arn(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """``RECON_GEN_DATASOURCE_ARN`` flips ``aws.datasource`` to mode=adopt
-    + sets the arn. Lets the runner point at a pre-existing QS datasource
-    without rewriting the cfg yaml."""
-    monkeypatch.setenv(  # typing-smell: ignore[envvar-bypass]: cfg-loader env-var contract
-        "RECON_GEN_DATASOURCE_ARN",
-        "arn:aws:quicksight:us-east-1:123456789012:datasource/preexisting",
-    )
-    p = _write(tmp_path, "cfg.yaml", _MIN_CFG)
-    cfg = load_config(p)
-    assert cfg.aws.datasource.mode == "adopt"
-    assert (
-        cfg.aws.datasource.arn
-        == "arn:aws:quicksight:us-east-1:123456789012:datasource/preexisting"
-    )
-
-
-def test_env_var_overrides_principal_arns(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """``RECON_GEN_PRINCIPAL_ARNS`` (comma-separated) overrides the yaml's
-    ``aws.principal_arns`` list."""
-    monkeypatch.setenv(  # typing-smell: ignore[envvar-bypass]: cfg-loader env-var contract
-        "RECON_GEN_PRINCIPAL_ARNS",
-        "arn:aws:iam::1:user/a, arn:aws:iam::1:user/b",
-    )
-    p = _write(tmp_path, "cfg.yaml", _MIN_CFG)
-    cfg = load_config(p)
-    assert cfg.aws.principal_arns == (
-        "arn:aws:iam::1:user/a", "arn:aws:iam::1:user/b",
-    )
 
 
 def test_env_var_app2_pool_size_int_coercion(
@@ -502,8 +329,6 @@ def test_write_yaml_round_trips_minimal_cfg(tmp_path: Path) -> None:
     out_path = tmp_path / "out.yaml"
     cfg.write_yaml(out_path)
     cfg2 = load_config(out_path)
-    assert cfg2.aws.account_id == cfg.aws.account_id
-    assert cfg2.aws.region == cfg.aws.region
     assert cfg2.aws.deployment_name == cfg.aws.deployment_name
     assert cfg2.db.dialect is cfg.db.dialect  # Enum survived through .value
     assert cfg2.db.url == cfg.db.url
@@ -524,7 +349,7 @@ def test_write_yaml_after_dataclasses_replace_mutate(tmp_path: Path) -> None:
     re_loaded = load_config(p)
     assert re_loaded.aws.deployment_name == "prod-deploy"
     # Other fields preserved.
-    assert re_loaded.aws.account_id == cfg.aws.account_id
+    assert re_loaded.db.url == cfg.db.url
     assert re_loaded.db.dialect is Dialect.POSTGRES
 
 
@@ -558,5 +383,5 @@ def test_write_yaml_to_stream(tmp_path: Path) -> None:
     buf = io.StringIO()
     cfg.write_yaml(buf)
     rendered = buf.getvalue()
-    assert "account_id: '123456789012'" in rendered
+    assert "deployment_name: test-deploy" in rendered
     assert "dialect: postgres" in rendered

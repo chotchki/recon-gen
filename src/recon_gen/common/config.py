@@ -51,54 +51,18 @@ from recon_gen.common.sql import Dialect
 
 
 @dataclass(frozen=True)
-class DatasourceConfig:
-    """``cfg.aws.datasource`` per DE.0 lock — explicit mode enum replaces
-    the implicit dispatch on ``datasource_arn`` presence."""
-    mode: Literal["create", "adopt", "skip"]
-    arn: str | None
-
-
-@dataclass(frozen=True)
 class AwsConfig:
-    """``cfg.aws.*`` — AWS deploy / QS deploy / cleanup fields.
-    Carries the ARN-synthesis helpers that depend solely on AWS fields
-    (partition, account_id, region, deployment_name).
+    """``cfg.aws.*`` — the residual deployment-namespace surface.
 
-    DE.5 — every field has a default so partial construction
-    (``AwsConfig(account_id=X)``) is legal during the strangler
-    period. ``Config.__post_init__`` blends partial AwsConfigs the
-    caller supplies with the legacy flat fields that are still
-    backing the remaining attrs."""
-    account_id: str = ""
-    region: str = ""
+    QuickSight + the AWS deploy path were removed in Phase DW. All that
+    survives is ``deployment_name``, which ``prefixed()`` weaves into
+    analysis / dashboard resource IDs so co-tenanted deploys (distinct
+    cfg.yaml ``deployment_name`` values) don't collide. The recon-prefix
+    lint enforces that every resource ID flows through ``prefixed()``.
+    (The account/region/datasource/partition ARN-synthesis machinery
+    went with QuickSight — there are no AWS resources to name anymore.)
+    """
     deployment_name: str = ""
-    principal_arns: tuple[str, ...] = ()
-    extra_tags: tuple[tuple[str, str], ...] = ()
-    tagging_enabled: bool = True
-    qs_disable_pg_ssl: bool = False
-    pg_cluster_id: str | None = None
-    oracle_instance_id: str | None = None
-    datasource: DatasourceConfig = field(
-        default_factory=lambda: DatasourceConfig(mode="create", arn=None),
-    )
-
-    @property
-    def partition(self) -> str:
-        """AWS partition for synthesized ARNs.
-
-        Commercial AWS = ``aws``; GovCloud = ``aws-us-gov``;
-        China = ``aws-cn``. Resolution order: ``datasource.arn`` first,
-        else first ``arn:``-prefixed ``principal_arns`` entry, else
-        default ``aws``. Mirrors the pre-DE ``Config.partition``
-        property.
-        """
-        sources: list[str | None] = [self.datasource.arn, *self.principal_arns]
-        for source in sources:
-            if source and source.startswith("arn:"):
-                parts = source.split(":", 2)
-                if len(parts) >= 2 and parts[1]:
-                    return parts[1]
-        return "aws"
 
     def prefixed(self, name: str) -> str:
         """Return a resource ID with the configured deployment prefix.
@@ -108,18 +72,6 @@ class AwsConfig:
         set explicitly in cfg.yaml (no default).
         """
         return f"{self.deployment_name}-{name}"
-
-    def dataset_arn(self, dataset_id: str) -> str:
-        return (
-            f"arn:{self.partition}:quicksight:{self.region}"
-            f":{self.account_id}:dataset/{dataset_id}"
-        )
-
-    def theme_arn(self, theme_id: str) -> str:
-        return (
-            f"arn:{self.partition}:quicksight:{self.region}"
-            f":{self.account_id}:theme/{theme_id}"
-        )
 
 
 @dataclass(frozen=True)
@@ -185,14 +137,6 @@ class TestConfig:
     )
 
 
-@dataclass(frozen=True)
-class AuthAwsConfig:
-    """``cfg.auth.aws.*`` — AWS-side auth. DE.5 step 21 — promoted to
-    real field with defaults so partial construction is legal."""
-    profile: str | None = None
-    quicksight_user_arn: str | None = None
-
-
 # DE.4 — phase DC + DD cfg block carriers (OIDC + JWT session + TLS).
 
 
@@ -239,33 +183,14 @@ class App2TlsConfig:
 
 @dataclass(frozen=True)
 class AuthConfig:
-    """Local-runner AWS auth + QS embed-signing identity.
+    """App2's own user-login auth (AWS-independent).
 
-    Combined h+i.0 spike (2026-05-08, `docs/audits/y_2_gate_h_i_combined_spike.md`):
-    long-lived IAM access keys for a dedicated `recon-gen-local` user,
-    referenced from `~/.aws/credentials` via a named profile. Eliminates the
-    AWS-SSO-cache-miss browser flow that broke multi-hour Claude-loop sessions.
-    Cfg yaml carries only the profile name; the keys themselves stay in
-    `~/.aws/credentials` (out of even gitignored cfg files, standard AWS
-    pattern).
-
-    `aws_profile` — name of a profile in `~/.aws/credentials`. Runner injects
-    `AWS_PROFILE=<value>` into every subprocess it spawns. None = ambient
-    AWS env (env vars / default profile / SSO cache).
-
-    `quicksight_user_arn` — explicit override for `_derive_qs_user_arn`'s
-    auto-derivation. None = derive via `sts:GetCallerIdentity` + match on
-    `quicksight:ListUsers`'s `PrincipalId == "federated/iam/<UserId>"`. Set
-    explicitly when authed as a principal that doesn't match the desired
-    QS embed user (e.g., local-root authed but want test-user; CI's per-job
-    cfg with the secret value baked in).
-
-    `oidc` / `session` — Phase DD's OIDC + JWT session blocks. Loader
-    populates these when ``auth.oidc:`` / ``auth.session:`` blocks
-    appear in the cfg yaml.
+    `oidc` / `session` — Phase DD's OIDC + JWT session blocks for App2's
+    Dex-backed login. The loader populates these when ``auth.oidc:`` /
+    ``auth.session:`` blocks appear in the cfg yaml. (The QS-embed
+    STS-signing half — ``auth.aws`` profile + quicksight_user_arn — was
+    removed in Phase DW along with QuickSight.)
     """
-    # DE.5 step 21 — aws_profile + quicksight_user_arn moved to aws.{profile, quicksight_user_arn}.
-    aws: AuthAwsConfig = field(default_factory=AuthAwsConfig)
     oidc: OidcConfig | None = None
     session: SessionConfig | None = None
 
@@ -456,19 +381,6 @@ class TestGeneratorConfig:
         return AsOfFrame.live(window_days=window_days)
 
 
-def _partition_from_arns(
-    datasource_arn: str | None, principal_arns: list[str],
-) -> str:
-    """Resolve AWS partition string from any available ARN.
-    See ``AwsConfig.partition`` for the resolution rationale."""
-    for source in (datasource_arn, *principal_arns):
-        if source and source.startswith("arn:"):
-            parts = source.split(":", 2)
-            if len(parts) >= 2 and parts[1]:
-                return parts[1]
-    return "aws"
-
-
 # ---------------------------------------------------------------------------
 # DE.5 — v14 nested-yaml loader. Errors / legacy-key map / build helpers
 # + ``load_config`` reading the concern-grouped shape.
@@ -639,61 +551,19 @@ def _resolve_dialect_nested(value: Any) -> Dialect:  # typing-smell: ignore[expl
 def _build_aws_nested(raw: dict[str, Any], path: Path) -> AwsConfig:  # typing-smell: ignore[explicit-any]: heterogeneous YAML payload
     block_raw = raw.get("aws")
     if not isinstance(block_raw, dict):
-        # DV.5 — the aws: block is OPTIONAL. A cfg with no AWS keys is valid
-        # for every non-QuickSight surface (dashboards / studio / audit /
-        # schema / data / docs / json emit). The QS deploy / clean / probe
-        # verbs validate aws.account_id / region / deployment_name at
-        # invocation (cli/json.py::_require_quicksight) and fail there with a
-        # set-the-aws-cfg hint.
+        # The aws: block is OPTIONAL. Post-DW the only field it carries is
+        # ``deployment_name`` (the resource-ID namespace); a cfg with no
+        # aws: block gets the empty default. Any leftover QS/AWS keys
+        # (account_id / region / datasource / …) are ignored — they name
+        # nothing now that QuickSight is gone.
+        del path
         return AwsConfig()
     block = cast(dict[str, Any], block_raw)
-    for key in ("account_id", "region", "deployment_name"):
-        if key not in block:
-            raise MissingFieldError(
-                f"{path}: required field 'aws.{key}' is absent"
-            )
-    ds_block_raw = block.get("datasource", {})
-    if not isinstance(ds_block_raw, dict):
-        raise CfgError(f"{path}: 'aws.datasource' must be a mapping")
-    ds_block = cast(dict[str, Any], ds_block_raw)
-    ds_mode_val = ds_block.get("mode", "create")
-    if ds_mode_val not in ("create", "adopt", "skip"):
-        raise CfgError(
-            f"{path}: aws.datasource.mode must be one of "
-            f"['create', 'adopt', 'skip'], got {ds_mode_val!r}"
-        )
-    ds_arn = ds_block.get("arn")
-    if ds_mode_val == "adopt" and not ds_arn:
+    if "deployment_name" not in block:
         raise MissingFieldError(
-            f"{path}: aws.datasource.mode='adopt' requires aws.datasource.arn"
+            f"{path}: required field 'aws.deployment_name' is absent"
         )
-    extra_tags_raw = block.get("extra_tags", {})
-    if isinstance(extra_tags_raw, dict):
-        tags_typed = cast(dict[Any, Any], extra_tags_raw)
-        tags_tuple = tuple(sorted(
-            (str(k), str(v)) for k, v in tags_typed.items()
-        ))
-    else:
-        raise CfgError(f"{path}: aws.extra_tags must be a mapping")
-    principals_raw = block.get("principal_arns", [])
-    if not isinstance(principals_raw, list):
-        raise CfgError(f"{path}: aws.principal_arns must be a list")
-    principals_typed = cast(list[Any], principals_raw)
-    return AwsConfig(
-        account_id=str(block["account_id"]),
-        region=str(block["region"]),
-        deployment_name=str(block["deployment_name"]),
-        principal_arns=tuple(str(p) for p in principals_typed),
-        extra_tags=tags_tuple,
-        tagging_enabled=bool(block.get("tagging_enabled", True)),
-        qs_disable_pg_ssl=bool(block.get("qs_disable_pg_ssl", False)),
-        pg_cluster_id=block.get("pg_cluster_id"),
-        oracle_instance_id=block.get("oracle_instance_id"),
-        datasource=DatasourceConfig(
-            mode=ds_mode_val,
-            arn=ds_arn,
-        ),
-    )
+    return AwsConfig(deployment_name=str(block["deployment_name"]))
 
 
 def _build_db_nested(
@@ -732,21 +602,13 @@ def _build_auth_nested(raw: dict[str, Any], path: Path) -> "AuthConfig":  # typi
     if not isinstance(block_raw, dict):
         raise CfgError("auth must be a mapping when present")
     block = cast(dict[str, Any], block_raw)
-    _allowed_auth = {"aws", "oidc", "session"}
+    _allowed_auth = {"oidc", "session"}
     unknown = sorted(set(block) - _allowed_auth)
     if unknown:
         raise CfgError(
             f"auth block contains unknown keys: {unknown}. "
             f"Allowed: {sorted(_allowed_auth)}."
         )
-    aws_block_raw = block.get("aws", {})
-    if not isinstance(aws_block_raw, dict):
-        raise CfgError("auth.aws must be a mapping")
-    aws_block = cast(dict[str, Any], aws_block_raw)
-    aws_auth = AuthAwsConfig(
-        profile=aws_block.get("profile"),
-        quicksight_user_arn=aws_block.get("quicksight_user_arn"),
-    )
     oidc_block_raw = block.get("oidc")
     oidc: OidcConfig | None = None
     if isinstance(oidc_block_raw, dict):
@@ -782,7 +644,7 @@ def _build_auth_nested(raw: dict[str, Any], path: Path) -> "AuthConfig":  # typi
         session = SessionConfig(
             jwt_secret_env=str(session_block["jwt_secret_env"]),
         )
-    return AuthConfig(aws=aws_auth, oidc=oidc, session=session)
+    return AuthConfig(oidc=oidc, session=session)
 
 
 def _build_app2_nested(raw: dict[str, Any]) -> App2Config:  # typing-smell: ignore[explicit-any]: heterogeneous YAML payload
@@ -988,27 +850,6 @@ def _load_nested_config(path: Path) -> "Config":
     _apply_env_overrides_nested(raw)
     aws = _build_aws_nested(raw, path)
     db = _build_db_nested(raw, aws, path)
-    # Auto-derive datasource.arn when mode=create + arn is None. Mirrors
-    # the pre-DE Config.__post_init__ behavior so deploy emitters get a
-    # synthesized ARN without per-callsite logic.
-    if aws.datasource.mode == "create" and aws.datasource.arn is None:
-        ds_id = aws.prefixed("demo-datasource")
-        derived_arn = (
-            f"arn:{aws.partition}:quicksight:{aws.region}"
-            f":{aws.account_id}:datasource/{ds_id}"
-        )
-        aws = AwsConfig(
-            account_id=aws.account_id,
-            region=aws.region,
-            deployment_name=aws.deployment_name,
-            principal_arns=aws.principal_arns,
-            extra_tags=aws.extra_tags,
-            tagging_enabled=aws.tagging_enabled,
-            qs_disable_pg_ssl=aws.qs_disable_pg_ssl,
-            pg_cluster_id=aws.pg_cluster_id,
-            oracle_instance_id=aws.oracle_instance_id,
-            datasource=DatasourceConfig(mode="create", arn=derived_arn),
-        )
     return Config(
         aws=aws,
         db=db,
@@ -1203,113 +1044,27 @@ class Config:
     # DE.5 step 19 — ``cfg.test`` is now a real ``TestConfig`` field.
 
     def __post_init__(self) -> None:
-        # DE.5 steps 3+4 — account_id + region come from caller-supplied
-        # aws=AwsConfig(account_id=..., region=...).
-        if not self.aws.account_id:
-            raise ValueError(
-                "Config requires aws=AwsConfig(account_id=...). The legacy "
-                "``aws_account_id`` flat kwarg was dropped in DE.5 step 3."
-            )
-        if not self.aws.region:
-            raise ValueError(
-                "Config requires aws=AwsConfig(region=...). The legacy "
-                "``aws_region`` flat kwarg was dropped in DE.5 step 4."
-            )
+        # deployment_name is the per-deployment namespace ``prefixed()``
+        # weaves into resource IDs — required, no default. (account_id /
+        # region / datasource / partition all went with QuickSight in DW;
+        # there are no AWS resources to synthesize ARNs for anymore.)
         if not self.aws.deployment_name:
             raise ValueError(
-                "Config requires aws=AwsConfig(deployment_name=...). The legacy "
-                "``deployment_name`` flat kwarg was dropped in DE.5 step 5."
+                "Config requires aws=AwsConfig(deployment_name=...) — the "
+                "per-deployment resource-ID namespace."
             )
-        account_id = self.aws.account_id
-        region = self.aws.region
-        deployment_name = self.aws.deployment_name
-        # DE.5 step 6 — derive datasource arn into self.aws.datasource
-        # when caller-supplied AwsConfig left arn=None + demo_database_url
-        # is set. mode=create when we own it; mode=adopt when operator
-        # provided the arn explicitly.
-        ds_arn = self.aws.datasource.arn
-        ds_mode = self.aws.datasource.mode
-        # DE.5 step 7 — principal_arns now from caller-supplied aws.principal_arns.
-        principal_arns_list = list(self.aws.principal_arns)
-        # DE.5.config_v14_consolidation — auto-derive only when mode=create;
-        # mode=skip means "don't touch the QS datasource API at all" so an arn
-        # is not required + clobbering to mode=create would defeat the escape.
-        # mode=adopt requires the operator to supply the arn explicitly (the
-        # loader's _build_aws_nested raises if absent).
-        if (
-            ds_mode == "create"
-            and ds_arn is None
-            and self.db.url is not None
-        ):
-            ds_id = f"{deployment_name}-demo-datasource"
-            partition = _partition_from_arns(ds_arn, principal_arns_list)
-            ds_arn = (
-                f"arn:{partition}:quicksight:{region}"
-                f":{account_id}:datasource/{ds_id}"
-            )
-            ds_mode = "create"
-        if ds_arn is None and ds_mode != "skip":
-            raise ValueError(
-                "aws.datasource.arn is required unless demo_database_url is "
-                "set OR aws.datasource.mode='skip'."
-            )
-        # DE.5 — blend caller-supplied ``aws`` fields with remaining flats.
-        # DE.5 steps 8-11 — extra_tags / tagging_enabled / qs_disable_pg_ssl /
-        # pg_cluster_id / oracle_instance_id all from caller-supplied aws.*.
-        self.aws = AwsConfig(
-            account_id=account_id,
-            region=region,
-            deployment_name=deployment_name,
-            principal_arns=tuple(principal_arns_list),
-            extra_tags=self.aws.extra_tags,
-            tagging_enabled=self.aws.tagging_enabled,
-            qs_disable_pg_ssl=self.aws.qs_disable_pg_ssl,
-            pg_cluster_id=self.aws.pg_cluster_id,
-            oracle_instance_id=self.aws.oracle_instance_id,
-            datasource=DatasourceConfig(mode=ds_mode, arn=ds_arn),
-        )
-        # DE.5 steps 12-16 — DB-block flats dropped. cfg.db is now
-        # caller-supplied (loader or test helper); table_prefix is
-        # required (loud-fail when empty).
+        # cfg.db is caller-supplied (loader or test helper); table_prefix
+        # is required (loud-fail when empty).
         if not self.db.table_prefix:
             raise ValueError(
                 "Config requires db=DbConfig(table_prefix=...). The legacy "
                 "``db_table_prefix`` flat kwarg was dropped in DE.5 step 12."
             )
 
-    @property
-    def partition(self) -> str:
-        """AWS partition for synthesized ARNs.
-
-        Standard commercial AWS = ``aws``; GovCloud = ``aws-us-gov``;
-        China = ``aws-cn``. Hardcoding ``aws`` breaks deploys against
-        GovCloud / China where every account-bound resource ARN must
-        carry the matching partition or QS rejects the binding.
-
-        Resolution order:
-
-        1. If ``datasource_arn`` is set explicitly (the customer
-           supplied a pre-existing datasource), parse partition from
-           it — that's the authoritative shape for THIS account.
-        2. Else if ``principal_arns`` is non-empty, parse from the
-           first principal ARN — the customer's user/role is in the
-           same partition as the resources we're about to synthesize.
-        3. Else default ``aws`` (commercial; preserves prior behavior
-           for the spec_example / fuzz fixtures that don't carry a
-           principal).
-
-        Bare strings (no ``arn:`` prefix) fall through to the default.
-        """
-        for source in (self.aws.datasource.arn, *self.aws.principal_arns):
-            if source and source.startswith("arn:"):
-                parts = source.split(":", 2)
-                if len(parts) >= 2 and parts[1]:
-                    return parts[1]
-        return "aws"
-
-    # DE.5 step 5 — legacy Config.tags() / .dataset_arn(id) /
-    # .theme_arn(id) / .prefixed(name) methods dropped. All callers were
-    # swept to cfg.aws.X by DE.2; those are real methods on AwsConfig.
+    # DW dead-config sweep — Config.partition + the ARN-synthesis machinery
+    # (dataset_arn / theme_arn / datasource derivation) went with QuickSight;
+    # there are no AWS resources to name. The only surviving cfg.aws surface
+    # is deployment_name + prefixed() (resource-ID namespacing on the tree).
 
     def to_yaml_dict(self) -> dict[str, Any]:  # typing-smell: ignore[explicit-any]: heterogeneous YAML payload — every value is something safe_dump can write
         """Return a dict ``yaml.safe_dump`` can write that

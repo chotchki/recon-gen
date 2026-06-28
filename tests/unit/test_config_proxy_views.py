@@ -1,14 +1,14 @@
-"""DE.2 commit A — proxy view properties on legacy ``Config``.
+"""DE.2 commit A — proxy view properties on ``Config``.
 
-Pins that ``cfg.aws.X`` / ``cfg.db.X`` / ``cfg.app2.X`` / ``cfg.audit.X``
-/ ``cfg.test.X`` / ``cfg.auth.aws.X`` read the same values as their
-flat-field counterparts. Sweep commits B-E migrate callsites from
-flat to nested; this test guards the bridge.
+Pins that ``cfg.db.X`` / ``cfg.app2.X`` / ``cfg.audit.X`` / ``cfg.test.X``
+read the concern-grouped nested shape locked in DE.0.
 
-Methods on ``_AwsView`` (``partition`` / ``prefixed`` / ``dataset_arn``
-/ ``theme_arn``) are pinned here too — the legacy ``Config.<method>``
-shape used to live on Config; sweep moves callers to ``cfg.aws.<method>``.
-(``tags()`` died with the QuickSight emit graph in DW.8.1.c.)
+The AWS-side surface collapsed in the dead-config sweep: ``AwsConfig``
+keeps only ``deployment_name`` + ``prefixed()``, so the ARN-synthesis
+proxies (``partition`` / ``dataset_arn`` / ``theme_arn`` / ``datasource``)
+and the ``auth.aws`` profile/quicksight_user_arn proxies went with
+QuickSight. Only ``cfg.aws.prefixed()`` survives here. (``tags()`` died
+with the QuickSight emit graph in DW.8.1.c.)
 """
 
 from __future__ import annotations
@@ -18,7 +18,6 @@ from datetime import date
 import pytest
 
 from recon_gen.common.config import (
-    AuthConfig,
     AwsConfig,
     Config,
     SigningConfig,
@@ -28,41 +27,17 @@ from recon_gen.common.sql import Dialect
 
 
 def _make_cfg(**overrides: object) -> Config:
-    """Build a minimal-but-complete legacy ``Config`` for proxy tests."""
-    # DE.5 steps 3-7 — aws_account_id / aws_region / deployment_name /
-    # datasource_arn / principal_arns moved into nested aws=AwsConfig(...).
-    from recon_gen.common.config import DatasourceConfig  # noqa: PLC0415
-    datasource_arn_raw = overrides.pop("datasource_arn", None)
-    datasource_arn: str | None = (
-        str(datasource_arn_raw) if datasource_arn_raw else None
-    )
-    principal_arns_raw = overrides.pop(  # noqa: PLC0415
-        "principal_arns",
-        ["arn:aws:iam::123456789012:role/TestRole"],
-    )
-    # Narrow object → iterable[str] for AwsConfig.principal_arns
-    if not isinstance(principal_arns_raw, (list, tuple)):
-        raise TypeError(f"principal_arns must be list/tuple; got {type(principal_arns_raw).__name__}")
-    extra_tags_raw = overrides.pop("extra_tags", {})
-    if not isinstance(extra_tags_raw, dict):
-        raise TypeError(f"extra_tags must be dict; got {type(extra_tags_raw).__name__}")
-    tagging_enabled_raw = overrides.pop("tagging_enabled", True)
-    if not isinstance(tagging_enabled_raw, bool):
-        raise TypeError(f"tagging_enabled must be bool; got {type(tagging_enabled_raw).__name__}")
-    aws_kwargs: dict[str, object] = {
-        "account_id": overrides.pop("aws_account_id", "123456789012"),
-        "region": overrides.pop("aws_region", "us-east-1"),
-        "deployment_name": overrides.pop("deployment_name", "test-deploy"),
-        "principal_arns": tuple(str(p) for p in principal_arns_raw),  # type: ignore[union-attr]: isinstance check above narrows; str() per-element handles whatever the test passed
-        "extra_tags": tuple(sorted(
-            (str(k), str(v)) for k, v in extra_tags_raw.items()  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]: isinstance check above narrows
-        )),
-        "tagging_enabled": tagging_enabled_raw,
-        "datasource": DatasourceConfig(
-            mode=("adopt" if datasource_arn else "create"),
-            arn=datasource_arn,
-        ),
-    }
+    """Build a minimal-but-complete ``Config`` for proxy tests."""
+    # Post-DW dead-config sweep: ``AwsConfig`` keeps only
+    # ``deployment_name``. The legacy aws_* / datasource / principal /
+    # tag kwargs are accepted-and-ignored so the helper's call surface
+    # stays stable across the callers that still pass them.
+    for _dead in (
+        "aws_account_id", "aws_region", "datasource_arn",
+        "principal_arns", "extra_tags", "tagging_enabled",
+    ):
+        overrides.pop(_dead, None)
+    deployment_name = overrides.pop("deployment_name", "test-deploy")
     from recon_gen.common.config import App2Config as _App2Config  # noqa: PLC0415
     from recon_gen.common.config import AuditConfig as _AuditConfig  # noqa: PLC0415
     from recon_gen.common.config import DbConfig as _DbConfig  # noqa: PLC0415
@@ -84,7 +59,7 @@ def _make_cfg(**overrides: object) -> Config:
         else _TestGeneratorConfig()
     )
     defaults: dict[str, object] = {
-        "aws": AwsConfig(**aws_kwargs),  # pyright: ignore[reportArgumentType]: dict[str, object] kwarg surface
+        "aws": AwsConfig(deployment_name=str(deployment_name)),
         "db": _DbConfig(
             table_prefix="test_deploy",
             url="postgresql://u:p@h:5432/d",
@@ -106,78 +81,10 @@ def _make_cfg(**overrides: object) -> Config:
 # ---------------------------------------------------------------------------
 
 
-def test_aws_view_carries_flat_fields() -> None:
-    """Proxy reads underlying flat fields. RHS uses the LEGACY field
-    names so this test catches a bridge-break (e.g., if cfg.aws.region
-    accidentally reads cfg.aws.deployment_name)."""
-    cfg = _make_cfg()
-    assert cfg.aws.account_id == cfg.aws.account_id  # type: ignore[attr-defined]: legacy flat field; surviving through DE.5 collapse
-    assert cfg.aws.region == cfg.aws.region  # type: ignore[attr-defined]: legacy flat field surviving through DE.5 collapse
-    assert cfg.aws.deployment_name == cfg.aws.deployment_name  # type: ignore[attr-defined]: legacy flat field surviving through DE.5 collapse
-    assert cfg.aws.principal_arns == ("arn:aws:iam::123456789012:role/TestRole",)
-
-
-def test_aws_view_partition_commercial_default() -> None:
-    cfg = _make_cfg(principal_arns=[])
-    assert cfg.aws.partition == "aws"
-
-
-def test_aws_view_partition_govcloud_from_principal() -> None:
-    cfg = _make_cfg(
-        principal_arns=["arn:aws-us-gov:iam::123456789012:role/RegOpsAdmin"],
-    )
-    assert cfg.aws.partition == "aws-us-gov"
-
-
-def test_aws_view_partition_china_from_datasource_arn() -> None:
-    cfg = _make_cfg(
-        datasource_arn="arn:aws-cn:quicksight:cn-north-1:123456789012:datasource/preexisting",
-    )
-    assert cfg.aws.partition == "aws-cn"
-
-
 def test_aws_view_prefixed_returns_deployment_prefix() -> None:
     cfg = _make_cfg(deployment_name="prod-deploy")
     assert cfg.aws.prefixed("foo") == "prod-deploy-foo"
     assert cfg.aws.prefixed("demo-datasource") == "prod-deploy-demo-datasource"
-
-
-def test_aws_view_dataset_arn_synthesizes_with_partition() -> None:
-    cfg = _make_cfg(
-        principal_arns=["arn:aws-us-gov:iam::123456789012:role/Op"],
-        aws_region="us-gov-east-1",
-    )
-    arn = cfg.aws.dataset_arn("my-dataset")
-    assert arn == "arn:aws-us-gov:quicksight:us-gov-east-1:123456789012:dataset/my-dataset"
-
-
-def test_aws_view_theme_arn_synthesizes_with_partition() -> None:
-    cfg = _make_cfg()
-    arn = cfg.aws.theme_arn("my-theme")
-    assert arn == "arn:aws:quicksight:us-east-1:123456789012:theme/my-theme"
-
-
-def test_aws_view_datasource_mode_adopt_when_arn_set() -> None:
-    """Legacy presence-of-arn dispatch maps to ``mode=adopt``."""
-    cfg = _make_cfg(
-        datasource_arn="arn:aws:quicksight:us-east-1:123456789012:datasource/preexisting",
-    )
-    assert cfg.aws.datasource.mode == "adopt"
-    assert cfg.aws.datasource.arn.endswith("preexisting")  # pyright: ignore[reportOptionalMemberAccess]: asserted not-None by datasource_arn present at construction
-
-
-def test_aws_view_datasource_mode_create_when_arn_derived() -> None:
-    """No explicit datasource_arn ⇒ Config.__post_init__ derives one;
-    proxy sees mode=adopt because the field is now set. (Mode=create
-    only when no arn was ever produced — pre-derive state; in practice
-    every loaded cfg has a derived arn.) Pins the legacy semantic."""
-    cfg = _make_cfg(datasource_arn=None)
-    # After __post_init__ derive, datasource_arn IS populated. Proxy
-    # reflects the live state — adopt-after-derive matches today's
-    # legacy code which uses `datasource_arn_was_derived` as the
-    # discriminator; DE.4 wires the v14 mode=create path explicitly.
-    assert cfg.aws.datasource.arn is not None
-    assert cfg.aws.datasource.mode == "create"
 
 
 # ---------------------------------------------------------------------------
@@ -328,33 +235,3 @@ def test_test_view_as_of_frame_window_days_widens_interval() -> None:
     # 7-day window ending at anchor — interval spans 8 calendar days
     # (inclusive); the as_of stays pinned at end_date.
     assert frame.as_of == date(2026, 3, 15)
-
-
-# ---------------------------------------------------------------------------
-# cfg.auth.aws
-# ---------------------------------------------------------------------------
-
-
-def test_auth_view_default_when_block_absent() -> None:
-    """No auth: block in cfg ⇒ cfg.auth is the empty AuthConfig
-    (DE.2 commit A made auth default-factory). cfg.auth.aws.profile
-    is None without None-checking cfg.auth."""
-    cfg = _make_cfg()
-    assert cfg.auth.aws.profile is None
-    assert cfg.auth.aws.quicksight_user_arn is None
-
-
-def test_auth_view_carries_profile_when_set() -> None:
-    from recon_gen.common.config import AuthAwsConfig  # noqa: PLC0415
-    cfg = _make_cfg(
-        auth=AuthConfig(
-            aws=AuthAwsConfig(
-                profile="recon-gen-local",
-                quicksight_user_arn="arn:aws:quicksight:us-east-1:123:user/default/test",
-            ),
-        ),
-    )
-    assert cfg.auth.aws.profile == "recon-gen-local"
-    assert cfg.auth.aws.quicksight_user_arn == (
-        "arn:aws:quicksight:us-east-1:123:user/default/test"
-    )

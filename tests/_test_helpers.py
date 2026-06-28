@@ -8,7 +8,7 @@ shapes but resolve to nothing.
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any
 
 from recon_gen.common.config import Config
 
@@ -52,26 +52,6 @@ def fetch_scalar(
     """
     return fetch_one(conn_or_cursor, sql, params)[0]
 
-_TEST_ACCOUNT = "111122223333"
-_TEST_REGION = "us-west-2"
-_TEST_DATASOURCE_ARN = (
-    f"arn:aws:quicksight:{_TEST_REGION}:{_TEST_ACCOUNT}:datasource/test-ds"
-)
-
-
-def _normalize_extra_tags(raw: Any) -> tuple[tuple[str, str], ...]:
-    """Translate legacy ``extra_tags={"k": "v"}`` dict kwarg to the
-    ``AwsConfig.extra_tags`` tuple-of-pairs shape."""
-    if isinstance(raw, dict):
-        items = cast(dict[str, str], raw).items()
-        return tuple(sorted(items))
-    if isinstance(raw, (list, tuple)):
-        items_list = cast(list[tuple[str, str]] | tuple[tuple[str, str], ...], raw)
-        return tuple(items_list)
-    raise TypeError(
-        f"extra_tags must be dict / list / tuple; got {type(raw).__name__}"
-    )
-
 
 def make_test_config(**overrides: Any) -> Config:
     """Return a Config preloaded with the canonical placeholder values.
@@ -100,20 +80,20 @@ def make_test_config(**overrides: Any) -> Config:
     AND its flattened fields raises ``TypeError`` (avoids ambiguity).
     """
     from recon_gen.common.config import (  # noqa: PLC0415
-        App2Config, AuditConfig, AwsConfig, DatasourceConfig, DbConfig,
+        App2Config, AuditConfig, AwsConfig, DbConfig,
         Dialect, TestConfig, TestGeneratorConfig,
     )
-    # AwsConfig fields
-    account_id = overrides.pop("aws_account_id", _TEST_ACCOUNT)
-    region = overrides.pop("aws_region", _TEST_REGION)
+    # AwsConfig — only ``deployment_name`` survives post-DW. The legacy
+    # aws_* kwargs (account_id / region / datasource / principal_arns /
+    # tags / cluster ids) are accepted-and-ignored so existing callers
+    # don't break; they name nothing now that QuickSight is gone.
     deployment_name = overrides.pop("aws_deployment_name", "recon-test")
-    datasource_arn = overrides.pop("aws_datasource_arn", None)
-    principal_arns = overrides.pop("aws_principal_arns", ())
-    extra_tags_raw = overrides.pop("aws_extra_tags", {})
-    tagging_enabled = overrides.pop("aws_tagging_enabled", True)
-    qs_disable_pg_ssl = overrides.pop("aws_qs_disable_pg_ssl", False)
-    aws_pg_cluster_id = overrides.pop("aws_pg_cluster_id", None)
-    aws_oracle_instance_id = overrides.pop("aws_oracle_instance_id", None)
+    for _dead_aws_kwarg in (
+        "aws_account_id", "aws_region", "aws_datasource_arn",
+        "aws_principal_arns", "aws_extra_tags", "aws_tagging_enabled",
+        "aws_qs_disable_pg_ssl", "aws_pg_cluster_id", "aws_oracle_instance_id",
+    ):
+        overrides.pop(_dead_aws_kwarg, None)
     # DbConfig fields
     db_table_prefix = overrides.pop("db_table_prefix", "test")
     db_url = overrides.pop("db_url", None)
@@ -130,30 +110,9 @@ def make_test_config(**overrides: Any) -> Config:
     test_generator = overrides.pop("test_generator", None)
     if test_generator is None:
         test_generator = TestGeneratorConfig()
-    if datasource_arn is None:
-        if region != _TEST_REGION:
-            datasource_arn = (
-                f"arn:aws:quicksight:{region}:{account_id}:datasource/test-ds"
-            )
-        else:
-            datasource_arn = _TEST_DATASOURCE_ARN
 
     base: dict[str, Any] = {
-        "aws": AwsConfig(
-            account_id=account_id,
-            region=region,
-            deployment_name=deployment_name,
-            principal_arns=tuple(principal_arns),
-            extra_tags=_normalize_extra_tags(extra_tags_raw),
-            tagging_enabled=tagging_enabled,
-            qs_disable_pg_ssl=qs_disable_pg_ssl,
-            pg_cluster_id=aws_pg_cluster_id,
-            oracle_instance_id=aws_oracle_instance_id,
-            datasource=DatasourceConfig(
-                mode=("adopt" if datasource_arn else "create"),
-                arn=datasource_arn,
-            ),
-        ),
+        "aws": AwsConfig(deployment_name=deployment_name),
         "db": DbConfig(
             dialect=dialect,
             url=db_url,
