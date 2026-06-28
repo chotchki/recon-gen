@@ -287,3 +287,68 @@ defs are exactly Theme / Analysis / Dashboard. Verified dead-producer map
 This remainder carries the drill K.2-invariant delicacy + a broad test-file
 retirement surface — fits the DW.8 box's recommended "fresh context +
 workflow + adversarial review" treatment.
+
+### DW.8.1.c EXECUTION — DONE (2026-06-28), + the cascade map's own corrections
+
+Ran the recommended treatment: a **6-agent pre-flight verification workflow**
+(re-confirm every "dead / zero-callers / frees X" claim BEFORE cutting) then
+a **4-agent adversarial-review workflow** (dropped-invariants / weakened-tests
+/ grep-zero-dangling / residue-inventory) AFTER. Three staged green commits:
+`e24369b9` (1/3 relocate K.2) → `de767051` (2/3 delete 5 consumers) →
+`8fae0da2` (3/3 models gut, 1402→141 lines, `grep to_aws_json src/`=0).
+
+The pre-flight corrected THIS map on three points:
+
+1. **CRITICAL — the K.2 invariant was NOT in the kept types.** The map (and
+   the recipe) assumed deleting `set_drill_parameters`/`cross_sheet_drill`
+   just needed a test re-point. False: `ColumnShape.can_assign_to` was called
+   in exactly ONE place — `drill.py:201` inside `set_drill_parameters`. The
+   live `Drill.resolve_source_shapes` resolved each source's shape but
+   DISCARDED the param and never compared them. Deleting the helper would have
+   SILENTLY DROPPED the whole K.2 shape-mismatch guard. So (1/3) is a CODE
+   change, not a test move: relocated the shape compare (+ the empty-writes
+   and duplicate-param wiring guards) into `Drill.resolve_source_shapes`,
+   walked by `App.validate()` (`structure.py:1631`) on every renderer, BEFORE
+   any deletion. Same emit-vs-embedded-invariant trap the map flagged for
+   "shape" generically — but it lived in the dead helper, not the dead model.
+2. **`_strip_nones` is DELETE, not KEEP.** The map's keep-set listed it; its
+   only callers were the 3 dying `to_aws_json` methods. Gone with them.
+   `_DATASET_PARAM_STATIC_VALUES_CAP` joined the keep-set explicitly (the map
+   named `_check_static_values_cap` but not the 32-value constant it needs).
+3. **It's ONE mass-delete, not a multi-round "dead-producer-first cascade."**
+   The map framed the model classes as freed incrementally as each producer
+   died. Reality: the tree emit layer stopped importing `models.py` several DW
+   stages ago, so the entire emit graph was ALREADY orphaned except for the 5
+   live consumers (aging.py, the 2 drill fns, the 2 `_helpers` label builders,
+   `config.tags()`, `dataset_permissions`). (2/3) removes all 5 consumers; (3/3)
+   then deletes the orphaned graph in one pyright-clean cut. `DateTimeDefaultValues`
+   is a keep-island physically buried mid-delete-zone — a full-file rewrite
+   (vs line-range deletion around two embedded islands) avoided that hazard.
+
+Also surfaced: the "7 files reference the drill fns" scare was substring noise
+(`iter_cross_sheet_drill`, test-method names, `tree.Drill` imports in
+`test_cross_sheet_drill_date_widening.py`); nothing outside `drill.py` imported
+the deleted fns. And a 4th dead `ResourcePermission` holder the map omitted —
+`LinkSharingConfiguration` (harmless, also deleted).
+
+**Adversarial review: CLEAN on all 4 lenses, zero blockers/majors.** Confirmed
+the `can_assign_to` direction is NOT reversed (`source.can_assign_to(dest)`,
+verified against the deleted helper via `git show de767051^`); zero deleted
+class carried a `__post_init__`/`raise` (no domain rule beyond K.2 to relocate);
+all 131 deleted class names' surviving references resolve to SELF-DEFINED tree
+classes (name collisions like `CategoryFilter`/`TimeRangeFilter`/`Analysis`,
+not dangling models refs); grep-zero confirmed for `to_aws_json` +
+`to_json_string` + `_strip_nones`. Two `info` non-defects: the re-pointed
+widening/sentinel drill tests lost a positive emit-shape assertion (it tested
+the now-deleted helper's output; `resolve_source_shapes` is a void validator so
+"doesn't raise" is complete), and `DecimalDatasetParameterDefaultValues` has no
+direct importer (it's the typed field of the live `DecimalDatasetParameter` —
+symmetric keep-set by design).
+
+**Residue handoff for later stages (review lens 4, all `info`):** see the
+matching note in the DW.8.1.c PLAN box — config cleanup (`theme_arn()` dead,
+`extra_tags`/`tagging_enabled`/`qs_disable_pg_ssl` dead-config, and the meaty
+`dataset_arn()`+tree-`Dataset.arn` DEAD-PAYLOAD cross-app sub-task), DW.11
+(`resolve_qs_user_arn` boto3 `ListUsers` derive = the last live boto3, only
+tests consume it), DW.10 (`[quicksight]` extra then has no src anchor), DW.13
+(incidental QS-as-renderer docstrings in date_view/parameters/l2ft-datasets).
