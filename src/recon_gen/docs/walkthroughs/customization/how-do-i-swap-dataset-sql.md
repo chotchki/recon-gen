@@ -25,7 +25,7 @@ the contract test passes and every visual keeps working.
 The catch: the contract is what the visuals depend on, not the
 SQL. Match the column shape and the swap is one line. Miss it
 (typo in a column name, INTEGER where the contract says DECIMAL)
-and the dataset deploys but the visuals stop rendering with no
+and the dataset still runs but the visuals stop rendering with no
 good error. So this walkthrough covers three things:
 
 - the safe-swap pattern,
@@ -46,8 +46,8 @@ Three reference points:
 - **`src/recon_gen/common/dataset_contract.py`** — the
   `DatasetContract` and `ColumnSpec` dataclasses. Every dataset
   declares one. The `build_dataset()` function takes the SQL
-  and the contract together and produces the QuickSight DataSet
-  JSON.
+  and the contract together and produces the dataset the
+  dashboards read.
 - **`src/recon_gen/apps/<app>/datasets.py`** — every
   dataset's contract declaration sits next to its
   `build_*_dataset()` function. Read the contract first; it's
@@ -55,9 +55,9 @@ Three reference points:
   implementation.
 - **`tests/json/test_dataset_contract.py`** — the regression
   test. For every dataset it builds the DataSet, extracts the
-  `InputColumn` list QuickSight will see and asserts it matches
+  `InputColumn` list the projection emits and asserts it matches
   the declared contract. This is the test that catches a
-  projection bug before deploy.
+  projection bug before it reaches the dashboards.
 
 ## What you'll see in the demo
 
@@ -124,9 +124,11 @@ Run the contract test:
 ```
 
 Pass = your projection emits the contract columns in the right
-order. Deploy with `recon-gen json apply -c config.yaml -o
-out/ --execute`. Every visual on the L1 Overdraft sheet keeps
-working — they don't know your SQL changed.
+order. Serve the dashboards with `recon-gen dashboards -c
+config.yaml` and the L1 Overdraft
+sheet reads your new SQL on the next request — Direct Query, so
+the change shows immediately, no deploy step. Every visual on
+the sheet keeps working — they don't know your SQL changed.
 
 See it live: https://recon-gen-spec.hotchkiss.io/
 
@@ -142,19 +144,21 @@ properties of the swap that matter:
    The alias is part of the projection contract — keep it in
    the SQL, not in a downstream view.
 2. **Column types must match exactly.** `STRING` / `DECIMAL` /
-   `INTEGER` / `DATETIME` / `BIT` are the QuickSight type
+   `INTEGER` / `DATETIME` / `BIT` are the `DatasetContract` type
    alphabet. If you emit `DECIMAL` where the contract says
-   `INTEGER`, QuickSight may still ingest it but visual
-   formatting (axes, KPI display, category sort order) can
-   silently degrade. The contract test enforces both name and
-   ordering — but type mismatches surface only at deploy time
-   when QuickSight rejects the InputColumn list.
+   `INTEGER`, the renderer still reads it but visual formatting
+   (axes, KPI display, category sort order) can silently
+   degrade. The contract test enforces both name and ordering —
+   but it does NOT check the type your SQL actually returns, so
+   a type mismatch surfaces only when the dashboard formats the
+   column wrong (a currency shown as a bare number, dates sorted
+   as strings).
 3. **Column order matters.** `DatasetContract.columns` is a
    list, not a set, and the contract test asserts list equality.
    Reorder columns in your SELECT and the test fails. That's
    intentional — column order is part of the dataset's public
-   surface (it drives field-list ordering in the QuickSight
-   authoring UI), so reordering is a breaking change customers
+   surface (it drives the field-list order the renderer
+   presents), so reordering is a breaking change customers
    should be conscious of.
 
 ## Drilling in
@@ -166,8 +170,8 @@ SQL substitution:
 
 Your warehouse view emits all contract columns with the right
 types. Edit one `build_*_dataset()` function's SQL, run the
-contract test, deploy. No other code changes. No version bump
-necessary on the dashboard side.
+contract test, serve the dashboards. No other code changes. No
+version bump necessary on the dashboard side.
 
 ### Add a column
 
@@ -208,16 +212,16 @@ downstream visual that reads it — and it removes the option of
 ever surfacing the data again without re-tracing every visual
 reference.
 
-### Add a column QuickSight can't infer
+### Cast a column the SQL can't pin down
 
-If your projection's column type can't be inferred from the SQL
-(e.g., a `CASE` expression returning mixed types), QuickSight
-will reject the InputColumn list at deploy time with a vague
-error. Fix at the SQL: cast explicitly (`CAST(... AS DECIMAL)`)
-to match the contract's declared type. The contract test does
-not catch this — it asserts column NAMES, not the type
-QuickSight will actually infer at ingest. Deploy is the
-boundary that catches the type mismatch.
+If your SQL returns a column whose type is ambiguous (e.g., a
+`CASE` expression returning mixed types), the renderer formats
+it by guesswork and the column sorts or displays wrong. Fix at
+the SQL: cast explicitly (`CAST(... AS DECIMAL)`) to match the
+contract's declared type. The contract test does not catch
+this — it asserts column NAMES, not the type your query
+actually returns. The dashboard render is the boundary that
+catches the type mismatch.
 
 ## Next step
 

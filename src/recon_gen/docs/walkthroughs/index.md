@@ -52,8 +52,6 @@ stack and shaping the L2 to their own institution.
 - [How do I map my database to the two base tables?](customization/how-do-i-map-my-database.md)
 - [How do I swap the SQL behind a dataset?](customization/how-do-i-swap-dataset-sql.md)
 - [How do I reskin the dashboards for my brand?](customization/how-do-i-reskin-the-dashboards.md)
-- [How do I configure the deploy for my AWS account?](customization/how-do-i-configure-the-deploy.md)
-- [How do I run my first deploy?](customization/how-do-i-run-my-first-deploy.md)
 - [How do I add an app-specific metadata key?](customization/how-do-i-add-a-metadata-key.md)
 - [How do I extend canonical values?](customization/how-do-i-extend-canonical-values.md)
 - [How do I add an AML inbound-flow cap?](customization/how-do-i-add-an-aml-inbound-cap.md)

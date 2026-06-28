@@ -159,11 +159,13 @@ catalog table in `Schema_v6.md`:
 | `originating_branch` | string | Branch code that handled the sale | Branch grouping in downstream sheets |
 ```
 
-**Step 4 — wire the visual.** Direct query (not SPICE) means new
-columns show up immediately after `recon-gen json apply
---execute`. No refresh step. Open the relevant sheet, drag
-`originating_branch` into the Pivot grouping or Table column
-list.
+**Step 4 — wire the visual.** Add `originating_branch` to the
+visual's field list in the relevant `apps/<app>/app.py` builder
+(or via Studio's data-shaping panel). The dashboards query the
+DB directly, so the new column renders the next time you serve
+them — `recon-gen dashboards -c run/config.yaml --l2
+tests/l2/{{ l2_instance_name }}.yaml` — no deploy, no refresh
+step.
 
 ## Next step
 
@@ -180,10 +182,11 @@ Once the key is producing, consuming and rendering:
    the cumulative-sum invariant still holds (UPDATEs on
    `amount_money` are the danger; UPDATEs on `metadata` are
    safe).
-3. **Deploy to the QuickSight environment**:
-   `recon-gen json apply -c run/config.yaml -o run/out/
-   --execute`. The new column appears on next dashboard open — no
-   SPICE refresh needed.
+3. **Serve the dashboards**: `recon-gen dashboards -c
+   run/config.yaml --l2 tests/l2/{{ l2_instance_name }}.yaml`.
+   The new column appears the next time you start the server —
+   the dashboards query the DB directly, no deploy or refresh
+   step.
 
 ## Related walkthroughs
 

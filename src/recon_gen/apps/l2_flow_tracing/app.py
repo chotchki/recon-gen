@@ -369,7 +369,9 @@ def _l2ft_datasets(
     writes the AWS shapes; this builds the typed tree refs for visual
     wiring on the App.
     """
-    aws_datasets = build_all_l2_flow_tracing_datasets(cfg, l2_instance)
+    # Register every dataset's contract + SQL (build side-effects); the
+    # returned BuiltDataset list is no longer consumed post-DW.
+    build_all_l2_flow_tracing_datasets(cfg, l2_instance)
     # Order matches `build_all_l2_flow_tracing_datasets`. M.3.10c
     # dropped DS_RAILS + the 28 per-key dropdowns; replaced with
     # DS_POSTINGS + DS_META_VALUES driving the cascade. M.3.10d
@@ -390,16 +392,15 @@ def _l2ft_datasets(
         DS_RAILS, DS_TEMPLATES,
         # DS_ACCOUNT_ROLES is L1-only (no L2FT picker uses it) but
         # the dataset still ships from this app to keep deploys
-        # idempotent across deploy --app filters. We bind it as
-        # placeholder so the visual_ids/aws_datasets zip aligns.
+        # idempotent across --app filters.
         "v-config-account-roles-ds",
         DS_METADATA_KEYS, DS_CHAIN_PARENTS,
         _DS_APP_INFO_LIVENESS, _DS_APP_INFO_MATVIEWS,  # M.4.4.5; BO.5 per-app
         _DS_APP_INFO_LATEST_BALANCE_DAY,                # DK.5.kpi
     ]
     return {
-        vid: Dataset(identifier=vid, arn=cfg.aws.dataset_arn(aws.DataSetId))
-        for vid, aws in zip(visual_ids, aws_datasets)
+        vid: Dataset(identifier=vid)
+        for vid in visual_ids
     }
 
 
@@ -1372,25 +1373,3 @@ def _populate_l2_exceptions_sheet(
     )
 
 
-# ---------------------------------------------------------------------------
-# CLI / external-caller shims. Mirror the L1 dashboard signature so the CLI
-# can plumb through generically.
-# ---------------------------------------------------------------------------
-
-
-def build_analysis(
-    cfg: Config,
-    *,
-    l2_instance: L2Instance | None = None,
-):
-    """Build the complete L2 Flow Tracing Analysis resource via the tree."""
-    return build_l2_flow_tracing_app(cfg, l2_instance=l2_instance).emit_analysis()
-
-
-def build_l2_flow_tracing_dashboard(
-    cfg: Config,
-    *,
-    l2_instance: L2Instance | None = None,
-):
-    """Build the L2 Flow Tracing Dashboard resource via the tree."""
-    return build_l2_flow_tracing_app(cfg, l2_instance=l2_instance).emit_dashboard()

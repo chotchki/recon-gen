@@ -41,13 +41,9 @@ def _cfg_env(monkeypatch_module: pytest.MonkeyPatch) -> None:  # pyright: ignore
     `l1_app` fixture below. Module-scoped so the env doesn't leak into
     other test modules (pre-Z.C.7 this was module-level
     `os.environ.setdefault`, which polluted `tests/unit/test_config_loader.py`).
+    (Post-DW: account_id / region / datasource_arn are gone; only the
+    deployment_name + table_prefix overrides remain.)
     """
-    monkeypatch_module.setenv("RECON_GEN_AWS_ACCOUNT_ID", "111122223333")
-    monkeypatch_module.setenv("RECON_GEN_AWS_REGION", "us-west-2")
-    monkeypatch_module.setenv(
-        "RECON_GEN_DATASOURCE_ARN",
-        "arn:aws:quicksight:us-west-2:111122223333:datasource/ds",
-    )
     monkeypatch_module.setenv("RECON_GEN_DEPLOYMENT_NAME", DEFAULT_PREFIX)
     monkeypatch_module.setenv("RECON_GEN_DB_TABLE_PREFIX", DEFAULT_PREFIX)
 
@@ -73,7 +69,7 @@ def l1_app() -> "App":
 
     cfg = load_config(None)
     app = build_l1_dashboard_app(cfg)
-    app.emit_analysis()
+    app.validate()
     return app
 
 
@@ -81,7 +77,7 @@ def l1_app() -> "App":
 def sheet_visual_titles(l1_app: "App") -> dict[str, set[str]]:
     """Map sheet name → set of visual titles on that sheet."""
     out: dict[str, set[str]] = {}
-    # `l1_app` fixture above calls `emit_analysis()`, which sets the
+    # `l1_app` fixture above calls `resolve_auto_ids()`, which sets the
     # analysis attribute — never None here. Asserting narrows for
     # pyright (App.analysis is declared Optional).
     assert l1_app.analysis is not None

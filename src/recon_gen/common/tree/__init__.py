@@ -3,9 +3,9 @@
 Replaces the constant-heavy + manually-cross-referenced builders in
 ``apps/{payment_recon,account_recon,investigation}/{analysis,filters,
 visuals}.py``. Authors construct apps as trees of typed nodes; the
-tree walks itself at emit time to produce the existing ``models.py``
-dataclasses, which serialize through the same ``to_aws_json()`` path
-the deploy pipeline uses.
+tree validates itself and the App2 (HTMX/d3) renderer walks it to
+produce the self-hosted dashboards. (Pre-DW the same tree also emitted
+the AWS QuickSight API JSON; that renderer retired in Phase DW.)
 
 **Validation rules** (catch these at construction or emit time):
 
@@ -27,9 +27,8 @@ Construction-time (raise immediately):
   ``minimum_value`` and ``minimum_parameter`` (or both on the
   maximum side).
 
-Emit-time (validated by ``App.resolve_auto_ids`` + the
-``_validate_*`` methods, all run from ``emit_analysis`` /
-``emit_dashboard``):
+Validation-time (``App.resolve_auto_ids`` + the ``_validate_*``
+methods, all run from ``App.validate()``):
 
 - Auto-IDs resolve for any node that didn't carry an explicit ID.
 - ``_validate_dataset_references`` — every typed Dataset ref in the
@@ -42,15 +41,15 @@ Emit-time (validated by ``App.resolve_auto_ids`` + the
 - ``_validate_drill_destinations`` — every Drill action's
   ``target_sheet`` must be a registered Sheet on the analysis.
 - ``FilterGroup.emit`` — refuses an unscoped FilterGroup.
-- ``cross_sheet_drill`` (K.2) — Drill ``DrillParam`` shape must
-  match the source field's ``ColumnShape``.
+- ``Drill.resolve_source_shapes`` (K.2) — a Drill ``DrillParam``'s
+  shape must be assignable from the source field's ``ColumnShape``.
 
 Known follow-up: ``DrillParam`` (in ``common/drill.py``) takes a
 string ``ParameterName`` rather than a typed ``ParameterDeclLike``
 ref. That string isn't validated against the analysis registry —
-typos in DrillParam.name flow to deploy. Closing the gap requires
-threading a typed parameter ref through ``DrillParam`` →
-``cross_sheet_drill`` → emission.
+typos in DrillParam.name flow through unchecked. Closing the gap
+requires threading a typed parameter ref through ``DrillParam`` →
+the Drill ``writes`` → validation.
 
 **Locked decisions** (see PLAN.md Phase L):
 

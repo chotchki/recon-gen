@@ -29,17 +29,8 @@ from recon_gen.common.drill import (
     DrillResetSentinel,
     DrillSourceField,
     DrillStaticDateTime,
-    cross_sheet_drill as _emit_cross_sheet_drill,
 )
 from recon_gen.common.drill import DrillParam as _DrillParam
-from recon_gen.common.models import (
-    CustomActionFilterOperation,
-    FilterOperationSelectedFieldsConfiguration,
-    FilterOperationTargetVisualsConfiguration,
-    SameSheetTargetVisualConfiguration,
-    VisualCustomAction,
-    VisualCustomActionOperation,
-)
 
 from recon_gen.common.tree._helpers import AUTO, AutoResolved, _AutoSentinel
 from recon_gen.common.tree.calc_fields import (
@@ -51,7 +42,7 @@ from recon_gen.common.tree.fields import Dim, Measure
 # uses for the FilterGroup → Sheet ref. Avoids circular import.
 from typing import TYPE_CHECKING, Union
 if TYPE_CHECKING:
-    from recon_gen.common.ids import SheetId
+    from recon_gen.common.ids import ParameterName, SheetId
     from recon_gen.common.tree.structure import Sheet
 
 
@@ -145,8 +136,8 @@ class Drill:
 
     ``writes`` is a list of ``(DrillParam, DrillSourceField | DrillResetSentinel)``
     tuples — same shape K.2 introduced. The ``DrillParam`` carries
-    its own ``ColumnShape``; ``DrillSourceField.shape`` must match
-    or ``cross_sheet_drill`` raises (call-site shape validation).
+    its own ``ColumnShape``; ``DrillSourceField.shape`` must be assignable
+    to it or ``resolve_source_shapes`` raises (validate-time shape check).
 
     ``trigger`` picks the click semantic — ``DATA_POINT_CLICK`` for
     left-click, ``DATA_POINT_MENU`` for right-click context menu.
@@ -167,27 +158,60 @@ class Drill:
 
     _AUTO_KIND: ClassVar[str] = "drill"
 
-    def emit(self) -> VisualCustomAction:
-        assert not isinstance(self.action_id, _AutoSentinel), (
-            "action_id wasn't resolved — App.resolve_auto_ids() must run."
-        )
-        assert not isinstance(self.target_sheet, _AutoSentinel), (
-            "target_sheet wasn't resolved — App.resolve_auto_ids() must "
-            "run before Drill.emit(). Same-sheet drills get back-filled "
-            "with the owning sheet automatically."
-        )
-        resolved_writes = [
-            (param, _resolve_drill_source(source))
-            for param, source in self.writes
-        ]
-        return _emit_cross_sheet_drill(
-            action_id=self.action_id,
-            name=self.name,
-            target_sheet=self.target_sheet.sheet_id,
-            writes=resolved_writes,
-            trigger=self.trigger,
-        )
+    def resolve_source_shapes(self) -> None:
+        """Resolve every write source's K.2 shape and enforce the
+        drill-param wiring invariants. Raises on:
 
+        - **empty writes** — a drill that sets no parameters is almost
+          certainly a wiring bug (use a navigation-only action if that's
+          the intent);
+        - **duplicate parameter** — a parameter written more than once in
+          one action;
+        - **unresolvable source shape** — a calc-field source with no
+          ``shape`` tag, or a real column whose shape can't be derived
+          from the contract (via ``_resolve_drill_source``);
+        - **shape mismatch** — a source whose resolved ``ColumnShape``
+          isn't assignable to the destination ``DrillParam``'s shape.
+          THE K.2 bug class: a DATETIME column silently coerced into an
+          ACCOUNT_ID string param matched zero rows and read as missing
+          data, not broken wiring. ``DrillResetSentinel`` /
+          ``DrillStaticDateTime`` writes skip the shape comparison — they
+          carry their own literal value, not a column ref.
+
+        ``App.validate()`` calls this so the invariant holds on EVERY
+        renderer. It used to live in ``set_drill_parameters`` (the QS-emit
+        helper); post-DW that helper is gone, so the check moved to the
+        validation walk where App2 picks it up too. Requires
+        ``resolve_auto_ids()`` to have run first (the source leaf's
+        field_id must be assigned)."""
+        if not self.writes:
+            raise ValueError(
+                f"Drill {self.name!r} has no parameter writes — a drill "
+                f"that sets no parameters is almost certainly a wiring "
+                f"bug. Use a navigation-only action if that's the intent."
+            )
+        seen: set[ParameterName] = set()
+        for param, source in self.writes:
+            if param.name in seen:
+                raise ValueError(
+                    f"Duplicate drill parameter {param.name!r} in drill "
+                    f"{self.name!r} — each parameter can be written at "
+                    f"most once per action."
+                )
+            seen.add(param.name)
+            resolved = _resolve_drill_source(source)
+            if isinstance(resolved, DrillSourceField):
+                if not resolved.shape.can_assign_to(param.shape):
+                    raise TypeError(
+                        f"Drill source shape mismatch: writing field "
+                        f"{resolved.field_id!r} ({resolved.shape.name}) "
+                        f"into parameter {param.name!r} (expects "
+                        f"{param.shape.name}) in drill {self.name!r}. This "
+                        f"is the K.2 bug class — pick a source column whose "
+                        f"contract shape is assignable to the parameter, or "
+                        f"widen the parameter's shape if both subtypes are "
+                        f"valid."
+                    )
 
 @dataclass(eq=False)
 class CrossAppDrill:
@@ -226,18 +250,6 @@ class CrossAppDrill:
 
     _AUTO_KIND: ClassVar[str] = "cross_app_drill"
 
-    def emit(self) -> None:
-        """QS emit — intentional no-op. The QS renderer's substitute
-        for a cross-app drill is a sibling ``TextBox`` with a
-        rich-text hyperlink (see ``rich_text.link``); CF.2 wires both
-        on the same sheet. Returning None signals "no QS action" to
-        the emit walker, which the per-Visual action collector
-        filters out (same shape as a same-sheet drill with no writes
-        — produces no VisualCustomAction at the QS layer).
-        """
-        return None
-
-
 # Forward reference — VisualLike is in visuals.py; import via TYPE_CHECKING.
 if TYPE_CHECKING:
     from recon_gen.common.tree.visuals import VisualLike
@@ -263,44 +275,6 @@ class SameSheetFilter:
     action_id: str | AutoResolved = AUTO
 
     _AUTO_KIND: ClassVar[str] = "filter"
-
-    def emit(self) -> VisualCustomAction:
-        assert not isinstance(self.action_id, _AutoSentinel), (
-            "action_id wasn't resolved — App.resolve_auto_ids() must run."
-        )
-        target_ids: list[str] = []
-        for v in self.target_visuals:
-            assert not isinstance(v.visual_id, _AutoSentinel), (
-                f"SameSheetFilter target visual_id wasn't resolved — "
-                f"App.resolve_auto_ids() must run before emit."
-            )
-            target_ids.append(v.visual_id)
-        return VisualCustomAction(
-            CustomActionId=self.action_id,
-            Name=self.name,
-            Trigger=self.trigger,
-            ActionOperations=[
-                VisualCustomActionOperation(
-                    FilterOperation=CustomActionFilterOperation(
-                        SelectedFieldsConfiguration=(
-                            FilterOperationSelectedFieldsConfiguration(
-                                SelectedFieldOptions="ALL_FIELDS",
-                            )
-                        ),
-                        TargetVisualsConfiguration=(
-                            FilterOperationTargetVisualsConfiguration(
-                                SameSheetTargetVisualConfiguration=(
-                                    SameSheetTargetVisualConfiguration(
-                                        TargetVisuals=target_ids,
-                                    )
-                                ),
-                            )
-                        ),
-                    ),
-                ),
-            ],
-        )
-
 
 # Discriminated union of every visual action type. Visual subtypes
 # accept ``actions: list[Action]`` to mix Drills + filters in one list.

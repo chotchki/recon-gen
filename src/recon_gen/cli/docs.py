@@ -7,7 +7,8 @@ Six operations:
   clean       — ``rm -rf site/``.
   test        — pytest the docs gates (link sweep + persona neutrality).
   export      — extract mkdocs source for hand-build (legacy ``export docs``).
-  screenshot  — capture deployed dashboards to PNG (legacy ``export screenshots``).
+  screenshot  — capture dashboards to PNG (App2 capture: placeholder
+                pending post-DW; see common/browser/screenshot.py).
 
 No ``--execute`` here — building a static site to a directory isn't
 a destructive side effect.
@@ -269,9 +270,11 @@ def _build_app_for_screenshots(app_slug: str, cfg, l2_instance):  # type: ignore
     mod = importlib.import_module(mod_path)
     builder = getattr(mod, fn_name)
     app = builder(cfg, l2_instance=l2_instance)
-    # emit_analysis() resolves auto-IDs on the tree so sheet objects
-    # match what was deployed.
-    app.emit_analysis()
+    # resolve_auto_ids() materializes the tree's auto-IDs so sheet
+    # objects match what was deployed — the only side effect this
+    # screenshot path needs. (The QS emitter is being removed in the
+    # DW phase, so depend on the narrow primitive directly.)
+    app.resolve_auto_ids()
     return app
 
 
@@ -752,16 +755,21 @@ def docs_screenshot(
     date_from: str | None,
     date_to: str | None,
 ) -> None:
-    """Capture per-sheet PNG screenshots from deployed dashboards.
+    """Capture per-sheet PNG screenshots of the dashboards.
 
     Walks the requested app's tree via WebKit and writes one full-page
     PNG per sheet to ``<output>/<app-slug>/<sheet_id>.png``. Single CLI
     surface for every app (replaces the per-app capture scripts that
     used to live under ``scripts/``).
 
-    Requires the dashboards already deployed (``json apply --execute``).
-    The handbook + walkthrough pages embed these screenshots by
-    relative path under ``docs/walkthroughs/screenshots/<app>/``.
+    Post-DW the capture engine is an App2 placeholder
+    (``common/browser/screenshot.py::capture_app_dashboards`` raises
+    NotImplementedError until the self-hosted capture is built — the QS
+    embed-URL path was removed with QuickSight). The command + its
+    scaffolding (app-slug map, date-param resolution, output layout, DB
+    warmup) are wired and waiting. The handbook + walkthrough pages embed
+    these screenshots by relative path under
+    ``docs/walkthroughs/screenshots/<app>/``.
     """
     if app is None and not all_apps:
         raise click.UsageError("Specify --app <name> or --all.")
@@ -774,11 +782,6 @@ def docs_screenshot(
     )
 
     cfg = load_config(config_path)
-    if not cfg.aws.account_id or not cfg.aws.region:
-        raise click.ClickException(
-            "Config missing aws_account_id or aws_region — "
-            "screenshots need them to generate an embed URL."
-        )
     if not skip_warmup and not cfg.db.url:
         raise click.ClickException(
             "demo_database_url not set; pass --skip-warmup to bypass "
@@ -820,10 +823,7 @@ def docs_screenshot(
         _warm_db_for_screenshots(cfg.db.url)
         click.echo(" OK")
 
-    from recon_gen.common.browser.helpers import (
-        generate_dashboard_embed_url,
-    )
-    from recon_gen.common.browser.screenshot import capture_deployed_app
+    from recon_gen.common.browser.screenshot import capture_app_dashboards
 
     output_root = Path(output)
     output_root.mkdir(parents=True, exist_ok=True)
@@ -832,20 +832,6 @@ def docs_screenshot(
     for slug in apps_to_capture:
         click.echo(f"== {slug} ==")
         app_obj = _build_app_for_screenshots(slug, cfg, l2_instance)
-        # Dashboard ID convention: cfg.aws.prefixed(<dashboard_id_suffix>) —
-        # Z.C: the cfg arrives fully-populated with cfg.aws.deployment_name,
-        # so app_obj.cfg and the outer cfg agree on the namespace.
-        dashboard_suffix = app_obj.dashboard.dashboard_id_suffix
-        dashboard_id = app_obj.cfg.aws.prefixed(dashboard_suffix)
-        click.echo(
-            f"-> embed URL for {dashboard_id}...", nl=False,
-        )
-        url = generate_dashboard_embed_url(
-            aws_account_id=cfg.aws.account_id,
-            aws_region=cfg.aws.region,
-            dashboard_id=dashboard_id,
-        )
-        click.echo(" OK")
 
         # Write to the short-slug subdir (l1/, l2ft/, inv/, exec/).
         _, _, output_subdir = SCREENSHOT_APPS[slug]
@@ -866,9 +852,13 @@ def docs_screenshot(
 
         click.echo(f"-> capturing {len(app_obj.analysis.sheets)} sheets at "
                    f"{viewport[0]}x{viewport[1]} into {out_dir}/")
-        results = capture_deployed_app(
+        # Post-DW: the QS embed-URL capture is gone; capture_app_dashboards
+        # is the App2 placeholder (raises NotImplementedError until the
+        # self-hosted capture is built — see its module docstring + the
+        # PLAN.md DW backlog). The command + scaffolding above are wired
+        # and waiting for it.
+        results = capture_app_dashboards(
             app_obj,
-            embed_url=url,
             output_dir=out_dir,
             viewport=viewport,
             initial_settle_ms=initial_settle_ms,

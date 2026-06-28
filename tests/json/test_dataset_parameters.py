@@ -1,23 +1,31 @@
-"""Tests for dataset-level parameters in CustomSQL (M.3.10c phase 1).
+"""Tests for dataset-level parameters threaded through ``build_dataset``.
 
-Verifies that:
+The ``<<$paramName>>`` substitution mechanism is renderer-agnostic:
+QuickSight substituted the literal at fetch time, and App2's executor
+resolves the same placeholder's default from the dataset-parameter
+registry (``get_dataset_params``, keyed by ``visual_identifier``). These
+tests pin the renderer-agnostic half of that mechanism:
 
-- The new ``DatasetParameter`` model variants emit the wire shape
-  QuickSight's CreateDataSet API requires (proven against the M.3.10
-  hand-spike — the captured shape is the test fixture below).
-- ``build_dataset()`` plumbs ``dataset_parameters`` onto the emitted
-  ``DataSet.DatasetParameters`` field.
-- Tree-level ``StringParam`` / ``IntegerParam`` / ``DateTimeParam``
-  variants emit ``MappedDataSetParameters`` on their declarations
-  when ``mapped_dataset_params=[(dataset, "name"), ...]`` is set, and
-  omit the field when not.
-- The bridge round-trips: an analysis-level parameter mapped to a
-  dataset-level parameter both emit valid AWS-shape JSON that
-  references each other by name.
+- ``build_dataset(dataset_parameters=[...])`` registers the params for
+  App2 default substitution, resolvable via ``BuiltDataset.dataset_params``
+  (the registry-backed read-through); a dataset built without params
+  carries none, so the existing 50+ datasets stay param-free.
+- AK.1 — each ``DataSetParameter.Id`` is a deterministic, dataset-scoped
+  UUIDv5 derived from ``(dataset_id, name)`` by ``_assign_dataset_param_ids``,
+  so two datasets sharing a param name (``pKey`` across several L2FT
+  datasets) never collide.
 
-The substitution syntax (`<<$paramName>>`) is captured separately in
-the project memory note `project_qs_dataset_parameters.md` — the
-unit tests just verify byte-shape, not Aurora-side substitution.
+DW.1 — the QS-API wire-shape tests that lived here retired with the
+QuickSight emitter. Two families went: the byte-for-byte
+``DataSetParameter`` dict the CreateDataSet API required (Id / ValueType /
+discriminator-key serialization), and the ``MappedDataSetParameters``
+analysis→dataset bridge. Both had no post-QS home — App2 reads the
+model's attributes via the registry (never the serialized wire dict) and
+checks ``mapped_dataset_params`` only for presence (never the mapping's
+target). See the migration record for the per-test rationale.
+
+The substitution syntax is captured in the project memory note
+``project_qs_dataset_parameters.md``.
 """
 
 from __future__ import annotations
@@ -28,141 +36,39 @@ from recon_gen.common.dataset_contract import (
     DatasetContract,
     build_dataset,
 )
-from recon_gen.common.ids import ParameterName
 from recon_gen.common.models import (
-    DataSet as DataSet,
     DatasetParameter,
-    DateTimeDatasetParameter,
-    DateTimeDatasetParameterDefaultValues,
-    DecimalDatasetParameter,
-    DecimalDatasetParameterDefaultValues,
-    IntegerDatasetParameter,
-    IntegerDatasetParameterDefaultValues,
-    MappedDataSetParameter,
     StringDatasetParameter,
     StringDatasetParameterDefaultValues,
 )
-from recon_gen.common.tree import Dataset, IntegerParam, StringParam
 from recon_gen.common.tree._helpers import auto_id
 
 
 _CFG = make_test_config()
 
 
-# -- Model emit ---------------------------------------------------------------
-
-
-def test_string_dataset_parameter_single_value_matches_spike_shape() -> None:
-    """The captured M.3.10 spike's ``pKey`` parameter wire shape, byte-
-    for-byte. Drift here means the QS API would reject the new shape."""
-    p = DatasetParameter(StringDatasetParameter=StringDatasetParameter(
-        Id="6d1ce7f7-2a8a-405a-b81a-b016a66c0a2f",
-        Name="pKey",
-        ValueType="SINGLE_VALUED",
-        DefaultValues=StringDatasetParameterDefaultValues(
-            StaticValues=["customer_id"],
-        ),
-    ))
-    from dataclasses import asdict
-    from recon_gen.common.models import _strip_nones
-    assert _strip_nones(asdict(p)) == {
-        "StringDatasetParameter": {
-            "Id": "6d1ce7f7-2a8a-405a-b81a-b016a66c0a2f",
-            "Name": "pKey",
-            "ValueType": "SINGLE_VALUED",
-            "DefaultValues": {"StaticValues": ["customer_id"]},
-        },
-    }
-
-
-def test_string_dataset_parameter_multi_value_matches_spike_shape() -> None:
-    """Same wire shape, ``MULTI_VALUED`` + multi-element default —
-    the second M.3.10 spike's ``pValues`` form."""
-    p = DatasetParameter(StringDatasetParameter=StringDatasetParameter(
-        Id="751f40e3-eec9-4263-afee-40cfca9661a6",
-        Name="pValues",
-        ValueType="MULTI_VALUED",
-        DefaultValues=StringDatasetParameterDefaultValues(
-            StaticValues=["demo-customer_id-1", "demo-customer_id-0"],
-        ),
-    ))
-    from dataclasses import asdict
-    from recon_gen.common.models import _strip_nones
-    assert _strip_nones(asdict(p)) == {
-        "StringDatasetParameter": {
-            "Id": "751f40e3-eec9-4263-afee-40cfca9661a6",
-            "Name": "pValues",
-            "ValueType": "MULTI_VALUED",
-            "DefaultValues": {
-                "StaticValues": [
-                    "demo-customer_id-1", "demo-customer_id-0",
-                ],
-            },
-        },
-    }
-
-
-def test_integer_dataset_parameter_emits() -> None:
-    """Sanity: Integer variant emits the right discriminator."""
-    p = DatasetParameter(IntegerDatasetParameter=IntegerDatasetParameter(
-        Id="abc-1", Name="pCount", ValueType="SINGLE_VALUED",
-        DefaultValues=IntegerDatasetParameterDefaultValues(StaticValues=[42]),
-    ))
-    from dataclasses import asdict
-    from recon_gen.common.models import _strip_nones
-    out = _strip_nones(asdict(p))
-    assert "IntegerDatasetParameter" in out
-    assert out["IntegerDatasetParameter"]["DefaultValues"]["StaticValues"] == [42]
-
-
-def test_decimal_dataset_parameter_emits() -> None:
-    """Sanity: Decimal variant emits the right discriminator."""
-    p = DatasetParameter(DecimalDatasetParameter=DecimalDatasetParameter(
-        Id="abc-2", Name="pAmount", ValueType="SINGLE_VALUED",
-        DefaultValues=DecimalDatasetParameterDefaultValues(
-            StaticValues=[1.5],
-        ),
-    ))
-    from dataclasses import asdict
-    from recon_gen.common.models import _strip_nones
-    out = _strip_nones(asdict(p))
-    assert "DecimalDatasetParameter" in out
-
-
-def test_datetime_dataset_parameter_emits_with_granularity() -> None:
-    """DateTime variant carries the optional TimeGranularity field."""
-    p = DatasetParameter(DateTimeDatasetParameter=DateTimeDatasetParameter(
-        Id="abc-3", Name="pAsOf", ValueType="SINGLE_VALUED",
-        TimeGranularity="DAY",
-        DefaultValues=DateTimeDatasetParameterDefaultValues(
-            StaticValues=["2030-01-01T00:00:00.000Z"],
-        ),
-    ))
-    from dataclasses import asdict
-    from recon_gen.common.models import _strip_nones
-    out = _strip_nones(asdict(p))
-    assert out["DateTimeDatasetParameter"]["TimeGranularity"] == "DAY"
+# -- build_dataset() plumbing -------------------------------------------------
 
 
 def test_dataset_parameter_omitted_when_not_provided() -> None:
-    """A DataSet without DatasetParameters omits the field entirely
-    in JSON output (so the existing 50+ datasets continue to emit
-    unchanged)."""
+    """A dataset built without ``dataset_parameters`` carries none — both
+    ``BuiltDataset.dataset_params`` and the App2 registry resolve to
+    ``[]`` — so the existing 50+ datasets stay param-free."""
+    from recon_gen.common.dataset_contract import get_dataset_params
+
     contract = DatasetContract(columns=[ColumnSpec("col", "STRING")])
     ds = build_dataset(
         _CFG, "qs-gen-noop-dataset", "Noop", "noop",
         "SELECT 1 AS col", contract,
         visual_identifier="noop-ds",
     )
-    assert "DatasetParameters" not in ds.to_aws_json()
+    assert ds.dataset_params == []
+    assert get_dataset_params("noop-ds") == []
 
 
-# -- build_dataset() plumbing -------------------------------------------------
-
-
-def test_build_dataset_propagates_dataset_parameters_to_emitted_json() -> None:
-    """``build_dataset(..., dataset_parameters=[...])`` lands on the
-    AWS-shape DataSet's top-level ``DatasetParameters`` field."""
+def test_build_dataset_propagates_dataset_parameters() -> None:
+    """``build_dataset(..., dataset_parameters=[...])`` makes the params
+    resolvable via ``BuiltDataset.dataset_params``."""
     contract = DatasetContract(columns=[ColumnSpec("col", "STRING")])
     params = [
         DatasetParameter(StringDatasetParameter=StringDatasetParameter(
@@ -179,9 +85,9 @@ def test_build_dataset_propagates_dataset_parameters_to_emitted_json() -> None:
         visual_identifier="with-params-ds",
         dataset_parameters=params,
     )
-    out = ds.to_aws_json()
-    assert "DatasetParameters" in out
-    assert out["DatasetParameters"][0]["StringDatasetParameter"]["Name"] == "pKey"
+    sp = ds.dataset_params[0].StringDatasetParameter
+    assert sp is not None
+    assert sp.Name == "pKey"
 
 
 def test_build_dataset_registers_params_for_app2_default_substitution() -> None:
@@ -223,84 +129,17 @@ def test_build_dataset_registers_params_for_app2_default_substitution() -> None:
     assert get_dataset_params("never-registered-ds") == []
 
 
-# -- Tree-level mapping wiring -----------------------------------------------
+# -- AK.1 dataset-parameter Id derivation ------------------------------------
 
 
-def test_string_param_emits_no_mappings_when_unset() -> None:
-    """Existing analysis params (date pickers, drill sentinels) DON'T
-    set ``mapped_dataset_params`` — the emitted declaration must omit
-    the field entirely. Otherwise existing dashboards regress."""
-    p = StringParam(name=ParameterName("pNoMappings"), default=["x"])
-    decl = p.emit()
-    sd = decl.StringParameterDeclaration
-    assert sd is not None
-    assert sd.MappedDataSetParameters is None
-
-
-def test_string_param_emits_mappings_when_provided() -> None:
-    """When ``mapped_dataset_params`` is set, emit one
-    ``MappedDataSetParameter`` per (Dataset, name) pair, in order."""
-    ds_a = Dataset(identifier="ds-a", arn="arn:fake:a")
-    ds_b = Dataset(identifier="ds-b", arn="arn:fake:b")
-    p = StringParam(
-        name=ParameterName("pBoth"),
-        default=["customer_id"],
-        mapped_dataset_params=[(ds_a, "pKey"), (ds_b, "pKey")],
-    )
-    decl = p.emit()
-    sd = decl.StringParameterDeclaration
-    assert sd is not None
-    assert sd.MappedDataSetParameters == [
-        MappedDataSetParameter(DataSetIdentifier="ds-a", DataSetParameterName="pKey"),
-        MappedDataSetParameter(DataSetIdentifier="ds-b", DataSetParameterName="pKey"),
-    ]
-
-
-def test_integer_param_supports_mappings() -> None:
-    """IntegerParam variant also emits the field (parity check)."""
-    ds = Dataset(identifier="ds-i", arn="arn:fake:i")
-    p = IntegerParam(
-        name=ParameterName("pInt"),
-        default=[1],
-        mapped_dataset_params=[(ds, "pNum")],
-    )
-    decl = p.emit()
-    assert decl.IntegerParameterDeclaration is not None
-    assert decl.IntegerParameterDeclaration.MappedDataSetParameters == [
-        MappedDataSetParameter(DataSetIdentifier="ds-i", DataSetParameterName="pNum"),
-    ]
-
-
-def test_dataset_param_mapping_uses_dataset_identifier_not_arn() -> None:
-    """Wire shape uses the Dataset's logical ``identifier`` (the analysis-
-    level visual_identifier), not the ARN. Bug if it ever flipped:
-    the analysis would reference a dataset by ARN, but
-    DataSetIdentifierDeclarations key the dataset by identifier."""
-    ds = Dataset(
-        identifier="my-pretty-name",
-        arn="arn:aws:quicksight:us-west-2:1:dataset/qs-gen-something",
-    )
-    p = StringParam(
-        name=ParameterName("pX"),
-        mapped_dataset_params=[(ds, "pKey")],
-    )
-    decl = p.emit()
-    sd = decl.StringParameterDeclaration
-    assert sd is not None
-    assert sd.MappedDataSetParameters is not None
-    mapping = sd.MappedDataSetParameters[0]
-    assert mapping.DataSetIdentifier == "my-pretty-name"
-    assert "arn" not in mapping.DataSetIdentifier
-
-
-# -- End-to-end: cascade-shape sanity -----------------------------------------
-
-
-def test_cascade_round_trip_against_spike_shape() -> None:
-    """Build the M.3.10 spike's full setup end-to-end through the
-    AWS-shape DataSet + assert the JSON shape. AK.1 — the param Ids are
-    now build_dataset-derived (auto_id over dataset_id + name), not the
-    captured spike's hand-picked values; the rest of the shape holds."""
+def test_cascade_build_assigns_deterministic_param_ids() -> None:
+    """Build the M.3.10 spike's full cascade setup through ``build_dataset``
+    and assert the params land on the dataset with build_dataset-derived
+    Ids. AK.1 — construction sites no longer hand-pick Ids; ``build_dataset``
+    stamps each a deterministic dataset-scoped UUIDv5 (``auto_id`` over
+    ``dataset_id`` + name). The Name / ValueType / default shape is
+    unchanged; the Ids are derived (the assertion catches a regression in
+    ``_assign_dataset_param_ids`` — the params go in Id-less)."""
     contract = DatasetContract(columns=[
         ColumnSpec("id", "STRING"),
         ColumnSpec("rail_name", "STRING"),
@@ -334,25 +173,24 @@ def test_cascade_round_trip_against_spike_shape() -> None:
             )),
         ],
     )
-    out = ds_aws.to_aws_json()
+    params = ds_aws.dataset_params
+    pkey, pvalues = (p.StringDatasetParameter for p in params)
+    assert pkey is not None and pvalues is not None
+
     # AK.1 — build_dataset assigns each param a deterministic, dataset-
-    # scoped UUID (auto_id over dataset_id + name); construction sites no
-    # longer hand-pick Ids. Shape is unchanged; the Ids are derived.
-    assert out["DatasetParameters"] == [
-        {"StringDatasetParameter": {
-            "Id": auto_id("qs-gen-meta-cascade-dataset:dsparam:pKey"),
-            "Name": "pKey",
-            "ValueType": "SINGLE_VALUED",
-            "DefaultValues": {"StaticValues": ["customer_id"]},
-        }},
-        {"StringDatasetParameter": {
-            "Id": auto_id("qs-gen-meta-cascade-dataset:dsparam:pValues"),
-            "Name": "pValues",
-            "ValueType": "MULTI_VALUED",
-            "DefaultValues": {
-                "StaticValues": ["demo-customer_id-1", "demo-customer_id-0"],
-            },
-        }},
+    # scoped UUID (auto_id over dataset_id + name); the shape is unchanged.
+    assert pkey.Id == auto_id("qs-gen-meta-cascade-dataset:dsparam:pKey")
+    assert pkey.Name == "pKey"
+    assert pkey.ValueType == "SINGLE_VALUED"
+    assert pkey.DefaultValues is not None
+    assert pkey.DefaultValues.StaticValues == ["customer_id"]
+
+    assert pvalues.Id == auto_id("qs-gen-meta-cascade-dataset:dsparam:pValues")
+    assert pvalues.Name == "pValues"
+    assert pvalues.ValueType == "MULTI_VALUED"
+    assert pvalues.DefaultValues is not None
+    assert pvalues.DefaultValues.StaticValues == [
+        "demo-customer_id-1", "demo-customer_id-0",
     ]
 
 
@@ -383,7 +221,7 @@ def test_dataset_param_ids_are_valid_unique_uuids_across_all_apps() -> None:
 
     seen: dict[str, tuple[str, str]] = {}
     for ds in datasets:
-        for p in (ds.DatasetParameters or []):
+        for p in ds.dataset_params:
             variant = (
                 p.StringDatasetParameter
                 or p.IntegerDatasetParameter

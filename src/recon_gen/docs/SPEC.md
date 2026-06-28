@@ -2,7 +2,7 @@
 
 ## Overall Goal
 
-Help integrators generate AWS QuickSight dashboards that help non-technical financial users find and triage problems in their unique institution. This consists of a shared common library that wraps the QuickSight JSON and a series of example applications built on top that are easily customizable to the situation.
+Help integrators generate self-hosted dashboards that help non-technical financial users find and triage problems in their unique institution. This consists of a shared common library that builds a renderer-agnostic dashboard tree (rendered as self-hosted HTMX dashboards + a regulator-ready audit PDF) and a series of example applications built on top that are easily customizable to the situation.
 
 ## Audiences
 

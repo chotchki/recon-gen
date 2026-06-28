@@ -1,9 +1,9 @@
-"""QuickSight DataSet builders for the L1 Dashboard app.
+"""Dataset builders for the L1 Dashboard app.
 
 Each builder wraps one M.1a.7 L1 invariant view. The SQL is intentionally
 trivial (`SELECT * FROM <prefix>_<view>`) — the views already do the
 filtering, computation, and shape work. Datasets here are thin façades
-that surface columns to QuickSight visuals via the dataset contract.
+that surface columns to the renderer via the dataset contract.
 
 The visual_identifier convention is ``l1-<viewname>-ds`` so every
 dataset's logical name traces back to the underlying L1 invariant.
@@ -22,6 +22,7 @@ from recon_gen.common.dataset_contract import (
     ColumnShape,
     ColumnSpec,
     DatasetContract,
+    BuiltDataset,
     build_dataset,
 )
 from recon_gen.common.l2 import L2Instance
@@ -31,7 +32,6 @@ from recon_gen.common.l2.primitives import (
     SUPERSEDE_TECHNICAL_CORRECTION,
 )
 from recon_gen.common.models import (
-    DataSet,
     DatasetParameter,
     DateTimeDatasetParameter,
     StringDatasetParameter,
@@ -893,7 +893,7 @@ P_L1_DRIFT_ROLE = "pL1DriftRole"
 P_L1_DRIFT_TL_ROLE = "pL1DriftTlRole"
 
 
-def build_drift_dataset(cfg: Config, l2_instance: L2Instance) -> DataSet:
+def build_drift_dataset(cfg: Config, l2_instance: L2Instance) -> BuiltDataset:
     """Wrap the leaf-account drift view from M.1a.7.
 
     Rows in this dataset are leaf-account drift violations only — the
@@ -966,7 +966,7 @@ def build_drift_dataset(cfg: Config, l2_instance: L2Instance) -> DataSet:
 
 def build_ledger_drift_dataset(
     cfg: Config, l2_instance: L2Instance,
-) -> DataSet:
+) -> BuiltDataset:
     """Wrap the parent-account drift view from M.1a.7.
 
     Same shape as ``build_drift_dataset`` minus ``account_parent_role``
@@ -1026,7 +1026,7 @@ P_L1_LIMIT_BREACH_TYPE = "pL1LimitBreachType"
 
 def build_overdraft_dataset(
     cfg: Config, l2_instance: L2Instance,
-) -> DataSet:
+) -> BuiltDataset:
     """Wrap the internal-account overdraft view from M.1a.7.
 
     Rows are accounts with negative stored balance — the L1 invariant
@@ -1071,7 +1071,7 @@ def build_overdraft_dataset(
 
 def build_limit_breach_dataset(
     cfg: Config, l2_instance: L2Instance,
-) -> DataSet:
+) -> BuiltDataset:
     """Wrap the per-(account, day, type) limit-breach view from M.1a.7.
 
     Each row is one cell where the cumulative outbound debit exceeded
@@ -1127,7 +1127,7 @@ P_L1_TODAYS_EXC_TYPE = "pL1TodaysExcType"
 
 def build_l1_exceptions_dataset(
     cfg: Config, l2_instance: L2Instance,
-) -> DataSet:
+) -> BuiltDataset:
     """Wrap the `<prefix>_l1_exceptions` matview from M.1a.9.
 
     M.1a.9 promoted the UNION ALL from inline CustomSql to a per-instance
@@ -1257,7 +1257,7 @@ def _date_dataset_param(name: str, view: DateView) -> DatasetParameter:
 
 def build_daily_statement_summary_dataset(
     cfg: Config, l2_instance: L2Instance,
-) -> DataSet:
+) -> BuiltDataset:
     """Wrap the `<prefix>_daily_statement_summary` matview from M.1a.9.
 
     M.1a.9 promoted the LAG window + LEFT JOIN + GROUP BY CTE from
@@ -1459,7 +1459,7 @@ def _daily_statement_transactions_sql(prefix: str, dialect: Dialect) -> str:
 
 def build_daily_statement_transactions_dataset(
     cfg: Config, l2_instance: L2Instance,
-) -> DataSet:
+) -> BuiltDataset:
     """Wrap the per-leg ledger feed for Daily Statement detail rows."""
     sql = _daily_statement_transactions_sql(cfg.db.table_prefix, cfg.db.dialect)
     view = DateView(frame=cfg.test.generator.as_of_frame())
@@ -1492,7 +1492,7 @@ P_L1_TX_TYPE = "pL1TxType"
 
 def build_transactions_dataset(
     cfg: Config, l2_instance: L2Instance,
-) -> DataSet:
+) -> BuiltDataset:
     """Wrap `<prefix>_current_transactions` matview for the Transactions
     sheet's raw posting ledger.
 
@@ -1564,7 +1564,7 @@ def build_transactions_dataset(
 
 def build_drift_timeline_dataset(
     cfg: Config, l2_instance: L2Instance,
-) -> DataSet:
+) -> BuiltDataset:
     """Pre-aggregate leaf-account drift by (business_day_end, account_role).
 
     One row per (day, role) carrying SUM(ABS(drift)). Source matview is
@@ -1608,7 +1608,7 @@ def build_drift_timeline_dataset(
 
 def build_ledger_drift_timeline_dataset(
     cfg: Config, l2_instance: L2Instance,
-) -> DataSet:
+) -> BuiltDataset:
     """Pre-aggregate ledger drift by (business_day_end, account_role).
 
     Same shape as the leaf-drift timeline, sourced from the parent-account
@@ -1658,7 +1658,7 @@ P_L1_UNBUNDLED_RAIL = "pL1UnbundledRail"
 
 def build_stuck_pending_dataset(
     cfg: Config, l2_instance: L2Instance,
-) -> DataSet:
+) -> BuiltDataset:
     """Wrap the M.2b.8 `<prefix>_stuck_pending` matview.
 
     Pending transactions whose age exceeds the per-rail
@@ -1703,7 +1703,7 @@ def build_stuck_pending_dataset(
 
 def build_stuck_unbundled_dataset(
     cfg: Config, l2_instance: L2Instance,
-) -> DataSet:
+) -> BuiltDataset:
     """Wrap the M.2b.9 `<prefix>_stuck_unbundled` matview.
 
     Posted transactions where bundle_id IS NULL and age exceeds the
@@ -1783,7 +1783,7 @@ _SUPERSESSION_SELECT_PREDICATE = "entry_count > 1 AND has_supersede = 1"
 
 def build_supersession_transactions_dataset(
     cfg: Config, l2_instance: L2Instance,
-) -> DataSet:
+) -> BuiltDataset:
     """Pull rows from `<prefix>_transactions` whose logical `id` has
     multiple `entry` values — the audit trail for superseded postings.
 
@@ -1874,7 +1874,7 @@ def build_supersession_transactions_dataset(
 
 def build_supersession_daily_balances_dataset(
     cfg: Config, l2_instance: L2Instance,
-) -> DataSet:
+) -> BuiltDataset:
     """Pull rows from `<prefix>_daily_balances` whose logical key
     `(account_id, business_day_start)` has multiple `entry` values.
 
@@ -1922,7 +1922,7 @@ def build_supersession_daily_balances_dataset(
 
 def build_l1_accounts_dataset(
     cfg: Config, l2_instance: L2Instance,
-) -> DataSet:
+) -> BuiltDataset:
     """Y.2.g companion — distinct ``(account_id, account_role)`` over
     the universe of accounts. Feeds every L1 sheet's Account dropdown
     via ``LinkedValues`` (the Daily Statement sheet's account dropdown
@@ -2002,7 +2002,7 @@ from recon_gen.common.html._tree_fetcher import PickerMatviewHint
 
 def build_l1_ds_accounts_dataset(
     cfg: Config, l2_instance: L2Instance,
-) -> DataSet:
+) -> BuiltDataset:
     """BO.1 — Daily-Statement-specific account picker source.
 
     Same shape as ``build_l1_accounts_dataset`` but sourced ONLY from
@@ -2061,7 +2061,7 @@ def build_l1_ds_accounts_dataset(
 
 def build_l1_ds_control_accounts_dataset(
     cfg: Config, l2_instance: L2Instance,
-) -> DataSet:
+) -> BuiltDataset:
     """CQ.4.b — singleton-control accounts reference table source.
 
     Drives the "Control accounts (1:1 singletons)" Table pinned at
@@ -2124,7 +2124,7 @@ def build_l1_ds_control_accounts_dataset(
 
 def build_l1_tx_ids_dataset(
     cfg: Config, l2_instance: L2Instance,
-) -> DataSet:
+) -> BuiltDataset:
     """Y.2.g companion — distinct ``transfer_id`` over the current
     ledger. Feeds the Transactions sheet's Transfer dropdown via
     ``LinkedValues``.
@@ -2153,7 +2153,7 @@ def build_l1_tx_ids_dataset(
 
 def build_l1_tx_transaction_ids_dataset(
     cfg: Config, l2_instance: L2Instance,
-) -> DataSet:
+) -> BuiltDataset:
     """DR.3 companion — distinct logical transaction ``id`` over the
     current ledger. Feeds the Transactions sheet's Transaction ID
     typeahead picker via ``LinkedValues``.
@@ -2185,7 +2185,7 @@ def build_l1_tx_transaction_ids_dataset(
 
 def build_l1_supersession_tx_ids_dataset(
     cfg: Config, l2_instance: L2Instance,
-) -> DataSet:
+) -> BuiltDataset:
     """DR.6 companion — distinct transaction ``id`` of the trails that
     actually appear in the Supersession Audit. Feeds the audit sheet's
     Transaction ID dropdown via ``LinkedValues``.
@@ -2218,7 +2218,7 @@ def build_l1_supersession_tx_ids_dataset(
 
 def build_l1_tx_facets_dataset(
     cfg: Config, l2_instance: L2Instance,
-) -> DataSet:
+) -> BuiltDataset:
     """Y.2.g companion — distinct ``(status, origin)`` over the current
     ledger. Feeds the Transactions sheet's Status + Origin dropdowns via
     ``LinkedValues``. Both columns are open-set in the L1 schema, so a
@@ -2237,7 +2237,7 @@ def build_l1_tx_facets_dataset(
 
 def build_all_l1_dashboard_datasets(
     cfg: Config, l2_instance: L2Instance,
-) -> list[DataSet]:
+) -> list[BuiltDataset]:
     """Return every dataset the L1 dashboard's sheets reference.
 
     `build_l1_dashboard_app` calls this and registers each result on the

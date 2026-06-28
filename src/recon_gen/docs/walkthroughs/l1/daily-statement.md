@@ -67,17 +67,14 @@ for triage.
 
 ## Filters
 
-- **Role** (ParameterDropdown, App2 only) — top of the Role → Account →
-  Day cascade; narrows the Account list to the picked role. QuickSight
-  drops it — its picker can't cascade off a parameterized dataset (see
-  the quirks log) — and shows the flat Account + Business Day pair
-  instead.
+- **Role** (ParameterDropdown) — top of the Role → Account → Day
+  cascade; narrows the Account list to the picked role.
 - **Account** (ParameterDropdown) — single-value picker over the
   internal accounts (shown as `Name (id)`). Required — the KPIs don't
   render without one selected. Drill-targets auto-fill it.
 - **Business Day** (ParameterDateTimePicker) — single-value picker over
-  `business_day`. Same semantics. Drill-targets auto-fill it. On App2
-  each visible day is decorated with has-transactions / has-balance /
+  `business_day`. Same semantics. Drill-targets auto-fill it. Each
+  visible day is decorated with has-transactions / has-balance /
   has-both markers for the picked account (DECORATION not restriction —
   every day stays clickable).
 

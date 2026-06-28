@@ -48,7 +48,6 @@ Click **Copy**. The button flashes *Copied!* for 1.5s. Paste the pretty-printed 
 
 ## Where it doesn't appear
 
-- **QuickSight bundles.** The popup is App2-only by operator decision (CY operator lock 7). The deployed QuickSight dashboards have no `⋯` row-drill menu and no side-panel chrome; QS users inspecting metadata must query the base table directly. The affordance was built primarily as a troubleshooting tool for the self-hosted App2 / Studio iteration loop where the operator already runs the L2-aware dashboard locally. (The same JSON is in the database either way; the question is only whether the dashboard surfaces it.)
 - **Sheets without a tree-flagged Table.** The popup attaches only to `Table` visuals declared with `metadata_popup=True` in the tree wiring (today: *Posting Ledger* on Transactions + *Posted Money Records* on Daily Statement). Adding the affordance elsewhere requires lighting up the same flag on the destination visual; the construction-time guard fails loud if the bound dataset's contract doesn't carry a `metadata` column.
 
 ## What it's NOT

@@ -993,26 +993,13 @@ def _build_app(app_name: str) -> App:
     Used for ``render_dataflow`` — only needs the analysis structure
     (sheets + visuals + dataset refs), not a real datasource.
     """
-    from recon_gen.common.config import AwsConfig, Config, DatasourceConfig
+    from recon_gen.common.config import AwsConfig, Config
     from recon_gen.common.l2 import default_l2_instance
 
     spec_example = default_l2_instance()
     from recon_gen.common.config import DbConfig
     cfg = Config(
-        aws=AwsConfig(
-            account_id="000000000000", region="us-east-2",
-            deployment_name="qs-gen",
-            principal_arns=(
-                "arn:aws:quicksight:us-east-2:000000000000:user/default/dummy",
-            ),
-            datasource=DatasourceConfig(
-                mode="adopt",
-                arn=(
-                    "arn:aws:quicksight:us-east-2:000000000000:"
-                    "datasource/qs-gen-demo-datasource"
-                ),
-            ),
-        ),
+        aws=AwsConfig(deployment_name="recon-gen"),
         db=DbConfig(table_prefix="spec_example"),
     )
     return _APP_BUILDERS[app_name](cfg, l2_instance=spec_example)

@@ -1,4 +1,4 @@
-"""QuickSight theme — registry default + builder.
+"""Theme presets — registry default + L2 resolver.
 
 Per N.1.g, the registry holds ONLY the ``default`` preset (a neutral
 blue/grey professional palette). Per-instance brand palettes
@@ -7,36 +7,21 @@ to inline ``theme:`` blocks on the L2 YAML — apps consume the L2
 theme via ``resolve_l2_theme(l2_instance)``.
 
 The ``ThemePreset`` dataclass itself lives in ``common/l2/theme.py``
-— theme is an L2 model concept; this module re-exports for back-compat
-and provides the ``build_theme(cfg)`` QuickSight Theme constructor.
+— theme is an L2 model concept; this module re-exports it for
+back-compat and owns ``DEFAULT_PRESET`` (the in-canvas-accent fallback
+the renderers resolve colors from). The QS ``Theme`` resource builder
+that once lived here is gone with the QS emitter (DW phase).
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from recon_gen.common.config import Config
 from recon_gen.common.l2.theme import ThemePreset
-from recon_gen.common.models import (
-    DataColorPalette,
-    FontFamily,
-    Gutter,
-    Margin,
-    ResourcePermission,
-    SheetStyle,
-    Theme,
-    ThemeConfiguration,
-    Tile,
-    TileBorder,
-    TileLayout,
-    Typography,
-    UIColorPalette,
-)
 
 __all__ = [
     "DEFAULT_PRESET",
     "ThemePreset",
-    "build_theme",
     "resolve_l2_theme",
 ]
 
@@ -70,7 +55,7 @@ _WARNING_AMBER = "#E65100"
 _DANGER_RED = "#C62828"
 
 DEFAULT_PRESET = ThemePreset(
-    theme_name="QuickSight Gen Theme",
+    theme_name="Recon Gen Theme",
     version_description="Auto-generated dashboard theme",
     analysis_name_prefix=None,
     data_colors=[
@@ -113,102 +98,9 @@ def resolve_l2_theme(l2_instance: "L2Instance | None") -> ThemePreset | None:
     (N.4.k). Callers that consume the return for accent colors (e.g.,
     Getting Started rich text) should fall through to
     ``DEFAULT_PRESET.accent`` so on-canvas colors stay sensible when
-    no L2 theme is declared. The dashboard-level fallback is AWS
-    QuickSight's CLASSIC theme (no Theme resource emitted by
-    ``build_theme`` when ``None``).
+    no L2 theme is declared. ``None`` means the renderer uses its own
+    neutral default (App2) — there's no QS Theme resource any more.
     """
     if l2_instance is not None and l2_instance.theme is not None:
         return l2_instance.theme
     return None
-
-
-# ---------------------------------------------------------------------------
-# Theme builder
-# ---------------------------------------------------------------------------
-
-def build_theme(cfg: Config, theme: ThemePreset | None) -> Theme | None:
-    """Build the QuickSight Theme resource for ``theme`` (N.4.k).
-
-    Returns ``None`` when ``theme`` is ``None`` — the silent-fallback
-    contract: an L2 instance with no inline ``theme:`` block deploys
-    against AWS QuickSight's CLASSIC theme without emitting a custom
-    Theme resource. The CLI skips ``theme.json`` write + skips the
-    deploy step in that case.
-
-    When ``theme`` is set, builds a complete Theme honoring permissions
-    + tags from ``cfg``.
-    """
-    if theme is None:
-        return None
-    preset = theme
-    theme_id = cfg.aws.prefixed("theme")
-
-    permissions = None
-    if cfg.aws.principal_arns:
-        theme_actions = [
-            "quicksight:DescribeTheme",
-            "quicksight:DescribeThemeAlias",
-            "quicksight:DescribeThemePermissions",
-            "quicksight:ListThemeAliases",
-            "quicksight:ListThemeVersions",
-            "quicksight:UpdateTheme",
-            "quicksight:UpdateThemeAlias",
-            "quicksight:UpdateThemePermissions",
-            "quicksight:DeleteTheme",
-            "quicksight:DeleteThemeAlias",
-            "quicksight:CreateThemeAlias",
-        ]
-        permissions = [
-            ResourcePermission(Principal=arn, Actions=theme_actions)
-            for arn in cfg.aws.principal_arns
-        ]
-
-    return Theme(
-        AwsAccountId=cfg.aws.account_id,
-        ThemeId=theme_id,
-        Name=preset.theme_name,
-        BaseThemeId="CLASSIC",
-        Tags=cfg.aws.tags(),
-        Configuration=ThemeConfiguration(
-            DataColorPalette=DataColorPalette(
-                Colors=preset.data_colors,
-                EmptyFillColor=preset.empty_fill_color,
-                MinMaxGradient=preset.gradient,
-            ),
-            UIColorPalette=UIColorPalette(
-                PrimaryBackground=preset.primary_bg,
-                SecondaryBackground=preset.secondary_bg,
-                PrimaryForeground=preset.primary_fg,
-                SecondaryForeground=preset.secondary_fg,
-                Accent=preset.accent,
-                AccentForeground=preset.accent_fg,
-                Danger=preset.danger,
-                DangerForeground=preset.danger_fg,
-                Warning=preset.warning,
-                WarningForeground=preset.warning_fg,
-                Success=preset.success,
-                SuccessForeground=preset.success_fg,
-                Dimension=preset.dimension,
-                DimensionForeground=preset.dimension_fg,
-                Measure=preset.measure,
-                MeasureForeground=preset.measure_fg,
-            ),
-            Sheet=SheetStyle(
-                Tile=Tile(
-                    Border=TileBorder(Show=True),
-                ),
-                TileLayout=TileLayout(
-                    Gutter=Gutter(Show=True),
-                    Margin=Margin(Show=True),
-                ),
-            ),
-            Typography=Typography(
-                FontFamilies=[
-                    FontFamily(FontFamily="Amazon Ember"),
-                    FontFamily(FontFamily="sans-serif"),
-                ],
-            ),
-        ),
-        Permissions=permissions,
-        VersionDescription=preset.version_description,
-    )

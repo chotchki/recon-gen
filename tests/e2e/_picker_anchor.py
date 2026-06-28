@@ -45,20 +45,20 @@ import psycopg
 
 from recon_gen.common.browser.helpers import record_sql_trace
 from recon_gen.common.config import Config
-from recon_gen.common.dataset_contract import DatasetContract
+from recon_gen.common.dataset_contract import BuiltDataset, DatasetContract
 from recon_gen.common.html._sql_executor import apply_dataset_param_defaults
 from recon_gen.common.l2 import L2Instance
-from recon_gen.common.models import DataSet
 from recon_gen.common.sql.dialect import Dialect
 
 
 PickerKind = Literal["dropdown", "datetime", "date_from", "date_to", "slider"]
 
-DatasetBuilder = Callable[[Config, L2Instance], DataSet]
+DatasetBuilder = Callable[[Config, L2Instance], BuiltDataset]
 """The ``build_*_dataset(cfg, l2)`` signature every L1 dataset uses.
 
 Specs carry one of these — the helper calls it to get the production
-DataSet object, then extracts the SQL the visual will run."""
+dataset handle, then extracts the SQL the visual will run via
+``BuiltDataset.sql``."""
 
 
 @dataclass(frozen=True)
@@ -174,9 +174,9 @@ def fetch_anchor_row(
     (with declared param defaults applied) and return the first row as a
     column→value dict.
 
-    The SQL is the exact CustomSql the deploy registers — extracted
-    from ``ds.PhysicalTableMap[<key>].CustomSql.SqlQuery`` after calling
-    the builder. ``apply_dataset_param_defaults`` substitutes each
+    The SQL is the exact query the builder registers — read off
+    ``BuiltDataset.sql`` after calling the builder.
+    ``apply_dataset_param_defaults`` substitutes each
     ``<<$pX>>`` placeholder with its ``DataSetParameter``'s declared
     static default (the same production substitutor App2 uses on
     initial page load). The result is then wrapped:
@@ -206,21 +206,9 @@ def fetch_anchor_row(
         raise RuntimeError("fetch_anchor_row: cfg.db.url is unset")
 
     ds = spec.dataset_builder(cfg, l2)
-    if not ds.PhysicalTableMap:
-        raise RuntimeError(
-            f"fetch_anchor_row: {spec.sheet_name!r}'s dataset has no "
-            f"PhysicalTableMap entries — builder returned an empty "
-            f"shape"
-        )
-    _, table = next(iter(ds.PhysicalTableMap.items()))
-    if table.CustomSql is None:
-        raise RuntimeError(
-            f"fetch_anchor_row: {spec.sheet_name!r}'s dataset table "
-            f"has no CustomSql — non-custom-SQL datasets aren't wired"
-        )
-    qs_sql = table.CustomSql.SqlQuery
+    qs_sql = ds.sql
     resolved = apply_dataset_param_defaults(
-        qs_sql, ds.DatasetParameters or [], {},
+        qs_sql, ds.dataset_params, {},
     )
     order_clause = f"ORDER BY {spec.anchor_order} " if spec.anchor_order else ""
     limit_clause = (

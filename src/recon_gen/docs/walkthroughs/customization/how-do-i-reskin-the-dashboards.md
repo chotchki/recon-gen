@@ -11,9 +11,9 @@ get our actual brand colors on this?*
 
 Yes, and it takes about ten minutes. The visual layer never
 references hex colors directly — every accent, foreground,
-background and link tint resolves at generate time from the L2
+background and link tint resolves at render time from the L2
 institution YAML's inline ``theme:`` block. To rebrand you add a
-``theme:`` block to your L2 YAML, regenerate, deploy. The
+``theme:`` block to your L2 YAML and restart the dashboards. The
 analysis name, KPI accent colors, table-cell tints and
 conditional formatting all flip together.
 
@@ -52,7 +52,7 @@ generic palette:
 
 ```yaml
 theme:
-  theme_name: "QuickSight Gen Theme"
+  theme_name: "Recon Gen Theme"
   version_description: "Auto-generated dashboard theme"
   analysis_name_prefix: null
   data_colors:
@@ -149,32 +149,34 @@ theme:
 ```
 
 If you omit the ``theme:`` block entirely, ``build_theme`` returns
-``None`` and the deploy skips emitting a custom Theme resource —
-AWS QuickSight CLASSIC takes over for that institution
-(silent-fallback contract). Useful for quick smoke tests where
-brand colors don't matter yet.
+``None`` and the renderer falls back to a neutral navy/grey
+(``common/theme.py::DEFAULT_PRESET``) for that institution — no
+persona palette (silent-fallback contract). Useful for quick
+smoke tests where brand colors don't matter yet.
 
-### Step 2 — Regenerate and deploy
+### Step 2 — Serve the themed dashboards
 
 ```bash
-recon-gen json apply --l2 acme_treasury.yaml -c config.yaml -o out/
-recon-gen json apply --l2 acme_treasury.yaml -c config.yaml -o out/ --execute
+recon-gen dashboards --l2 acme_treasury.yaml -c config.yaml
+# → http://127.0.0.1:8765/dashboards
 ```
 
-The deploy delete-then-creates the theme + analyses + dashboards
-with your new tokens. Existing user-saved bookmarks survive (the
-dashboard ID is stable across re-deploys); the visual chrome
-flips on next load.
+The dashboards server resolves your new tokens at render time —
+no deploy step, no resource graph to delete-then-create. Restart
+the process and your brand flips on the next page load. The audit
+PDF (``recon-gen audit apply``) reads the SAME tokens, so a
+regenerated report carries your palette too. Use
+``recon-gen studio`` instead if you'd rather iterate on the YAML
+in place — same themed dashboards, plus the editor.
 
 ## Drilling in
 
 A few tokens to know about beyond the obvious accent:
 
 - **`analysis_name_prefix`** — set to ``null`` for production
-  (analysis reads "L1 Reconciliation Dashboard"). Set to
-  ``"Demo"`` to name analyses "Demo — L1 Reconciliation
-  Dashboard" and visually distinguish demo vs production
-  analyses in the QuickSight authoring UI.
+  (the dashboard reads "L1 Reconciliation Dashboard"). Set to
+  ``"Demo"`` to name it "Demo — L1 Reconciliation Dashboard" and
+  flag demo vs production builds at a glance.
 - **`data_colors`** — the eight-color series palette. First
   three are most prominent (single-series KPIs, two-series bar
   charts, three-segment stacked charts). Pick three brand
@@ -196,7 +198,7 @@ A few tokens to know about beyond the obvious accent:
 
 ## Next step
 
-Once your theme block is declared and the deploy reflects your
+Once your theme block is declared and the dashboards reflect your
 brand:
 
 1. **Spot-check the three brand-defining surfaces.** Open the L1
@@ -206,14 +208,13 @@ brand:
    are the three places where a wrong token surfaces most
    visibly.
 2. **Confirm the analysis name.** With
-   ``analysis_name_prefix: null``, the analysis in QuickSight
-   reads its app's display name (no prefix). Demo themes
-   often use ``"Demo"`` to flag demo deploys.
+   ``analysis_name_prefix: null``, the dashboard reads its app's
+   display name (no prefix). Demo themes often use ``"Demo"`` to
+   flag demo builds.
 3. **Multi-instance note.** Each L2 YAML carries its own
-   ``theme:``. Deploying L1 against ``sasquatch_pr.yaml`` and
-   ``acme_treasury.yaml`` simultaneously gives you two
-   dashboards with two distinct themes — no per-app preset
-   juggling required.
+   ``theme:``. Serving L1 against ``sasquatch_pr.yaml`` and
+   ``acme_treasury.yaml`` gives you two dashboards with two
+   distinct themes — no per-app preset juggling required.
 
 ## The docs site follows the same theme block
 
@@ -258,8 +259,8 @@ navigation (no logo) — `mkdocs.yml` ships no default mark.
 
 ## Related walkthroughs
 
-- [How do I configure the deploy for my AWS account?](how-do-i-configure-the-deploy.md) —
-  the ``config.yaml`` deploy contract; theme declarations now live
-  on the L2 YAML, not in this file.
+- [Self-hosting the dashboards](../../reference/self-host.md) —
+  how to run the themed dashboards (and Studio) against your
+  database.
 - [How do I publish docs against my L2?](how-do-i-publish-docs-against-my-l2.md) —
   the end-to-end docs export + render flow.

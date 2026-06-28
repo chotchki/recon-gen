@@ -3,9 +3,9 @@
 #
 # The pre-CB.11.c shape had six top-level jobs plus a sibling `e2e.yml`
 # workflow with another four. With the self-hosted recon-gen-ci-local
-# box online and `./run_tests.sh up_to=qs_browser` driving every layer
-# (unit → db → app2 → deploy → qs_api → qs_browser) under one roof —
-# Docker, AWS QuickSight deploys, Playwright WebKit, teardown — the
+# box online and `./run_tests.sh up_to=agreement` driving every layer
+# (unit → db → app2 → app2_browser → agreement) under one roof —
+# Docker, Playwright WebKit, teardown, all AWS-free post-DW.11 — the
 # matrix collapses onto one self-hosted job. Post CB.17.d there is no
 # cell loop: the runner runs ONE pytest invocation per layer; the
 # shared PG + Oracle containers below are the substrate for every
@@ -14,8 +14,9 @@
 # re-spin its own container on top of CI's.
 #
 # What stays out:
-# - `e2e.yml` is deleted (the layered runner does its work). The nightly
-#   AWS-sweep belongs in `nightly-cost-sweep.yml`, not here.
+# - `e2e.yml` is deleted (the layered runner does its work). DW.11 also
+#   deleted `nightly-cost-sweep.yml` — with QuickSight + the AWS footprint
+#   gone (DW.0.5 fully-local), there's nothing to sweep.
 # - `release.yml` no longer re-runs tests; it gates on this workflow's
 #   `workflow_run` success (see `release.yml.new`).
 # - `docs-portable-install` stays on ubuntu-latest — it's a wheel-extras
@@ -44,13 +45,12 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  id-token: write   # AWS OIDC for the qs_api / qs_browser layers
   contents: read
   actions: read     # `gh run list` if any cleanup helper needs it
 
 jobs:
   test-everything:
-    name: Layered runner (unit → qs_browser)
+    name: Layered runner (unit → agreement)
     # v12.0.0 followup, preserved: skip the push-CI when this is a
     # Release commit. The Release workflow (release.yml) fires on the
     # tag push and runs its own pipeline; the parallel push-CI burns
@@ -66,7 +66,7 @@ jobs:
 
     # Hard cap so a hung Playwright session doesn't pin the runner.
     # 90 min is comfortable headroom over the observed ~50 min wall on
-    # a full qs_browser sweep (BY.2 baseline).
+    # a full unit→agreement sweep (BY.2 baseline).
     timeout-minutes: 90
 
     steps:
@@ -89,10 +89,9 @@ jobs:
       - name: Install dependencies (uv sync from uv.lock)
         # `--extra dev --extra prod` covers what the layers exercise (unit
         # needs dev/pyright + playwright; db/app2 need prod for the seed +
-        # App2 server). `--extra quicksight` (DV.4) adds the runtime boto3 so
-        # the qs_browser / qs_api legs RUN — without it the QS tests skip
-        # cleanly (DV.6). Playwright + boto3-stubs + pytest-xdist live in [dev].
-        run: uv sync --frozen --extra dev --extra prod --extra quicksight
+        # App2 server). DW.10 — no `--extra quicksight`: QuickSight (and
+        # boto3) are gone. Playwright + pytest-xdist live in [dev].
+        run: uv sync --frozen --extra dev --extra prod
 
       - name: Install Playwright WebKit browser
         # WebKit system libs are pre-installed on the runner, so
@@ -107,15 +106,6 @@ jobs:
         uses: biomejs/setup-biome@v2
         with:
           version: 2.4.14
-
-      - name: Configure AWS credentials via OIDC
-        # qs_api + qs_browser layers reach AWS for QuickSight deploys.
-        # OIDC trust policy on `qs-gen-ci` role is documented in
-        # `.github/E2E_SETUP.md` (carried over from e2e.yml).
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: us-east-1
 
       - name: Generate random DB passwords (BX.248)
         # Per-workflow-run random passwords for the shared PG + Oracle
@@ -169,11 +159,10 @@ jobs:
 
       - name: Ensure shared PG + Oracle are up (reuse persistent containers when present)
         # CI box exposes PG on host port 5432 and Oracle on host port
-        # 1521. `hotchkiss.io:5432` / `:1521` DDNS forwards point at
-        # the CI box so QS-in-us-east-1 can reach the CI containers
-        # from the runner-generated qs.yaml. (Dev-box pair owns 5433
-        # / 1522; the port-preserve in `_swap_url_host` keeps the two
-        # environments separable through DDNS.)
+        # 1521 for the local test layers. (Pre-DW.11 these also had
+        # `hotchkiss.io:5432` / `:1521` DDNS forwards so QS-in-us-east-1
+        # could reach the containers — QuickSight is gone, so the
+        # inbound forwards close and the ports are local-only now.)
         #
         # If a persistent container is already bound to those ports —
         # reuse it (skip the start, record `STARTED_BY_CI=false` so
@@ -215,7 +204,7 @@ jobs:
           # CL-followup — mirror `runner.py:_start_fresh_pg_container`
           # tuning so CI's adopted container matches local. Without
           # this, ci-shared-pg runs stock alpine defaults
-          # (max_connections=100, shared_buffers=128MB), and qs_browser
+          # (max_connections=100, shared_buffers=128MB), and app2_browser
           # under xdist `-n 4` saturates with "FATAL: sorry, too many
           # clients already". Local uses runner.py's _start_fresh_pg_
           # container path which already has the full tuning; CI takes
@@ -346,18 +335,17 @@ jobs:
           EOF"
 
       - name: Materialize per-dialect runner cfgs (one cfg per dialect)
-        # CB.17.f: dropped the `.qs.yaml` siblings. Post CB.17.d the
-        # runner generates its own QS-side cfg per run via
-        # `_write_qs_cfg_for_thin` — swaps host 127.0.0.1 → hotchkiss.io
-        # so QS in us-east-1 can reach the dev/CI box, sets
-        # `qs_disable_pg_ssl` for the postgres:17-alpine container.
-        # All CI needs to materialize is the local cfg.
+        # DW.11 — QuickSight removed: no `aws:` block, no QS-side cfg.
+        # The `aws:` block is optional post-DV.5 (a cfg with no AWS keys
+        # loads fine for every surface — dashboards / studio / audit /
+        # schema / data); CI only needs the local DB cfg + the App2 Dex
+        # OIDC / session / TLS blocks (App2's own auth, AWS-independent).
         #
-        # `demo_database_url` points at the shared containers from the
-        # step above. The env-URL short-circuit on the test step
+        # `db.url` points at the shared containers from the step above.
+        # The env-URL short-circuit on the test step
         # (`RECON_GEN_DEMO_DATABASE_URL_PG` / `_OR`) tells the runner
-        # not to re-spin its own; this URL is the cfg-side default
-        # used for seed/deploy CLI subprocess invocations.
+        # not to re-spin its own; this URL is the cfg-side default used
+        # for seed CLI subprocess invocations.
         # BX.248 — heredoc is UNquoted so `${PG_PASSWORD}` / `${ORACLE_PASSWORD}`
         # expand from the env. `${{ github.run_id }}` is GitHub template
         # syntax substituted by the runner BEFORE the shell sees it, so
@@ -365,20 +353,12 @@ jobs:
         run: |
           mkdir -p run
           cat > run/config.postgres.yaml <<EOF
-          aws:
-            account_id: "470656905821"
-            region: "us-east-1"
-            deployment_name: "qs-ci-${{ github.run_id }}-pg"
-            principal_arns:
-              - "${{ secrets.RECON_E2E_USER_ARN }}"
           db:
             dialect: "postgres"
             url: "postgresql://postgres:${PG_PASSWORD}@127.0.0.1:5432/postgres"
-            table_prefix: "qs_ci_${{ github.run_id }}_pg"
+            table_prefix: "recon_ci_${{ github.run_id }}_pg"
             default_l2_instance: "tests/l2/sasquatch_pr.yaml"
           auth:
-            aws:
-              quicksight_user_arn: "${{ secrets.RECON_E2E_USER_ARN }}"
             oidc:
               issuer_url: "https://localci.recon-gen.hotchkiss.io:5556/dex"
               client_id: "recon-gen-app2-test"
@@ -398,20 +378,12 @@ jobs:
               env: "ci"
           EOF
           cat > run/config.oracle.yaml <<EOF
-          aws:
-            account_id: "470656905821"
-            region: "us-east-1"
-            deployment_name: "qs-ci-${{ github.run_id }}-or"
-            principal_arns:
-              - "${{ secrets.RECON_E2E_USER_ARN }}"
           db:
             dialect: "oracle"
             url: "oracle+oracledb://system:${ORACLE_PASSWORD}@127.0.0.1:1521/?service_name=FREEPDB1"
-            table_prefix: "qs_ci_${{ github.run_id }}_or"
+            table_prefix: "recon_ci_${{ github.run_id }}_or"
             default_l2_instance: "tests/l2/sasquatch_pr.yaml"
           auth:
-            aws:
-              quicksight_user_arn: "${{ secrets.RECON_E2E_USER_ARN }}"
             oidc:
               issuer_url: "https://localci.recon-gen.hotchkiss.io:5556/dex"
               client_id: "recon-gen-app2-test"
@@ -431,10 +403,12 @@ jobs:
               env: "ci"
           EOF
 
-      - name: Run the full layered chain (unit → qs_browser)
-        # ./run_tests.sh up_to=qs_browser invokes the chain
-        # unit → db → app2 → deploy → qs_api → qs_browser, ONE pytest
-        # invocation per layer (post CB.17.d cell removal).
+      - name: Run the full layered chain (unit → agreement)
+        # DW.11 — QuickSight + the whole AWS footprint removed:
+        # ./run_tests.sh up_to=agreement invokes the chain
+        # unit → db → app2 → app2_browser → agreement, ONE pytest
+        # invocation per layer, fully local (no AWS tier). `agreement`
+        # is the terminal cross-renderer cross-check.
         # `--coverage` writes `.coverage.<run-id>.<layer>` files into
         # runs/<id>/.
         #
@@ -446,18 +420,14 @@ jobs:
         #
         # DJ.1 (2026-06-15) — RECON_GEN_E2E env-var gate retired.
         # e2e-tier tests collect by default; per-fixture cfg-shape
-        # checks gate the heavyweight setup. RECON_E2E_USER_ARN is
-        # consumed by the qs_browser layer for embed URL minting
-        # (also derivable from cfg.auth, kept explicit for parity
-        # with the legacy e2e.yml shape).
+        # checks gate the heavyweight setup.
         env:
-          RECON_E2E_USER_ARN: ${{ secrets.RECON_E2E_USER_ARN }}
           # Phase DC.3 — Cloudflare API token for the run-internal TLS
           # coordinator (ensure_dev_env). Scope: Zone:DNS:Edit on
           # hotchkiss.io. Read by `RECON_GEN_CLOUDFLARE_TOKEN.get_or_none()`
           # in `_dev/tls/ensure.py`; fires only when the cfg.app2.tls
           # block is set AND the chain target is in TLS_TOUCHING_LAYERS
-          # ({app2, qs_api, qs_browser}).
+          # ({app2, app2_browser}) — App2's own HTTPS, not AWS.
           RECON_GEN_CLOUDFLARE_TOKEN: ${{ secrets.CLOUDFLARE_TOKEN }}
           # Phase DD.4 — Dex IdP URL for the App2 OAuth flow. Set by
           # the runner if the runner spun a local Dex (when this env
@@ -470,9 +440,8 @@ jobs:
           # RECON_GEN_DEX_URL: "https://localci.recon-gen.hotchkiss.io:5556/dex"
           # CB.17.f env-URL short-circuit — runner reads these from
           # `_start_thin_container` and skips its own container spin.
-          # Both the seed (`recon-gen schema apply` etc.) and the
-          # deploy subprocess inherit them and reach the shared
-          # containers directly.
+          # The seed subprocesses (`recon-gen schema apply` etc.)
+          # inherit them and reach the shared containers directly.
           RECON_GEN_DEMO_DATABASE_URL_PG: "postgresql://postgres:${{ env.PG_PASSWORD }}@127.0.0.1:5432/postgres"
           RECON_GEN_DEMO_DATABASE_URL_OR: "oracle+oracledb://system:${{ env.ORACLE_PASSWORD }}@127.0.0.1:1521/?service_name=FREEPDB1"
           # RECON_GEN_RUNNER_YES bypasses the destructive-op prompt;
@@ -503,7 +472,7 @@ jobs:
         run: |
           mkdir -p runs
           /usr/bin/time -v -o runs/peak-rss-time.log \
-            ./run_tests.sh up_to=qs_browser --coverage
+            ./run_tests.sh up_to=agreement --coverage
           echo "--- /usr/bin/time -v summary ---"
           cat runs/peak-rss-time.log
           echo "--- peak RSS ---"
@@ -596,19 +565,6 @@ jobs:
             docker rm ci-shared-oracle 2>/dev/null || true
           fi
 
-      - name: Sweep deployed QS resources (always)
-        # Belt-and-suspenders: even though the runner's per-cell teardown
-        # is supposed to be idempotent, a runner-killed-mid-job case
-        # (timeout, OOM, manual cancel) leaves QS dashboards behind. The
-        # `json clean` here scopes by `Deployment` tag — uses the same
-        # deployment_name we wrote into the cfgs above, so it only
-        # sweeps THIS run's resources.
-        if: always()
-        run: |
-          mkdir -p /tmp/empty-out
-          .venv/bin/recon-gen json clean -c run/config.postgres.yaml -o /tmp/empty-out --execute || true
-          .venv/bin/recon-gen json clean -c run/config.oracle.yaml -o /tmp/empty-out --execute || true
-
   # Build a wheel from the current commit, install it in a fresh venv
   # (NOT an editable / src-tree install), and run `docs apply --portable`
   # end-to-end. Catches regressions where docs sourcing assumes a repo
@@ -685,13 +641,12 @@ jobs:
             exit 1
           }
 
-  # DV.10 — the no-QuickSight regression. A boto3-free install (the [dev] +
-  # [prod] extras WITHOUT [quicksight]) must import clean and run the
-  # non-QS tests with the QS tests skipping (DV.6), not crashing. This is
-  # the "QuickSight is optional, not required" half of the v15 contract;
-  # the Layered runner above (with --extra quicksight) is the "still works"
-  # half.
-  no-quicksight-install:
+  # DW.11 — clean-install smoke on stock ubuntu. QuickSight is gone, so
+  # this is no longer the DV.10 "QS-is-optional" regression — it's the
+  # permanent guard that the published surface installs + imports clean
+  # with ZERO boto3 anywhere in the dependency graph (the runtime
+  # complement to DW.14's no-boto3 AST lint).
+  clean-install-smoke:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -702,16 +657,16 @@ jobs:
           enable-cache: true
           python-version: "3.14"
 
-      - name: Install WITHOUT the [quicksight] extra (no runtime boto3)
+      - name: Install [dev] + [prod]
         run: uv sync --frozen --extra dev --extra prod
 
-      - name: Prove boto3 is absent + the package imports anyway (DV.1)
+      - name: Prove boto3 is absent + the package imports clean
         run: |
           set -e
-          .venv/bin/python -c "import importlib.util; assert importlib.util.find_spec('boto3') is None, 'boto3 leaked into the no-QS install'; print('runtime boto3 absent: OK')"
-          .venv/bin/python -c "import recon_gen, recon_gen.common.deploy, recon_gen.cli.json; print('package + deploy + cli import without boto3: OK')"
+          .venv/bin/python -c "import importlib.util; assert importlib.util.find_spec('boto3') is None, 'boto3 leaked into the install'; print('boto3 absent: OK')"
+          .venv/bin/python -c "import recon_gen, recon_gen.cli, recon_gen.common.config, recon_gen.apps.l1_dashboard.app, recon_gen.common.html.render; print('package + CLI + app + App2 renderer import clean: OK')"
 
-      - name: A representative test slice passes without boto3
+      - name: A representative test slice passes
         run: .venv/bin/python -m pytest tests/unit/test_models.py tests/unit/test_theme_presets.py tests/unit/test_typing_smells.py -q -p no:cacheprovider
 
   # Combine coverage data, render markdown + HTML reports, generate the

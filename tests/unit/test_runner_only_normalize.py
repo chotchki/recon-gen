@@ -119,7 +119,6 @@ def test_options_from_args_normalizes_only() -> None:
         skip_cheap=False,
         keep_on_failure=False,
         trace_all=False,
-        allow_dirty_deploy=False,
         coverage=False,
     )
     opts = r._options_from_args(ns)

@@ -1,10 +1,10 @@
-"""Phase DB.2 — App2 parity gate construction-time tests.
+"""App2 field-consumption gate — construction-time tests.
 
 The gate at ``App.resolve_auto_ids()`` walks every Visual on the
-analysis and asserts each dataclass field has a parity disposition
-entry in ``APP2_ATTRIBUTE_REGISTRY``. Catches the DA-shape gap class
-(tree adds a field, emit() lands it in QS JSON, App2 silently drops
-it) at the wiring site instead of months later.
+analysis and asserts each dataclass field has a disposition entry in
+``APP2_ATTRIBUTE_REGISTRY``. Catches the gap class (tree adds a field,
+App2's renderer silently drops it) at the wiring site instead of months
+later.
 """
 
 from __future__ import annotations
@@ -18,7 +18,6 @@ from recon_gen.common.ids import ParameterName, SheetId, VisualId
 from recon_gen.common.tree import AUTO, KPI, Analysis, App, Sheet
 from recon_gen.common.tree.app2_parity_registry import (
     APP2_ATTRIBUTE_REGISTRY,
-    HARDCODED_EMIT_INVENTORY,
     App2Consumed,
     App2ParityGap,
     ByDesign,
@@ -32,7 +31,7 @@ from tests._test_helpers import make_test_config
 def _minimal_app_with_visual(visual: object) -> App:
     """Build a one-sheet App that hosts ``visual`` so we can drive
     ``check_app2_parity(app)`` without exercising the dataset / drill
-    / param validators that come BEFORE the gate in ``emit_analysis``.
+    / param validators that come BEFORE the gate in ``App.validate()``.
     Calls the gate directly to keep failure isolation tight."""
     app = App(name="da-gate-test", cfg=make_test_config())
     analysis = app.set_analysis(
@@ -56,9 +55,9 @@ def test_kpi_with_only_registered_fields_passes_gate() -> None:
     the gate cleanly — every dataclass field is in the registry."""
     cfg = make_test_config()
     # Build a Measure that the KPI can hold without exercising dataset
-    # resolution (we never call emit_analysis here — direct gate call).
+    # resolution (we never call validate() here — direct gate call).
     from recon_gen.common.tree.structure import Dataset
-    ds = Dataset(identifier="gate-ds", arn="arn:aws:quicksight:::dataset/gate-ds")
+    ds = Dataset(identifier="gate-ds")
     measure = Measure(dataset=ds, column="n", kind="sum")
     kpi = KPI(
         title="T", subtitle="s",
@@ -164,23 +163,6 @@ def test_registry_entries_use_only_typed_dispositions() -> None:
             )
 
 
-def test_hardcoded_emit_inventory_is_non_empty_and_well_formed() -> None:
-    """The hardcoded-emit inventory captures emit() literal hardcodes
-    that don't trace to a dataclass field. Operator-locked at DB.0 —
-    one-time enumeration, doesn't grow per-Visual."""
-    assert HARDCODED_EMIT_INVENTORY, "hardcoded-emit inventory unexpectedly empty"
-    valid = (App2Consumed, TreeOnly, ByDesign)
-    for hc in HARDCODED_EMIT_INVENTORY:
-        assert hc.visual in APP2_ATTRIBUTE_REGISTRY, (
-            f"hardcoded emit on unknown Visual kind {hc.visual!r}"
-        )
-        assert hc.emit_path, "emit_path empty"
-        assert isinstance(hc.disposition, valid), (
-            f"hardcoded {hc.visual}.{hc.emit_path} disposition is "
-            f"{type(hc.disposition).__name__}; expected typed."
-        )
-
-
 # ---------------------------------------------------------------------------
 # Gate is idempotent (re-runs are no-ops once registry is satisfied).
 # ---------------------------------------------------------------------------
@@ -188,7 +170,7 @@ def test_hardcoded_emit_inventory_is_non_empty_and_well_formed() -> None:
 
 def test_gate_is_idempotent_on_clean_app() -> None:
     from recon_gen.common.tree.structure import Dataset
-    ds = Dataset(identifier="idem-ds", arn="arn:aws:quicksight:::dataset/idem-ds")
+    ds = Dataset(identifier="idem-ds")
     measure = Measure(dataset=ds, column="n", kind="sum")
     kpi = KPI(
         title="T", subtitle="s",

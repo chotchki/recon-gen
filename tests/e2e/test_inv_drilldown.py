@@ -41,8 +41,8 @@ if TYPE_CHECKING:
 pytestmark = [
     pytest.mark.e2e,
     pytest.mark.browser,
-    tier(Tier.QS_BROWSER),
-    needs(Need.AWS_QS, Need.PLAYWRIGHT),
+    tier(Tier.APP2),
+    needs(Need.PLAYWRIGHT),
 ]
 
 
@@ -96,33 +96,7 @@ def test_account_network_table_walk_rerenders_table(inv_dashboard_driver: tuple[
         _pytest.skip(
             "Backlog #331 — App2 Anchor parameter pick fires setValue + "
             "change event but no /visuals/*/data refetch lands within 30s "
-            "on CI. The [qs] variant still gates the K.4.8 invariant on "
-            "the production renderer."
-        )
-    if driver.__class__.__name__ == "QsEmbedDriver":
-        # DG.3 followup — QS Anchor account picker's MUI Autocomplete
-        # reports ``139 Options`` via the ARIA live region but always
-        # shows ``MuiAutocomplete-noOptions`` in the popper after any
-        # typed query (verified at multiple narrow-query lengths: full
-        # label, name-only "Juniper Ridge LLC", and shorter prefixes).
-        # The dataset SQL fix landed in this run (UNION source + target
-        # so Juniper Ridge IS in the picker source); the typeahead
-        # filter on the QS side is what stays broken. The contradictory
-        # state (ARIA says 139, popper says noOptions) suggests a
-        # QS-side filterOptions / server-narrowing race that
-        # ``set_dropdown_value``'s standard fill-then-wait pattern
-        # can't catch. xfail'd strict=False so the eventual fix
-        # surfaces as XPASS. Tracked: PLAN backlog.
-        import pytest as _pytest  # noqa: PLC0415
-        _pytest.xfail(
-            "DG.3 followup — QS Anchor account picker MUI Autocomplete "
-            "shows noOptions despite 139 options being known. Filter "
-            "race / server-narrowing quirk; investigation requires "
-            "tracing the QS Autocomplete filterOptions or "
-            "GetUniqueAttributeValuesSyncForAnalysis call. See "
-            "runs/<id>/browser/.../dom.html for the contradictory "
-            "state. UNION dataset fix did ship — Juniper Ridge IS in "
-            "the picker source now."
+            "on CI."
         )
     driver.open(dashboard_arg, sheet="Account Network")
     # DG.3 — the Anchor control's title is "Anchor account" (per

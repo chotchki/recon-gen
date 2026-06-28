@@ -46,8 +46,8 @@ if TYPE_CHECKING:
 pytestmark = [
     pytest.mark.e2e,
     pytest.mark.browser,
-    tier(Tier.QS_BROWSER),
-    needs(Need.AWS_QS, Need.PLAYWRIGHT),
+    tier(Tier.APP2),
+    needs(Need.PLAYWRIGHT),
 ]
 
 
@@ -55,10 +55,7 @@ def _l2ft_exceptions_sql_and_params(
     cfg: Config, l2: "L2Instance",
 ) -> tuple[str, list["DatasetParameter"]]:
     ds = build_unified_l2_exceptions_dataset(cfg, l2)
-    physical = next(iter(ds.PhysicalTableMap.values()))
-    assert physical.CustomSql is not None
-    sql = physical.CustomSql.SqlQuery
-    return sql, list(ds.DatasetParameters or [])
+    return ds.sql, list(ds.dataset_params)
 
 
 def test_bg6_l2ft_exceptions_kpi_matches_dataset_distinct_check_types(

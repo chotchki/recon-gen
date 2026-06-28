@@ -46,14 +46,14 @@ Four checks today, all extensible — drop a new ``Check`` into
   fuzz-seed reproducibility. Use ``rng = random.Random(<seed>);
   rng.X(...)`` instead.
 
-- **boto3-direct** (Y.2.gate.b.15.lint.boto3-direct) — direct
-  ``boto3.client(...)`` calls outside the 5 known production
-  wrappers (``common/deploy.py``, ``common/cleanup.py``,
-  ``common/browser/helpers.py``, ``common/aws_rds.py``,
-  ``_dev/runner.py``). Stray clients bypass the
-  ``ManagedBy: recon-gen`` tagging convention → break
-  ``cleanup``. Tests can freely use ``boto3.client`` (scope is
-  src/ only).
+- **no-boto3** (DW.14, was ``boto3-direct``) — any boto3 / botocore
+  import or ``boto3.<x>`` reach in shipped ``src/recon_gen``.
+  QuickSight + the whole AWS footprint were removed in Phase DW
+  (DW.0.5 = fully-local); boto3 has zero legitimate callers, so the
+  lint bars its re-entry entirely (mirrors no-playwright-leak). The
+  old ``boto3-direct`` variant allowed it in 5 wrappers
+  (deploy/cleanup/browser-helpers/aws_rds/runner) — all deleted in DW,
+  so the allowlist is gone with them.
 
 - **recon-prefix** (Y.2.gate.b.15.lint.recon-prefix, originally
   ``qs-gen-prefix`` — renamed at AC.B.1) — hardcoded
@@ -88,8 +88,7 @@ Four checks today, all extensible — drop a new ``Check`` into
 - **no-playwright-leak** (X.2.q.5) — ``import playwright`` /
   ``from playwright[.x] import …`` OR
   ``from recon_gen.common.browser{.helpers|.screenshot} import …``
-  (the Playwright-primitives layer; the AWS-only helpers
-  ``get_user_arn`` / ``generate_dashboard_embed_url`` are exempt) in
+  (the Playwright-primitives layer) in
   any ``tests/e2e/`` file outside the driver layer
   (``tests/e2e/_drivers/``). Playwright stays sealed behind
   ``DashboardDriver`` — e2e tests talk driver verbs (``open`` /
@@ -592,50 +591,65 @@ class DeterminismCheck(Check):
 
 
 # ---------------------------------------------------------------------------
-# Check: boto3-direct (Y.2.gate.b.15.lint.boto3-direct)
+# Check: no-boto3 (DW.14 — was Y.2.gate.b.15.lint.boto3-direct)
 # ---------------------------------------------------------------------------
 
 
-class _Boto3DirectVisitor(ast.NodeVisitor):
-    """Walk Call nodes; flag direct ``boto3.client(...)`` calls.
+_NO_BOTO3_MESSAGE = (
+    "boto3 / botocore reference — QuickSight + the whole AWS footprint "
+    "were removed in Phase DW (DW.0.5 = fully-local). There is NO "
+    "legitimate boto3 use anywhere in shipped code, and the no-boto3 "
+    "lint keeps it that way (mirrors no-playwright-leak). If you're "
+    "re-introducing a cloud surface, that's a phase-level decision — "
+    "don't reach for boto3 in a single file. Suppress with "
+    "``# typing-smell: ignore[no-boto3]: <reason>`` only with operator "
+    "sign-off."
+)
 
-    Stray clients bypass the ``ManagedBy: recon-gen`` tagging
-    convention that all production resource creation goes through;
-    the cleanup verb relies on every resource carrying that tag to
-    find orphans."""
+
+class _NoBoto3Visitor(ast.NodeVisitor):
+    """Walk import + call nodes; flag any boto3 / botocore reach.
+
+    DW.14 — QuickSight is gone and so is the AWS SDK. boto3 has zero
+    legitimate callers; this lint bars its re-entry into shipped code.
+    Catches the import (the real entry point: no import → no usage) plus
+    a direct ``boto3.client(...)`` belt-and-suspenders."""
 
     def __init__(self, file: Path) -> None:
         self.file = file
         self.smells: list[Smell] = []
 
-    def visit_Call(self, node: ast.Call) -> None:
-        if isinstance(node.func, ast.Attribute) and \
-                node.func.attr == "client" and \
-                isinstance(node.func.value, ast.Name) and \
-                node.func.value.id == "boto3":
-            self.smells.append(Smell(
-                file=self.file,
-                lineno=node.lineno,
-                checker="boto3-direct",
-                message=(
-                    "direct ``boto3.client(...)`` call — production "
-                    "AWS access goes through one of the 5 known "
-                    "wrappers (``common/deploy.py``, ``common/cleanup.py``, "
-                    "``common/browser/helpers.py``, ``common/aws_rds.py``, "
-                    "``_dev/runner.py``) so resources stay tagged "
-                    "``ManagedBy: recon-gen`` and ``cleanup`` finds "
-                    "them. If this site is genuinely a new wrapper, add "
-                    "it to the lint's allowlist; otherwise route through "
-                    "an existing one. Suppress with ``# typing-smell: "
-                    "ignore[boto3-direct]: <reason>`` if intentional."
-                ),
-            ))
+    def _flag(self, lineno: int) -> None:
+        self.smells.append(Smell(
+            file=self.file,
+            lineno=lineno,
+            checker="no-boto3",
+            message=_NO_BOTO3_MESSAGE,
+        ))
+
+    def visit_Import(self, node: ast.Import) -> None:
+        for alias in node.names:
+            root = alias.name.split(".", 1)[0]
+            if root in ("boto3", "botocore"):
+                self._flag(node.lineno)
+        self.generic_visit(node)
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        root = (node.module or "").split(".", 1)[0]
+        if root in ("boto3", "botocore"):
+            self._flag(node.lineno)
+        self.generic_visit(node)
+
+    def visit_Attribute(self, node: ast.Attribute) -> None:
+        if isinstance(node.value, ast.Name) and \
+                node.value.id in ("boto3", "botocore"):
+            self._flag(node.lineno)
         self.generic_visit(node)
 
 
-class Boto3DirectCheck(Check):
+class NoBoto3Check(Check):
     def find_smells(self, src: str, tree: ast.AST, file: Path) -> Iterable[Smell]:
-        v = _Boto3DirectVisitor(file)
+        v = _NoBoto3Visitor(file)
         v.visit(tree)
         return v.smells
 
@@ -1044,73 +1058,16 @@ class TreeDataclassCheck(Check):
         return v.smells
 
 
-_QS_CREATE_FUNCS = frozenset({
-    "create_data_set",
-    "create_analysis",
-    "create_dashboard",
-    "create_theme",
-    "create_data_source",
-})
-
-
-class _CreateTagsVisitor(ast.NodeVisitor):
-    """Walk Call nodes; flag ``<x>.create_data_set/_analysis/_dashboard/
-    _theme/_data_source(...)`` calls in deploy.py that don't either pass
-    ``Tags=`` directly OR spread a payload dict via ``**name`` (where
-    Tags is expected to live in the JSON payload). Pairs with
-    ``boto3-direct`` — that lint catches new ``boto3.client()``
-    instantiations outside the allowlist; this lint catches new
-    ``client.create_X(...)`` shapes in the allowlisted boto3 files
-    that would skip the ManagedBy: recon-gen tagging convention."""
-
-    def __init__(self, file: Path) -> None:
-        self.file = file
-        self.smells: list[Smell] = []
-
-    def visit_Call(self, node: ast.Call) -> None:
-        if isinstance(node.func, ast.Attribute) and \
-                node.func.attr in _QS_CREATE_FUNCS:
-            kwarg_names = {kw.arg for kw in node.keywords if kw.arg}
-            has_spread = any(kw.arg is None for kw in node.keywords)
-            if "Tags" not in kwarg_names and not has_spread:
-                self.smells.append(Smell(
-                    file=self.file,
-                    lineno=node.lineno,
-                    checker="create-tags",
-                    message=(
-                        f"``{node.func.attr}(...)`` without ``Tags=`` "
-                        "or ``**payload`` spread — boto3 QuickSight "
-                        "create_* calls must carry the ``ManagedBy: "
-                        "recon-gen`` tag (plus per-instance + "
-                        "extra tags) so the cleanup CLI can find + "
-                        "delete the resource later. Either pass "
-                        "``Tags=[...]`` directly or build the dict "
-                        "via ``build_*`` and spread with "
-                        "``**payload``."
-                    ),
-                ))
-        self.generic_visit(node)
-
-
-class CreateTagsCheck(Check):
-    def find_smells(self, src: str, tree: ast.AST, file: Path) -> Iterable[Smell]:
-        v = _CreateTagsVisitor(file)
-        v.visit(tree)
-        return v.smells
-
-
 # ---------------------------------------------------------------------------
 # Check: no-playwright-leak (X.2.q.5)
 # ---------------------------------------------------------------------------
 
 
 # Names that live in ``common/browser/helpers.py`` but aren't
-# Playwright-coupled — AWS plumbing that happens to share the file.
-# A test importing ONLY these is fine; importing ``webkit_page`` /
-# ``wait_for_*`` / ``screenshot`` / etc. is bypassing the driver layer.
+# Playwright-coupled. A test importing ONLY these is fine; importing
+# ``webkit_page`` / ``wait_for_*`` / ``screenshot`` / etc. is bypassing
+# the driver layer.
 _NON_PLAYWRIGHT_BROWSER_HELPERS = frozenset({
-    "get_user_arn",
-    "generate_dashboard_embed_url",
     # AA.A.qs-triage.5.followon — failure-capture sidecar; writes
     # `<capture_dir>/sql_trace.txt`. No Playwright coupling. Lives in
     # helpers.py because that's where the rest of the per-test capture
@@ -2586,25 +2543,15 @@ def _build_checks() -> list[Check]:
                 REPO_ROOT / "src/recon_gen/apps",
             ]),
         ),
-        Boto3DirectCheck(
-            name="boto3-direct",
+        NoBoto3Check(
+            name="no-boto3",
             description=(
-                "direct ``boto3.client(...)`` outside the 5 known "
-                "production wrappers — bypasses the ManagedBy tagging "
-                "convention; route through ``common/deploy.py``, "
-                "``common/cleanup.py``, ``common/browser/helpers.py``, "
-                "``common/aws_rds.py``, or ``_dev/runner.py`` instead"
+                "boto3 / botocore reference in shipped code — QuickSight + "
+                "the AWS footprint were removed in Phase DW; boto3 has zero "
+                "legitimate callers and may not re-enter src/ (mirrors "
+                "no-playwright-leak)"
             ),
-            files=[
-                p for p in _expand_paths(
-                    [REPO_ROOT / "src/recon_gen"]
-                )
-                if p != REPO_ROOT / "src/recon_gen/common/deploy.py"
-                and p != REPO_ROOT / "src/recon_gen/common/cleanup.py"
-                and p != REPO_ROOT / "src/recon_gen/common/browser/helpers.py"
-                and p != REPO_ROOT / "src/recon_gen/common/aws_rds.py"
-                and p != REPO_ROOT / "src/recon_gen/_dev/runner.py"
-            ],
+            files=_expand_paths([REPO_ROOT / "src/recon_gen"]),
         ),
         ReconPrefixCheck(
             name="recon-prefix",
@@ -2689,16 +2636,6 @@ def _build_checks() -> list[Check]:
                 "identity"
             ),
             files=_expand_paths([REPO_ROOT / "src/recon_gen/common/tree"]),
-        ),
-        CreateTagsCheck(
-            name="create-tags",
-            description=(
-                "boto3 QuickSight ``create_*`` calls must carry "
-                "the ``ManagedBy: recon-gen`` tag — pass "
-                "``Tags=[...]`` directly or spread a built "
-                "payload via ``**payload``"
-            ),
-            files=[REPO_ROOT / "src/recon_gen/common/deploy.py"],
         ),
         NoPlaywrightLeakCheck(
             name="no-playwright-leak",

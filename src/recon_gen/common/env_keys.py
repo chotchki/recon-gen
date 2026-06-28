@@ -23,8 +23,7 @@ runner grew. Three independent failure modes:
    different stack frame.
 
 2. **Required-vs-optional context.** ``RECON_GEN_RUN_DIR`` is optional
-   (sidecar capture); ``RECON_E2E_USER_ARN`` is required (browser e2e
-   embed-URL signing); ``RECON_GEN_DEMO_DATABASE_URL`` is context-
+   (sidecar capture); ``RECON_GEN_DEMO_DATABASE_URL`` is context-
    required (set by the runner for non-default variants). Every
    call site re-implements its own None-handling.
 
@@ -343,18 +342,8 @@ class EnvVar[T]:
 
 # ---------------------------------------------------------------------------
 # Patterns (used by validators below)
-
-
-# IAM ARN format — ``arn:<partition>:<service>:<region>:<account>:<resource>``.
-# Partition: ``aws`` (commercial) / ``aws-us-gov`` (GovCloud) / ``aws-cn`` (China).
-# Fairly permissive on resource part (QS resource paths use slashes).
-_IAM_ARN_RE: Final = re.compile(
-    r"arn:aws(?:-us-gov|-cn)?:[a-z0-9-]+:[a-z0-9-]*:[0-9]{12}:.+",
-)
-
-
-# AWS region — ``us-east-1`` shape.
-_AWS_REGION_RE: Final = re.compile(r"[a-z]{2}-[a-z]+-\d+")
+# (The _IAM_ARN_RE + _AWS_REGION_RE patterns retired with the AWS env
+# vars they validated — DW dead-config sweep.)
 
 
 # ---------------------------------------------------------------------------
@@ -394,19 +383,19 @@ RECON_GEN_LAYER: Final = EnvVar(
 # silent-skip-when-unset behavior was pure POLICY 1 divergence
 # (operators forgot the env var → ghost-pass locally while CI was
 # green). E2E tests now collect by default; per-fixture cfg-shape
-# checks (qs_deployed needs aws creds; dex_container_url needs
-# cfg.auth.oidc + cfg.app2.tls) gate the heavyweight setup.
+# checks (dex_container_url needs cfg.auth.oidc + cfg.app2.tls) gate
+# the heavyweight setup.
 
 # v14.0.0 — chain-wide ``as_of`` anchor pin. Set by the test layer
 # chain runner at chain start (writes to env_overrides for every layer
 # subprocess); read by ``AsOfFrame.live()`` so all wall-clock-now reads
 # across the chain agree on the same calendar day even when the run
-# straddles local midnight. Without this pin, ``json apply`` /
-# ``data apply`` / dataset emit at deploy-time would stamp today=X, and
-# later qs_browser tests computing dataset defaults at assertion time
-# would see today=Y (when Y > X by one day across the boundary),
-# silently shifting the KPI window by a day and breaking the
-# "QS-rendered == dataset-SQL aggregate" contract.
+# straddles local midnight. Without this pin, ``data apply`` / dataset
+# emit at seed-time would stamp today=X, and later app2 browser tests
+# computing dataset defaults at assertion time would see today=Y (when
+# Y > X by one day across the boundary), silently shifting the KPI
+# window by a day and breaking the "rendered == dataset-SQL aggregate"
+# agreement contract.
 #
 # ISO date string (YYYY-MM-DD); coerced to ``date`` at read time.
 # Absent ⇒ historical wall-clock behavior (``date.today()``).
@@ -414,8 +403,8 @@ RECON_GEN_AS_OF_ANCHOR: Final = EnvVar(
     name="RECON_GEN_AS_OF_ANCHOR",
     description=(
         "ISO date (YYYY-MM-DD); chain-wide ``as_of`` anchor pin. Runner "
-        "exports at chain start so deploy + dataset emit + qs_browser "
-        "tests share one calendar day across the run. Absent ⇒ "
+        "exports at chain start so dataset emit + app2 browser tests "
+        "share one calendar day across the run. Absent ⇒ "
         "``AsOfFrame.live()`` reads ``date.today()`` (historical)."
     ),
     coercer=_iso_date_coercer,
@@ -551,46 +540,10 @@ RECON_GEN_DEMO_DATABASE_URL_OR: Final = EnvVar(
 )
 
 
-# CB.11.b — QS-side cfg path. Sibling to ``RECON_GEN_CONFIG``: points at
-# a cfg yaml whose ``demo_database_url`` is the hotchkiss.io-forwarded
-# endpoint (with ``qs_disable_pg_ssl: true`` for PG) so the QS data
-# source can validate-connect from us-east-1. The local-layer cfg
-# (``RECON_GEN_CONFIG``) keeps ``127.0.0.1:<port>`` for in-process
-# schema/seed/refresh. The runner writes both per-cell. Layer dispatch
-# routes ``deploy``/``qs_api``/``qs_browser`` to this cfg; ``db``/``app2``
-# stay on ``RECON_GEN_CONFIG``. See ``project_cb10_qs_to_docker_pg_constraints``
-# memory + ``docs/audits/cb_11_a_dev_machine_forward_spike.md`` (CB.11.a
-# spike outcome) for the underlying QS→home-firewall→dev-machine shape.
-RECON_GEN_QS_CONFIG: Final = EnvVar(
-    name="RECON_GEN_QS_CONFIG",
-    description=(
-        "QS-side cfg yaml path. Used by deploy/qs_api/qs_browser layers; "
-        "its demo_database_url points at hotchkiss.io:<port> + carries "
-        "qs_disable_pg_ssl=true for PG. Runner writes per-cell."
-    ),
-    coercer=str,
-    optional=True,
-)
-
-# DI phase — operator escape hatch for the session-autouse
-# ``qs_deployed`` fixture (tests/e2e/conftest.py). When set, the fixture
-# returns early and the session runs against whatever QS state already
-# exists in the AWS account. Use case: "I deployed manually 30s ago,
-# just run the test." The fixture is normally always-apply
-# (delete-then-create, idempotent); this lets the operator skip the
-# ~30-60s redeploy when they know the state is fresh.
-RECON_GEN_SKIP_QS_DEPLOY: Final = EnvVar(
-    name="RECON_GEN_SKIP_QS_DEPLOY",
-    description=(
-        "Bool — set to any non-empty value to skip the session-autouse "
-        "QS deploy fixture (tests/e2e/conftest.py::qs_deployed). The "
-        "session runs against whatever QS state already exists in the "
-        "account. Use when you've just deployed manually and don't want "
-        "to pay the ~30-60s redeploy cost."
-    ),
-    coercer=_bool_coercer,
-    optional=True,
-)
+# DW.11 — RECON_GEN_QS_CONFIG (the QS-side two-cfg path) and
+# RECON_GEN_SKIP_QS_DEPLOY (the qs_deployed-fixture escape hatch) were
+# deleted with QuickSight. No QS deploy, no QS-side cfg, no
+# hotchkiss.io-forwarded endpoint.
 
 # Y.2.gate.c.11 — operator opt-in to capture Playwright traces on
 # every test (default is failure-only). Plumbed by RunOptions; the
@@ -704,9 +657,8 @@ RECON_GEN_RUNNER_CI: Final = EnvVar(
     optional=True,
 )
 
-# Y.2.gate.c.9 / cmd_sweep — operator override for cfg-file
-# discovery. Absent → fall back to per-dialect candidates under
-# ``run/``.
+# Y.2.gate.c.9 — operator override for cfg-file discovery. Absent →
+# fall back to per-dialect candidates under ``run/``.
 RECON_GEN_CONFIG: Final = EnvVar(
     name="RECON_GEN_CONFIG",
     legacy_name="QS_GEN_CONFIG",
@@ -794,7 +746,7 @@ RECON_GEN_TLS_KEY: Final = EnvVar(
 # biome (changed JS), and tailwind (drift gate). When the operator is
 # iterating on Python-only work and wants the unit layer < 30s, they
 # can opt OUT via these env vars — the runner sets them automatically
-# for non-unit layers (db / app2 / deploy / qs_api / qs_browser) so
+# for non-unit layers (db / app2 / app2_browser / agreement) so
 # those layers don't re-run the static checks that the unit layer
 # already covered. Pre-registration these were set as bare strings
 # (`subprocess env["RECON_GEN_SKIP_PYRIGHT"] = "1"`) which bypassed
@@ -829,21 +781,6 @@ RECON_GEN_SKIP_TAILWIND: Final = EnvVar(
     optional=True,
 )
 
-# Browser e2e — required for embed-URL signing. The probe
-# (_probe_qs_e2e_user_arn) catches the absent case before dispatch
-# to give an operator-actionable message.
-RECON_E2E_USER_ARN: Final = EnvVar(
-    name="RECON_E2E_USER_ARN",
-    legacy_name="QS_E2E_USER_ARN",
-    description=(
-        "QuickSight user ARN for embed-URL signing in browser e2e tests. "
-        "Required when running the browser layer."
-    ),
-    coercer=str,
-    optional=False,
-    validator=matches(_IAM_ARN_RE),
-)
-
 # tests/e2e/conftest.py tunables — Playwright wait knobs. Both
 # default to sensible values in the helpers; operator override
 # extends timeouts on slow CI runners.
@@ -869,33 +806,6 @@ RECON_E2E_VISUAL_TIMEOUT: Final = EnvVar(
     coercer=int,
     optional=True,
     validator=positive_int,
-)
-
-# QuickSight identity region (us-east-1 by convention; the embed-URL
-# generator is identity-region-aware).
-RECON_E2E_IDENTITY_REGION: Final = EnvVar(
-    name="RECON_E2E_IDENTITY_REGION",
-    legacy_name="QS_E2E_IDENTITY_REGION",
-    description="QuickSight identity region for embed-URL signing.",
-    coercer=str,
-    optional=True,
-    validator=matches(_AWS_REGION_RE),
-)
-
-# config.py — comma-separated list of IAM principal ARNs to grant
-# permissions on generated resources. CSV format; the loader splits
-# + validates each entry.
-RECON_GEN_PRINCIPAL_ARNS: Final = EnvVar(
-    name="RECON_GEN_PRINCIPAL_ARNS",
-    legacy_name="QS_GEN_PRINCIPAL_ARNS",
-    description=(
-        "Comma-separated IAM principal ARNs to grant permissions on "
-        "generated resources. Overrides cfg.aws.principal_arns."
-    ),
-    coercer=str,
-    optional=True,
-    # No validator — the parsed list is checked downstream by the cfg
-    # loader (each ARN runs through the same regex used elsewhere).
 )
 
 # CB.14 — runner override for the Oracle 19c container image. Absent →
@@ -958,46 +868,17 @@ RECON_GEN_DB_TESTS: Final = EnvVar(
 # practical. Most are str (cfg loader does its own coercion to
 # Path / int as needed).
 
-RECON_GEN_AWS_ACCOUNT_ID: Final = EnvVar(
-    name="RECON_GEN_AWS_ACCOUNT_ID",
-    legacy_name="QS_GEN_AWS_ACCOUNT_ID",
-    description="AWS account ID — overrides cfg.aws.account_id.",
-    coercer=str,
-    optional=True,
-    validator=matches(re.compile(r"\d{12}")),
-)
-
-RECON_GEN_AWS_REGION: Final = EnvVar(
-    name="RECON_GEN_AWS_REGION",
-    legacy_name="QS_GEN_AWS_REGION",
-    description="AWS region (us-east-1 shape) — overrides cfg.aws.region.",
-    coercer=str,
-    optional=True,
-    validator=matches(_AWS_REGION_RE),
-)
-
-RECON_GEN_DATASOURCE_ARN: Final = EnvVar(
-    name="RECON_GEN_DATASOURCE_ARN",
-    legacy_name="QS_GEN_DATASOURCE_ARN",
-    description=(
-        "QuickSight datasource ARN — overrides cfg.aws.datasource.arn. "
-        "Required only when cfg has no demo_database_url."
-    ),
-    coercer=str,
-    optional=True,
-    validator=matches(_IAM_ARN_RE),
-)
+# DW dead-config sweep — RECON_GEN_AWS_ACCOUNT_ID / AWS_REGION /
+# DATASOURCE_ARN deleted with the QuickSight ARN-synthesis surface
+# (cfg.aws no longer carries account_id / region / datasource).
 
 RECON_GEN_DEPLOYMENT_NAME: Final = EnvVar(
     name="RECON_GEN_DEPLOYMENT_NAME",
     legacy_name="QS_GEN_DEPLOYMENT_NAME",
     description=(
-        "Per-deploy QS namespace (kebab-case) — overrides "
-        "cfg.aws.deployment_name. Z.C: replaces v8.x's RECON_GEN_RESOURCE_PREFIX "
-        "+ RECON_GEN_L2_INSTANCE_PREFIX (those collapsed into one field). "
-        "Used by the Y.2.gate.m runner to namespace per-cell aw-target "
-        "deploys so sister cells (e.g., sp_pg_aw + sp_or_aw) don't "
-        "collide on QS resource IDs."
+        "Per-deploy resource-ID namespace (kebab-case) — overrides "
+        "cfg.aws.deployment_name. ``prefixed()`` weaves it into analysis / "
+        "dashboard IDs so co-tenanted deploys don't collide."
     ),
     coercer=str,
     optional=True,
@@ -1106,40 +987,9 @@ RECON_GEN_APP2_DB_POOL_SIZE: Final = EnvVar(
     # No validator — load_config does the int coercion + range check.
 )
 
-# Y.2.gate.l — RDS identifiers for the start/stop lifecycle commands.
-# RDS identifier rules: 1-63 chars, lowercase alphanumeric + hyphens,
-# starts with a letter, no trailing hyphen, no consecutive hyphens.
-# `cmd_up aws` / `cmd_down aws` / `cmd_status` read these to know which
-# cluster + instance to act on; CI workflows inject them as the CI-side
-# identifiers (separate from operator's local-dev ones — see gate.l.0
-# provisioning runbook).
-_RDS_IDENT_RE: Final = re.compile(r"[a-z][a-z0-9]*(-[a-z0-9]+)*")
-
-RECON_GEN_AWS_PG_CLUSTER_ID: Final = EnvVar(
-    name="RECON_GEN_AWS_PG_CLUSTER_ID",
-    legacy_name="QS_GEN_AWS_PG_CLUSTER_ID",
-    description=(
-        "Aurora PG cluster identifier (e.g., 'database-2' or "
-        "'recon-ci-aurora') — overrides cfg.aws.pg_cluster_id. "
-        "Required for `./run_tests.sh up aws` / `down aws` / `status`."
-    ),
-    coercer=str,
-    optional=True,
-    validator=matches(_RDS_IDENT_RE),
-)
-
-RECON_GEN_AWS_ORACLE_INSTANCE_ID: Final = EnvVar(
-    name="RECON_GEN_AWS_ORACLE_INSTANCE_ID",
-    legacy_name="QS_GEN_AWS_ORACLE_INSTANCE_ID",
-    description=(
-        "Oracle RDS instance identifier (e.g., 'database-3' or "
-        "'recon-ci-oracle') — overrides cfg.aws.oracle_instance_id. "
-        "Required for `./run_tests.sh up aws` / `down aws` / `status`."
-    ),
-    coercer=str,
-    optional=True,
-    validator=matches(_RDS_IDENT_RE),
-)
+# DW dead-config sweep — RECON_GEN_AWS_PG_CLUSTER_ID /
+# AWS_ORACLE_INSTANCE_ID (+ the _RDS_IDENT_RE validator) deleted with the
+# RDS start/stop lifecycle (DW.11 — no `up aws` / `down aws` anymore).
 
 
 # CR.2 — operator-tunable picker search-query length cap. Pre-CR.2 the

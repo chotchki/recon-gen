@@ -5,8 +5,7 @@ its own brand inline in the YAML, so the ``ThemePreset`` dataclass is a
 piece of the L2 model rather than an app-shared registry concept.
 
 ``common/theme.py`` re-exports ``ThemePreset`` from here for back-compat
-and owns the QuickSight ``Theme`` resource builder (``build_theme``)
-plus the single ``DEFAULT_PRESET`` fallback used when an L2 instance
+and owns the single ``DEFAULT_PRESET`` fallback used when an L2 instance
 omits its inline ``theme:`` block (N.4.l dropped the lookup-by-name
 registry; only the one default fallback remains).
 """

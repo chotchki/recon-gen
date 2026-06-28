@@ -126,10 +126,7 @@ def _run_supersession_audit(
     ``transaction`` / ``no_reason`` to exercise the respective narrowing.
     """
     ds = build_supersession_transactions_dataset(cfg, default_l2_instance())
-    physical = next(iter(ds.PhysicalTableMap.values()))
-    assert physical.CustomSql is not None
-    sql = physical.CustomSql.SqlQuery
-    assert sql is not None
+    sql = ds.sql
     return query_db_via_cfg(
         cfg, sql, binds={
             "param_pL1SupersedeReason": L1_ALL_SENTINEL,

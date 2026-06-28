@@ -31,35 +31,10 @@ the App walker assigns position-indexed IDs at emit time
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, ClassVar, Literal, Protocol, runtime_checkable
+from typing import ClassVar, Literal, Protocol, runtime_checkable
 
-from recon_gen.common.models import (
-    FilterControl,
-    ParameterControl,
-)
-from recon_gen.common.models import (
-    FilterCrossSheetControl as ModelFilterCrossSheetControl,
-)
-from recon_gen.common.models import (
-    FilterDateTimePickerControl as ModelFilterDateTimePickerControl,
-)
-from recon_gen.common.models import (
-    FilterDropDownControl as ModelFilterDropDownControl,
-)
-from recon_gen.common.models import (
-    FilterSliderControl as ModelFilterSliderControl,
-)
-from recon_gen.common.models import (
-    ParameterDateTimePickerControl as ModelParameterDateTimePickerControl,
-)
-from recon_gen.common.models import (
-    ParameterDropDownControl as ModelParameterDropDownControl,
-)
-from recon_gen.common.models import (
-    ParameterSliderControl as ModelParameterSliderControl,
-)
 
-from recon_gen.common.tree._helpers import AUTO, AutoResolved, _AutoSentinel
+from recon_gen.common.tree._helpers import AUTO, AutoResolved
 from recon_gen.common.tree.datasets import Column, Dataset
 from recon_gen.common.tree.filters import FilterLike
 from recon_gen.common.tree.parameters import ParameterDeclLike
@@ -74,10 +49,6 @@ from recon_gen.common.tree.parameters import ParameterDeclLike
 class StaticValues:
     """Restrict the dropdown to a fixed list of options."""
     values: list[str]
-
-    def emit(self) -> dict[str, Any]:
-        return {"Values": list(self.values)}
-
 
 @dataclass(frozen=True)
 class LinkedValues:
@@ -117,15 +88,6 @@ class LinkedValues:
         registered ``DatasetContract``."""
         return cls(dataset=dataset, column_name=column_name)
 
-    def emit(self) -> dict[str, Any]:
-        return {
-            "LinkToDataSetColumn": {
-                "DataSetIdentifier": self.dataset.identifier,
-                "ColumnName": self.column_name,
-            },
-        }
-
-
 SelectableValues = StaticValues | LinkedValues
 
 
@@ -144,8 +106,6 @@ class ParameterControlLike(Protocol):
     """
     control_id: str | AutoResolved
 
-    def emit(self) -> ParameterControl: ...
-
     def datasets(self) -> set[Dataset]: ...
 
 
@@ -157,8 +117,6 @@ class FilterControlLike(Protocol):
     same shape as ``ParameterControlLike.datasets()``.
     """
     control_id: str | AutoResolved
-
-    def emit(self) -> FilterControl: ...
 
     def datasets(self) -> set[Dataset]: ...
 
@@ -203,16 +161,6 @@ class ParameterDropdown:
     # where this column equals the source value, then re-distincts
     # the dropdown's options. Required when cascade_source is set.
     cascade_match_column: "Column | None" = None
-    # DM.0.5 — App2-only renderer gate. When True, the QS emitter walk
-    # (``Sheet.emit()``) skips this control entirely; the App2
-    # renderer (``common/html/_tree_filter_specs.py``) ignores the
-    # field and renders the control normally. Use when the cascade /
-    # picker UX a QS-side primitive can't honor (cascading dataset
-    # parameter silent-fail + URL-param no-control-sync) but App2's
-    # per-request server query handles cleanly. Default False keeps
-    # today's both-renderer behavior. See
-    # ``docs/audits/dm_0_daily_statement_app2_cascade.md``.
-    app2_only: bool = False
     control_id: str | AutoResolved = AUTO
 
     _AUTO_KIND: ClassVar[str] = "dropdown"
@@ -223,66 +171,6 @@ class ParameterDropdown:
             ds = self.selectable_values.dataset
             return {ds}
         return set()
-
-    def emit(self) -> ParameterControl:
-        assert not isinstance(self.control_id, _AutoSentinel), (
-            "control_id wasn't resolved — App.resolve_auto_ids() must run."
-        )
-        display_options: dict[str, Any] | None = None
-        if self.hidden_select_all:
-            display_options = {
-                "SelectAllOptions": {"Visibility": "HIDDEN"},
-            }
-
-        cascading_config = None
-        # DM.2 — gate the QS CascadingControlConfiguration emit on the
-        # source control's renderer disposition. When the cascade source
-        # is ``app2_only`` (DM.0.5 renderer-gate), it is dropped from the
-        # QS emitter walk (``Sheet.emit()`` skips app2_only controls), so
-        # a QS cascade block pointing at ``SourceSheetControlId`` would
-        # dangle (reference a control QS never sees). App2 still cascades
-        # correctly because its renderer reads ``cascade_source`` directly
-        # off the tree (``common/html/_tree_filter_specs.py``) and wires
-        # the BR.1 server-side refresh — independent of this QS emit. See
-        # ``docs/audits/dm_0_daily_statement_app2_cascade.md``.
-        if self.cascade_source is not None and not self.cascade_source.app2_only:
-            from recon_gen.common.models import (
-                CascadingControlConfiguration,
-                CascadingControlSource,
-                ColumnIdentifier,
-            )
-            assert not isinstance(self.cascade_source.control_id, _AutoSentinel), (
-                "cascade_source's control_id wasn't resolved before this "
-                "control's emit — auto-ID resolution must visit the source "
-                "control first."
-            )
-            assert self.cascade_match_column is not None, (
-                "cascade_source set without cascade_match_column — QS "
-                "needs to know which column on this dropdown's dataset "
-                "to filter by the source control's selected value."
-            )
-            cascading_config = CascadingControlConfiguration(
-                SourceControls=[CascadingControlSource(
-                    SourceSheetControlId=self.cascade_source.control_id,
-                    ColumnToMatch=ColumnIdentifier(
-                        DataSetIdentifier=self.cascade_match_column.dataset.identifier,
-                        ColumnName=self.cascade_match_column.name,
-                    ),
-                )],
-            )
-
-        return ParameterControl(
-            Dropdown=ModelParameterDropDownControl(
-                ParameterControlId=self.control_id,
-                Title=self.title,
-                SourceParameterName=self.parameter.name,
-                Type=self.type,
-                SelectableValues=self.selectable_values.emit(),
-                DisplayOptions=display_options,
-                CascadingControlConfiguration=cascading_config,
-            ),
-        )
-
 
 @dataclass(eq=False)
 class ParameterSlider:
@@ -299,42 +187,18 @@ class ParameterSlider:
     def datasets(self) -> set[Dataset]:
         return set()
 
-    def emit(self) -> ParameterControl:
-        assert not isinstance(self.control_id, _AutoSentinel), (
-            "control_id wasn't resolved — App.resolve_auto_ids() must run."
-        )
-        return ParameterControl(
-            Slider=ModelParameterSliderControl(
-                ParameterControlId=self.control_id,
-                Title=self.title,
-                SourceParameterName=self.parameter.name,
-                MinimumValue=self.minimum_value,
-                MaximumValue=self.maximum_value,
-                StepSize=self.step_size,
-            ),
-        )
-
-
 @dataclass(eq=False)
 class ParameterDateTimePicker:
     """Date/time picker control bound to a DateTime parameter.
-
-    ``app2_only`` (DM.0.5) — see ``ParameterDropdown.app2_only``. When
-    True, the QS emitter walk skips this control; App2 renders it
-    normally. Use for the day-availability decorated picker shape
-    (DM.3) where the App2 renderer adds CSS markers QS can't.
 
     ``day_availability_account_param`` (DM.3) — when set to a source
     account-picker parameter name (e.g. ``pL1DsAccount``), the App2
     renderer wires the Flatpickr ``onDayCreate`` decoration against the
     ``day-availability`` endpoint, reading the picked account from the
-    named sibling control. ``None`` (default) = no decoration. App2-only
-    (the QS emit ignores it; the QS ``ParameterDateTimePickerControl``
-    API has no per-day decoration surface).
+    named sibling control. ``None`` (default) = no decoration.
     """
     parameter: ParameterDeclLike
     title: str
-    app2_only: bool = False
     day_availability_account_param: str | None = None
     control_id: str | AutoResolved = AUTO
 
@@ -342,19 +206,6 @@ class ParameterDateTimePicker:
 
     def datasets(self) -> set[Dataset]:
         return set()
-
-    def emit(self) -> ParameterControl:
-        assert not isinstance(self.control_id, _AutoSentinel), (
-            "control_id wasn't resolved — App.resolve_auto_ids() must run."
-        )
-        return ParameterControl(
-            DateTimePicker=ModelParameterDateTimePickerControl(
-                ParameterControlId=self.control_id,
-                Title=self.title,
-                SourceParameterName=self.parameter.name,
-            ),
-        )
-
 
 @dataclass(eq=False)
 class ParameterTextField:
@@ -398,20 +249,6 @@ class ParameterTextField:
     def datasets(self) -> set[Dataset]:
         return set()
 
-    def emit(self) -> ParameterControl:
-        from recon_gen.common.models import ParameterTextFieldControl
-        assert not isinstance(self.control_id, _AutoSentinel), (
-            "control_id wasn't resolved — App.resolve_auto_ids() must run."
-        )
-        return ParameterControl(
-            TextField=ParameterTextFieldControl(
-                ParameterControlId=self.control_id,
-                Title=self.title,
-                SourceParameterName=self.parameter.name,
-            ),
-        )
-
-
 # ---------------------------------------------------------------------------
 # Filter controls
 # ---------------------------------------------------------------------------
@@ -440,27 +277,6 @@ class FilterDropdown:
             return {ds}
         return set()
 
-    def emit(self) -> FilterControl:
-        assert not isinstance(self.control_id, _AutoSentinel), (
-            "control_id wasn't resolved — App.resolve_auto_ids() must run."
-        )
-        assert not isinstance(self.filter.filter_id, _AutoSentinel), (
-            "inner filter's filter_id wasn't resolved — App.resolve_auto_ids() must run."
-        )
-        return FilterControl(
-            Dropdown=ModelFilterDropDownControl(
-                FilterControlId=self.control_id,
-                Title=self.title,
-                SourceFilterId=self.filter.filter_id,
-                Type=self.type,
-                SelectableValues=(
-                    self.selectable_values.emit()
-                    if self.selectable_values is not None else None
-                ),
-            ),
-        )
-
-
 @dataclass(eq=False)
 class FilterSlider:
     """Slider control bound to a NumericRangeFilter."""
@@ -477,26 +293,6 @@ class FilterSlider:
     def datasets(self) -> set[Dataset]:
         return set()
 
-    def emit(self) -> FilterControl:
-        assert not isinstance(self.control_id, _AutoSentinel), (
-            "control_id wasn't resolved — App.resolve_auto_ids() must run."
-        )
-        assert not isinstance(self.filter.filter_id, _AutoSentinel), (
-            "inner filter's filter_id wasn't resolved — App.resolve_auto_ids() must run."
-        )
-        return FilterControl(
-            Slider=ModelFilterSliderControl(
-                FilterControlId=self.control_id,
-                Title=self.title,
-                SourceFilterId=self.filter.filter_id,
-                MinimumValue=self.minimum_value,
-                MaximumValue=self.maximum_value,
-                StepSize=self.step_size,
-                Type=self.type,
-            ),
-        )
-
-
 @dataclass(eq=False)
 class FilterDateTimePicker:
     """Date/time picker control bound to a TimeRangeFilter."""
@@ -509,23 +305,6 @@ class FilterDateTimePicker:
 
     def datasets(self) -> set[Dataset]:
         return set()
-
-    def emit(self) -> FilterControl:
-        assert not isinstance(self.control_id, _AutoSentinel), (
-            "control_id wasn't resolved — App.resolve_auto_ids() must run."
-        )
-        assert not isinstance(self.filter.filter_id, _AutoSentinel), (
-            "inner filter's filter_id wasn't resolved — App.resolve_auto_ids() must run."
-        )
-        return FilterControl(
-            DateTimePicker=ModelFilterDateTimePickerControl(
-                FilterControlId=self.control_id,
-                Title=self.title,
-                SourceFilterId=self.filter.filter_id,
-                Type=self.type,
-            ),
-        )
-
 
 @dataclass(eq=False)
 class FilterCrossSheet:
@@ -543,16 +322,3 @@ class FilterCrossSheet:
     def datasets(self) -> set[Dataset]:
         return set()
 
-    def emit(self) -> FilterControl:
-        assert not isinstance(self.control_id, _AutoSentinel), (
-            "control_id wasn't resolved — App.resolve_auto_ids() must run."
-        )
-        assert not isinstance(self.filter.filter_id, _AutoSentinel), (
-            "inner filter's filter_id wasn't resolved — App.resolve_auto_ids() must run."
-        )
-        return FilterControl(
-            CrossSheet=ModelFilterCrossSheetControl(
-                FilterControlId=self.control_id,
-                SourceFilterId=self.filter.filter_id,
-            ),
-        )

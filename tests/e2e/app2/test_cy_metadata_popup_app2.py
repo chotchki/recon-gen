@@ -46,7 +46,7 @@ from recon_gen.common.ids import VisualId
 from recon_gen.common.l2 import default_l2_instance
 from recon_gen.common.spine._emit_helpers import DEFAULT_PREFIX
 from tests._test_helpers import make_test_config
-from tests.e2e._drivers import App2Driver, DashboardDriver, skips_if_unsupported
+from tests.e2e._drivers import App2Driver, DashboardDriver
 
 
 _DASHBOARD_ID = "l1"
@@ -174,10 +174,10 @@ def _build_l1_app_with_stub() -> tuple[Any, dict[str, VisualId]]:
     instance = default_l2_instance()
     build_all_l1_dashboard_datasets(cfg, instance)
     tree_app = build_l1_dashboard_app(cfg, l2_instance=instance)
-    # emit_analysis() resolves auto-IDs (visual.visual_id = AUTO → a
+    # resolve_auto_ids() resolves auto-IDs (visual.visual_id = AUTO → a
     # concrete UUID) in addition to running validation walks; we need
     # the resolved form so the stub fetcher can key by visual_id.
-    tree_app.emit_analysis()
+    tree_app.validate()
     analysis = tree_app.analysis
     assert analysis is not None
     titles = {title for _, title in _SHEETS}
@@ -186,7 +186,7 @@ def _build_l1_app_with_stub() -> tuple[Any, dict[str, VisualId]]:
         for visual in sheet.visuals:
             t = getattr(visual, "title", None)
             if t in titles:
-                # emit_analysis() above has run, so visual_id is the
+                # resolve_auto_ids() above has run, so visual_id is the
                 # resolved VisualId form, not the AUTO sentinel. The
                 # ``isinstance(str, ...)`` narrow keeps pyright happy
                 # without a brittle cast — and surfaces the resolve
@@ -195,7 +195,7 @@ def _build_l1_app_with_stub() -> tuple[Any, dict[str, VisualId]]:
                 vid = visual.visual_id
                 assert isinstance(vid, str), (
                     f"visual_id for {t!r} unresolved after "
-                    f"emit_analysis — got {vid!r}"
+                    f"resolve_auto_ids — got {vid!r}"
                 )
                 by_title[t] = VisualId(vid)
     missing = titles - set(by_title)
@@ -430,30 +430,3 @@ def test_metadata_panel_row_with_empty_metadata_shows_empty_state(
         f"{open_count} open on sheet {sheet_name!r}"
     )
     driver.close_metadata_panel()
-
-
-# QS leg — placeholder param exists so the test file documents the
-# protocol's App2-only scope at runtime. Driving the QS driver
-# raises NotImplementedError per operator lock 7; `skips_if_unsupported`
-# converts that to a clean skip. No QS leg fires data (no qs_driver
-# fixture is used) — this is the "renderer-agnostic test with one
-# renderer skipping" shape the protocol's `dialect` field documents.
-def test_metadata_popup_qs_leg_skips() -> None:
-    """The QS embed driver raises ``NotImplementedError`` from every
-    metadata-popup verb (operator lock 7). Exercises the protocol's
-    skip-path so a future "let's enable it on QS too" change has one
-    place to flip + this test starts running."""
-    from tests.e2e._drivers import QsEmbedDriver  # noqa: PLC0415
-
-    # We don't need a real embed — the verb raises before touching
-    # the page. Construct a thin instance directly.
-    driver = QsEmbedDriver.__new__(QsEmbedDriver)
-    with skips_if_unsupported():
-        driver.open_metadata_panel("anything", 0)
-    # If we get here the verb didn't raise — that's the regression
-    # signal (operator lock 7 lifted unintentionally).
-    pytest.fail(
-        "QsEmbedDriver.open_metadata_panel didn't raise — operator "
-        "lock 7 (metadata popup is App2-only) may have been lifted "
-        "without updating this test."
-    )

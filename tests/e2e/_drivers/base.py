@@ -290,8 +290,8 @@ class DashboardDriver(Protocol):
         picker drops its stale value when the Role source changes.
 
         App2-only — the Role→Account cascade-clear is an App2 affordance
-        (the QS-side cascade source is gated off via ``app2_only`` because
-        QS can't execute a parameterized picker dataset; see
+        (QS can't execute a parameterized picker dataset, so it never had
+        a working cascade source; see
         ``[[project_qs_no_searchfilter_cascading]]``). ``QsEmbedDriver``
         raises ``NotImplementedError``."""
         ...

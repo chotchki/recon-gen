@@ -38,7 +38,7 @@ The sheet has three controls in the top-right panel:
 Two visuals side-by-side:
 
 - **Money Trail — Chain Sankey** (left) — renders the chain's
-  source → target ribbons. The QuickSight engine self-organizes the
+  source → target ribbons. The renderer self-organizes the
   layout: the root sits leftmost, the deepest descendants sit
   rightmost, ribbon thickness encodes hop amount.
 - **Money Trail — Hop-by-Hop** (right) — table of every edge in the
@@ -76,8 +76,8 @@ The matview does NOT auto-refresh. After every ETL load, the
 operator runs
 `REFRESH MATERIALIZED VIEW {{ l2_instance_name }}_inv_money_trail_edges;` —
 see [Refresh contract](../../Schema_v6.md#refresh-contract).
-QuickSight Direct Query can't run a recursive CTE inside a custom-
-SQL dataset, so materialization isn't optional here.
+The dashboard datasets read the matview, not the recursive walk
+itself, so materialization isn't optional here.
 
 {% if vocab.demo.has_investigation_plants and vocab.demo.investigation.layering_chain | length >= 3 and vocab.demo.investigation.anomaly_pair_sender %}
 ??? example "Worked example: {{ vocab.fixture_name }}"

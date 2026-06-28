@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from recon_gen.common.models import SheetTextBox as ModelSheetTextBox
 from recon_gen.common.tree._helpers import GridLayoutElementType
 
 
@@ -43,8 +42,3 @@ class TextBox:
     def element_type(self) -> GridLayoutElementType:
         return "TEXT_BOX"
 
-    def emit(self) -> ModelSheetTextBox:
-        return ModelSheetTextBox(
-            SheetTextBoxId=self.text_box_id,
-            Content=self.content,
-        )

@@ -16,14 +16,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "recon-gen"
 dynamic = ["version"]
-description = "Outside validation that your financial system is sound — tells midsize financial institutions whether their books balance day to day, and when they don't, where to look first. Ships AWS QuickSight, self-hosted HTMX, and regulator-ready PDF surfaces from one L2 institution model."
+description = "Outside validation that your financial system is sound — tells midsize financial institutions whether their books balance day to day, and when they don't, where to look first. Ships self-hosted HTMX dashboards and a regulator-ready PDF audit from one L2 institution model."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.14"
 keywords = [
-    "quicksight",
-    "aws",
-    "dashboards",
+    "self-hosted",
+    "audit",
     "reconciliation",
     "analytics",
     "finance",
@@ -67,29 +66,17 @@ Changelog = "https://github.com/chotchki/recon-gen/blob/main/RELEASE_NOTES.md"
 # Net effect: simpler install, one knob per persona. Specific dep
 # annotations preserved in the prod-bucket below.
 #
-# DV.3 (Phase DV, v15) — QuickSight is now an OPT-IN extra, not a
-# baseline prod dep. boto3 is lazy-imported (common/deploy.py) so the
-# package imports cleanly without it; `pip install recon-gen[quicksight]`
-# is the opt-in that pulls the AWS SDK for `json apply --execute`
-# deploys. botocore[crt] pulls awscrt for the SSO credential provider;
-# absent it boto3 trips MissingDependencyException when operators use
-# `aws sso login`. The pin lives HERE — [dev] / [e2e] self-reference it.
-quicksight = [
-    "boto3>=1.34",
-    "botocore[crt]>=1.34",
-]
+# DW.10 (Phase DW, v16) — QuickSight is GONE. The `[quicksight]` extra
+# (boto3 + botocore[crt]) is deleted; there's no AWS SDK anywhere in the
+# dependency graph. recon-gen ships two surfaces now: self-hosted App2
+# + regulator-ready PDF. (QuickSight shipped through v15.x — pin
+# `recon-gen==15.x` with that release's `[quicksight]` extra if you
+# need it.)
 prod = [
     # ETL Engineer / Integrator running a production App2 deploy gets
-    # every NON-AWS runtime dep under one extras name (App2 + PDF +
-    # DB). QuickSight deploy via `json apply --execute` additionally
-    # needs the opt-in `[quicksight]` extra (DV.4) — boto3 is no longer
-    # baseline. Set studio_enabled=false in cfg for dashboards-only
-    # prod App2; the markdown dep stays installed but inert.
-    #
-    # DV.4 (Phase DV, v15) — boto3 + botocore[crt] MOVED OUT to the
-    # opt-in `[quicksight]` extra. `pip install recon-gen[prod]` now
-    # resolves with ZERO AWS SDK (App2 + PDF + DB only); operators who
-    # deploy to QuickSight install `recon-gen[prod,quicksight]`.
+    # every runtime dep under one extras name (App2 + PDF + DB). Set
+    # studio_enabled=false in cfg for dashboards-only prod App2; the
+    # markdown dep stays installed but inert.
     #
     # App2 runtime — Starlette + uvicorn + multipart (HTMX form POST
     # parsing) + httpx (TestClient + outbound). The browser-side
@@ -187,20 +174,10 @@ dev = [
     # time — passes on re-run) auto-retries before halting the chain. A
     # test that's broken (not flaky) fails 3× → still halts.
     "pytest-rerunfailures>=14.0",
-    # DV.4 — [dev] carries NO runtime boto3, so a no-QS regression install
-    # (`uv sync --extra dev` WITHOUT `[quicksight]`) is boto3-free and the QS
-    # tests skip cleanly (DV.6). To RUN the QS tests, add `--extra quicksight`
-    # (CI's Layered runner does). The boto3 runtime pin lives only in the
-    # `[quicksight]` extra. Type stubs below are independent of the runtime
-    # SDK — kept here so pyright resolves the QS surface.
-    # BE.7.B (2026-05-26) — `sts` + `s3` added on top of the existing
-    # `quicksight,rds` so pyright can resolve the full surface tests/
-    # touches via boto3-stubs. The stubs only help once test-side
-    # fixtures are also annotated (the test fixtures' `-> dict`
-    # returns erase the TypedDict at the consumer boundary). Type stubs
-    # are independent of the runtime SDK — kept in [dev] (not folded
-    # into [quicksight]) while QS code exists.
-    "boto3-stubs[quicksight,rds,sts,s3]>=1.34",
+    # DW.10 (Phase DW, v16) — `boto3-stubs` dropped: no boto3 left in src
+    # for pyright to resolve (the last live boto3, config.py's QS-user-ARN
+    # derive, went in DW.11). The `[quicksight]` extra that anchored it is
+    # deleted.
     # Y.2.gate.b.2.impl — Docker-backed local DB containers.
     # PG (b.2.impl.schema) + Oracle (b.2.impl.oracle). Oracle's
     # container is multi-GB and slower to start (~20-30s on
@@ -266,11 +243,11 @@ dev = [
     # maintainer-stewarded Python client; `cryptography` for keypair
     # + CSR + cert parsing; `dnspython` for TXT-propagation polling
     # against 1.1.1.1; `requests` for the Cloudflare REST surface +
-    # the `cloudflare_trace` public-IP discovery. All four are
-    # transitive deps already of one prod entry (boto3 pulls in
-    # cryptography + requests via botocore[crt], acme has dnspython
-    # as a hard dep) but pinning them here makes `uv sync --extra
-    # dev` self-sufficient without relying on transitive bumps.
+    # the `cloudflare_trace` public-IP discovery. Pinned explicitly
+    # here so `uv sync --extra dev` is self-sufficient — the audit
+    # PDF's pyHanko/cryptography path and acme's dnspython hard dep
+    # would drag most of these in transitively, but the explicit pin
+    # doesn't rely on transitive bumps.
     "acme>=2.10.0",
     "cryptography>=41.0",
     "dnspython>=2.4",
@@ -286,9 +263,6 @@ dev = [
 e2e = [
     "pytest>=7.0",
     "pytest-xdist>=3.5",
-    # DV.4 — [e2e] carries NO runtime boto3; add `--extra quicksight` to run
-    # the QS browser/api tests (else they skip cleanly, DV.6). boto3's runtime
-    # pin lives only in the `[quicksight]` extra.
     "playwright>=1.60",
     # X.2.u.3 — the browser e2e suite is now parametrized over
     # [qs, app2]: App2Driver serves the bundled HTMX renderer in-process
@@ -484,7 +458,7 @@ pythonVersion = "3.14"
 typeCheckingMode = "strict"
 extraPaths = ["src"]
 # Pin the venv so pyright resolves third-party stubs (Playwright,
-# boto3-stubs, psycopg). Without this, ad-hoc ``pyright <file>``
+# psycopg). Without this, ad-hoc ``pyright <file>``
 # invocations on files in scope above can't resolve those packages
 # and surface ~300 false-positive "type is unknown" cascades. The
 # ``venvPath`` is the parent directory; ``venv`` is the directory

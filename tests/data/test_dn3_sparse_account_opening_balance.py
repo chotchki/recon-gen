@@ -68,11 +68,7 @@ def _dataset_sql() -> str:
         db_table_prefix=_PREFIX,
     )
     ds = build_daily_statement_summary_dataset(cfg, default_l2_instance())
-    physical = next(iter(ds.PhysicalTableMap.values()))
-    assert physical.CustomSql is not None
-    sql = physical.CustomSql.SqlQuery
-    assert sql is not None
-    return sql
+    return ds.sql
 
 
 @pytest.fixture

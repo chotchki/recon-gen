@@ -1,3 +1,3 @@
-"""Programmatic generator for self-hosted HTMX dashboards + audit PDFs (AWS QuickSight optional, deprecated)."""
+"""Programmatic generator for self-hosted HTMX dashboards + regulator-ready audit PDFs."""
 
 __version__ = "15.0.0"

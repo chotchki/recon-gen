@@ -21,23 +21,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-from recon_gen.common.models import (
-    CategoricalDimensionField,
-    CategoricalMeasureField,
-    ColumnIdentifier,
-    CurrencyDisplayFormatConfiguration,
-    DateDimensionField,
-    DecimalPlacesConfiguration,
-    DimensionField,
-    MeasureField,
-    NumberFormatConfiguration,
-    NumericalAggregationFunction,
-    NumericalDimensionField,
-    NumericalMeasureField,
-    NumericFormatConfiguration,
-    SeparatorConfiguration,
-    ThousandSeparatorOptions,
-)
 from recon_gen.common.tree._helpers import (
     AUTO,
     AutoResolved,
@@ -121,13 +104,24 @@ class Dim:
     kind: DimKind = "categorical"
     date_granularity: TimeGranularity | None = field(default=None, kw_only=True)
     field_id: str | AutoResolved = field(default=AUTO, kw_only=True)
-    # Q.1.a.7 — currency=True emits a USD CurrencyDisplayFormatConfiguration
-    # on the underlying NumericalDimensionField (row-level money columns
-    # in tables typically use Dim.numerical, not Measure.sum, since they
-    # show the raw value rather than an aggregate). Only valid for
-    # ``kind="numerical"`` — money never makes sense as a categorical
-    # axis or a date axis. Asserted at emit time.
+    # Q.1.a.7 — currency=True renders the value as USD (2 decimals, comma
+    # thousands separator, "$" prefix). Row-level money columns in tables
+    # typically use Dim.numerical, not Measure.sum, since they show the
+    # raw value rather than an aggregate. Only valid for ``kind="numerical"``
+    # — money never makes sense as a categorical or date axis. Validated
+    # at construction (see __post_init__).
     currency: bool = field(default=False, kw_only=True)
+
+    def __post_init__(self) -> None:
+        # Money never makes sense on a categorical or date axis — wiring
+        # currency=True on a non-numerical Dim is a typo, not an ergonomic
+        # shorthand. Fail at the wiring site (construction), not later.
+        if self.currency and self.kind != "numerical":
+            raise ValueError(
+                f"Dim(currency=True) is only valid for kind='numerical', "
+                f"not {self.kind!r} — money values aren't categorical or "
+                f"date axes."
+            )
 
     @classmethod
     def date(
@@ -159,85 +153,6 @@ class Dim:
         """The CalcField this Dim references, or None if it points at
         a real dataset column. Used by the dependency-graph walk."""
         return calc_field_in(self.column)
-
-    def emit(self) -> DimensionField:
-        assert not isinstance(self.field_id, _AutoSentinel), (
-            "field_id wasn't resolved — App.resolve_auto_ids() must run "
-            "before Dim.emit()."
-        )
-        col = ColumnIdentifier(
-            DataSetIdentifier=self.dataset.identifier,
-            ColumnName=resolve_column(self.column),
-        )
-        if self.kind == "date":
-            return DimensionField(
-                DateDimensionField=DateDimensionField(
-                    FieldId=self.field_id, Column=col,
-                    DateGranularity=self.date_granularity,
-                ),
-            )
-        if self.kind == "numerical":
-            return DimensionField(
-                NumericalDimensionField=NumericalDimensionField(
-                    FieldId=self.field_id, Column=col,
-                    FormatConfiguration=_USD_FORMAT if self.currency else None,
-                ),
-            )
-        assert not self.currency, (
-            f"Dim(currency=True) is only valid for kind='numerical', not "
-            f"{self.kind!r} — money values aren't categorical or date axes."
-        )
-        return DimensionField(
-            CategoricalDimensionField=CategoricalDimensionField(
-                FieldId=self.field_id, Column=col,
-            ),
-        )
-
-    def emit_unaggregated_field(self) -> dict[str, object]:
-        """Emit the raw ``UnaggregatedField`` dict shape used inside
-        ``TableUnaggregatedFieldWells.Values``. The model layer types
-        that field as ``list[dict[str, Any]]`` rather than a typed
-        union, so the tree emits it as a dict directly.
-
-        Q.1.a.7 — When ``currency=True`` is set on a numerical Dim, the
-        same USD ``FormatConfiguration`` that ``emit()`` wires onto a
-        NumericalDimensionField is also folded into the unaggregated
-        field shape so table cells render with "$" + thousands
-        separator + 2 decimals. Without this, currency=True only took
-        effect when the Dim was used as a chart axis or KPI value, not
-        when it was used as a table column (the by-far common case).
-        """
-        assert not isinstance(self.field_id, _AutoSentinel), (
-            "field_id wasn't resolved — App.resolve_auto_ids() must run "
-            "before Dim.emit_unaggregated_field()."
-        )
-        out: dict[str, object] = {
-            "FieldId": self.field_id,
-            "Column": {
-                "DataSetIdentifier": self.dataset.identifier,
-                "ColumnName": resolve_column(self.column),
-            },
-        }
-        if self.currency:
-            assert self.kind == "numerical", (
-                f"Dim(currency=True) is only valid for kind='numerical', "
-                f"not {self.kind!r} — money values aren't categorical or "
-                f"date axes."
-            )
-            from dataclasses import asdict
-            from recon_gen.common.models import _strip_nones
-            # UnaggregatedField.FormatConfiguration is a discriminated
-            # union of String/Number/DateTime — pick the NumberFormatConfiguration
-            # branch and place the existing _USD_FORMAT shape under it.
-            # (NumericalMeasureField's FormatConfiguration drops the
-            # discriminator since the field type is already known to be
-            # numeric; the unaggregated field stays generic over the
-            # column type and so needs the extra level.)
-            out["FormatConfiguration"] = {
-                "NumberFormatConfiguration": _strip_nones(asdict(_USD_FORMAT)),
-            }
-        return out
-
 
 # Aggregation kinds split into "categorical" (COUNT, DISTINCT_COUNT —
 # read off any column type) and "numerical" (SUM, MAX, MIN, AVERAGE —
@@ -341,12 +256,10 @@ class Measure:
     column: ColumnRef
     kind: MeasureKind
     field_id: str | AutoResolved = field(default=AUTO, kw_only=True)
-    # Q.1.a — currency=True emits a USD CurrencyDisplayFormatConfiguration
-    # on the underlying NumericalMeasureField (2 decimal places, comma
-    # thousands separator, "$" prefix per QS's USD rendering). Only
-    # valid for numerical aggregations (sum/max/min/average) — count /
-    # distinct_count don't aggregate money. The emit-time assert below
-    # catches the misuse loud rather than silently dropping the format.
+    # Q.1.a — currency=True renders a USD value (2 decimal places, comma
+    # thousands separator, "$" prefix). Only valid for numerical
+    # aggregations (sum/max/min/average) — count / distinct_count don't
+    # aggregate money. Validated at construction (see __post_init__).
     currency: bool = field(default=False, kw_only=True)
     # v11.22.1 cold-read finding #18 (2026-05-26) — when QS sees an
     # AVERAGE aggregation with no FormatConfiguration it renders 3
@@ -357,6 +270,39 @@ class Measure:
     # DecimalPlaces=N + comma thousands separator. Mutually exclusive
     # with currency=True (currency already pins 2 decimals).
     decimals: int | None = field(default=None, kw_only=True)
+
+    def __post_init__(self) -> None:
+        # Currency only applies to numerical aggregations — count /
+        # distinct_count return row counts, never money. And currency
+        # already pins 2 decimals, so a separate decimals= is contradictory.
+        # Both are author bugs; fail at the wiring site (construction).
+        if self.currency and self.kind in ("count", "distinct_count"):
+            raise ValueError(
+                f"Measure(currency=True) is only valid for numerical "
+                f"aggregations (sum/max/min/average), not {self.kind!r} — "
+                f"count/distinct_count return row counts, never money."
+            )
+        if self.currency and self.decimals is not None:
+            raise ValueError(
+                "Measure cannot set both currency=True and decimals=N — "
+                "currency already pins 2 decimals. Drop decimals= or "
+                "currency=True."
+            )
+
+    def validate_column_type(self) -> None:
+        """Numerical aggregations (sum/max/min/average) require an
+        INTEGER/DECIMAL column at the contract level (v11.24.1 — QS
+        rejected non-numeric ones at analysis-create; a malformed tree
+        should fail on any renderer). No-op for count/distinct_count
+        (categorical — they read any column type). Permissive when the
+        contract / column isn't registered (see
+        ``_assert_numerical_column_type``).
+
+        Called from ``App.validate()`` — used to live inside
+        ``Measure.emit()``, relocated to the validation walk post-DW so
+        it fires after every contract has registered."""
+        if self.kind in _NUMERICAL_AGG:
+            _assert_numerical_column_type(self.dataset, self.column, self.kind)
 
     @classmethod
     def sum(
@@ -424,123 +370,16 @@ class Measure:
         at a real dataset column."""
         return calc_field_in(self.column)
 
-    def emit(self) -> MeasureField:
-        assert not isinstance(self.field_id, _AutoSentinel), (
-            "field_id wasn't resolved — App.resolve_auto_ids() must run "
-            "before Measure.emit()."
-        )
-        col = ColumnIdentifier(
-            DataSetIdentifier=self.dataset.identifier,
-            ColumnName=resolve_column(self.column),
-        )
-        if self.kind == "count":
-            # BL.1 — read through to the literal-1 CalcField. The
-            # CalcField itself is registered on the Analysis by
-            # ``App.resolve_auto_ids`` (one per ``Dataset`` referenced
-            # by a count Measure); here we just emit the
-            # NumericalMeasureField(SUM) pointing at that CalcField's
-            # convention name.
-            assert not self.currency, (
-                f"Measure(currency=True) is only valid for numerical "
-                f"aggregations (sum/max/min/average), not "
-                f"{self.kind!r} — count returns row counts, never money."
-            )
-            row_one_col = ColumnIdentifier(
-                DataSetIdentifier=self.dataset.identifier,
-                ColumnName=row_one_calc_name(self.dataset),
-            )
-            return MeasureField(
-                NumericalMeasureField=NumericalMeasureField(
-                    FieldId=self.field_id,
-                    Column=row_one_col,
-                    AggregationFunction=NumericalAggregationFunction(
-                        SimpleNumericalAggregation="SUM",
-                    ),
-                ),
-            )
-        if self.kind in _CATEGORICAL_AGG:
-            assert not self.currency, (
-                f"Measure(currency=True) is only valid for numerical "
-                f"aggregations (sum/max/min/average), not "
-                f"{self.kind!r} — count/distinct_count return row "
-                f"counts, never money."
-            )
-            return MeasureField(
-                CategoricalMeasureField=CategoricalMeasureField(
-                    FieldId=self.field_id,
-                    Column=col,
-                    AggregationFunction=_CATEGORICAL_AGG[self.kind],
-                ),
-            )
-        assert not (self.currency and self.decimals is not None), (
-            "Measure cannot set both currency=True and decimals=N — "
-            "currency already pins 2 decimals via _USD_FORMAT. Drop "
-            "decimals= or drop currency=True."
-        )
-        _assert_numerical_column_type(self.dataset, self.column, self.kind)
-        fmt: NumberFormatConfiguration | None
-        if self.currency:
-            fmt = _USD_FORMAT
-        elif self.decimals is not None:
-            fmt = _integer_format(self.decimals)
-        else:
-            fmt = None
-        return MeasureField(
-            NumericalMeasureField=NumericalMeasureField(
-                FieldId=self.field_id,
-                Column=col,
-                AggregationFunction=NumericalAggregationFunction(
-                    SimpleNumericalAggregation=_NUMERICAL_AGG[self.kind],
-                ),
-                FormatConfiguration=fmt,
-            ),
-        )
-
-
 # USD currency format — the only supported currency for now (Q.1.a).
 # Extracted as a module-level constant so identity equality holds across
 # every currency=True Measure (callers can compare-via-`is` if they need
 # to detect "this measure was format-tagged"). When a future phase adds
 # multi-currency support, swap this for a per-instance lookup.
-_USD_FORMAT = NumberFormatConfiguration(
-    FormatConfiguration=NumericFormatConfiguration(
-        CurrencyDisplayFormatConfiguration=CurrencyDisplayFormatConfiguration(
-            Symbol="USD",
-            DecimalPlacesConfiguration=DecimalPlacesConfiguration(DecimalPlaces=2),
-            SeparatorConfiguration=SeparatorConfiguration(
-                ThousandsSeparator=ThousandSeparatorOptions(
-                    Symbol="COMMA", Visibility="VISIBLE",
-                ),
-            ),
-        ),
-    ),
-)
-
-
 # v11.22.1 cold-read finding #18 (2026-05-26) — per-Measure integer /
 # fixed-decimal format. Constructed per (decimals,) so the resulting
 # wire shape is stable across emits and JSON pin tests don't churn.
 # NumberDisplayFormatConfiguration is the QS NumericFormatConfiguration
 # branch for plain numbers (vs the Currency / Percentage branches).
-def _integer_format(decimals: int) -> NumberFormatConfiguration:
-    assert decimals >= 0, (
-        f"Measure.decimals must be >= 0, got {decimals!r}"
-    )
-    return NumberFormatConfiguration(
-        FormatConfiguration=NumericFormatConfiguration(
-            NumberDisplayFormatConfiguration={
-                "DecimalPlacesConfiguration": {"DecimalPlaces": decimals},
-                "SeparatorConfiguration": {
-                    "ThousandsSeparator": {
-                        "Symbol": "COMMA",
-                        "Visibility": "VISIBLE",
-                    },
-                },
-            },
-        ),
-    )
-
-
 # Type alias used everywhere a sort/drill plumbing slot accepts either
 # a leaf object ref or a bare field_id string. Object refs are the
 # preferred form (the tree resolves the field_id at emit time so

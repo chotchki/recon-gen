@@ -62,8 +62,7 @@ Column-by-column:
 - `status` — `TEXT NOT NULL`. `'Posted'`, `'Pending'`, `'Reversed'`,
   etc. — your L2's declared status enum.
 - `posting` — `TEXT NOT NULL`. ISO timestamp string the leg was
-  posted at (naive, interpreted in the DB's local TZ — see the
-  [local-TZ convention](../reference/quicksight-quirks.md)).
+  posted at (naive, interpreted in the DB's local TZ).
 - `transfer_id` — `TEXT NOT NULL`. Groups all legs of one
   money-movement event. The conservation-of-money invariant fires on
   this: non-failed legs of a non-single-leg transfer net to zero.

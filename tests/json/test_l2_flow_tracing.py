@@ -32,11 +32,11 @@ Tests here cover:
 from __future__ import annotations
 
 import inspect
+import re
 from pathlib import Path
 from typing import Any
 
 import pytest
-from click.testing import CliRunner
 
 from recon_gen.common.l2 import default_l2_instance
 from recon_gen.apps.l2_flow_tracing.app import (
@@ -56,10 +56,9 @@ from recon_gen.apps.l2_flow_tracing.datasets import (
     DS_TT_LEGS,
     DS_UNIFIED_L2_EXCEPTIONS,
 )
-from recon_gen.cli import main
 from recon_gen.cli._helpers import APPS
+from recon_gen.common.dataset_contract import BuiltDataset
 from recon_gen.common.l2 import load_instance
-from recon_gen.common.models import DataSet
 from recon_gen.common.sheets.app_info import (
     APP_INFO_SHEET_NAME,
     app_info_latest_balance_day_id,
@@ -114,22 +113,11 @@ def _string_ds_params(params: list[Any]) -> dict[str, Any]:
     return out
 
 
-def _ds_sql(aws_ds: DataSet) -> str:
-    """Pull the CustomSql.SqlQuery off the first PhysicalTableMap entry
-    of a built dataset, with the None-narrow built in. Every dataset we
-    build here is CustomSql-shaped (``build_dataset`` always sets it),
-    so the assert is a defensive type-narrow, not a behavioral guard."""
-    cs = list(aws_ds.PhysicalTableMap.values())[0].CustomSql
-    assert cs is not None
-    return cs.SqlQuery
-
-
-def _ds_columns(aws_ds: DataSet) -> list[Any]:
-    """Pull the CustomSql.Columns off the first PhysicalTableMap entry —
-    same None-narrow shape as ``_ds_sql``."""
-    cs = list(aws_ds.PhysicalTableMap.values())[0].CustomSql
-    assert cs is not None
-    return list(cs.Columns)
+def _ds_sql(aws_ds: BuiltDataset) -> str:
+    """Pull the registered SQL off a built dataset. ``build_dataset``
+    registers it under the dataset's visual_identifier, resolved by
+    ``BuiltDataset.sql``."""
+    return aws_ds.sql
 
 
 def _sheet_by_name(app: App, name: str) -> Sheet:
@@ -179,6 +167,17 @@ def test_build_signature_l2_instance_is_kwarg_only() -> None:
 # -- Analysis + Dashboard registration ---------------------------------------
 
 
+def test_tree_validates() -> None:
+    """The full tree-validation walk passes on the L2 Flow Tracing app —
+    no orphan dataset / calc-field / parameter refs, no unsettable filter
+    params, no dangling drill targets, App2-parity holds, no bare-string
+    columns. Phase DW.1: was the analysis/dashboard emit success path
+    (the validators ran only at emit time); the walk now lives on
+    App.validate(), so the canary survives the emitter's removal."""
+    app = build_l2_flow_tracing_app(_CFG)
+    app.validate()  # raises on the first violation
+
+
 def test_analysis_registered_with_deployment_aware_name() -> None:
     """Z.C — the Analysis title surfaces ``cfg.aws.deployment_name`` so
     multi-deploy QS accounts are distinguishable in the UI."""
@@ -193,30 +192,25 @@ def test_dashboard_registered() -> None:
     assert app.dashboard is not None
 
 
-def test_emit_analysis_and_dashboard_succeed() -> None:
-    """Tree validation passes — no orphan refs / shape errors."""
-    app = build_l2_flow_tracing_app(_CFG)
-    analysis = app.emit_analysis()
-    dashboard = app.emit_dashboard()
-    assert analysis is not None
-    assert dashboard is not None
-
-
 def test_analysis_id_uses_deployment_prefix() -> None:
     """Z.C — `<deployment_name>-l2-flow-tracing-analysis`. Default
     deployment_name is whatever ``make_test_config`` defaulted to
-    (``recon-test``)."""
+    (``recon-test``). Tree-walk: the AnalysisId is
+    ``cfg.aws.prefixed(analysis_id_suffix)`` — reconstruct it without
+    emit."""
     app = build_l2_flow_tracing_app(_CFG)
-    analysis = app.emit_analysis()
-    assert analysis.AnalysisId == (
+    assert app.analysis is not None
+    analysis_id = app.cfg.aws.prefixed(app.analysis.analysis_id_suffix)
+    assert analysis_id == (
         f"{_CFG.aws.deployment_name}-l2-flow-tracing-analysis"
     )
 
 
 def test_dashboard_id_uses_deployment_prefix() -> None:
     app = build_l2_flow_tracing_app(_CFG)
-    dashboard = app.emit_dashboard()
-    assert dashboard.DashboardId == (
+    assert app.dashboard is not None
+    dashboard_id = app.cfg.aws.prefixed(app.dashboard.dashboard_id_suffix)
+    assert dashboard_id == (
         f"{_CFG.aws.deployment_name}-l2-flow-tracing"
     )
 
@@ -232,8 +226,10 @@ def test_per_deployment_prefix_isolates_resource_ids() -> None:
     b_app = build_l2_flow_tracing_app(
         cfg_b, l2_instance=load_instance(SASQUATCH_PR_YAML),
     )
-    a_id = a_app.emit_analysis().AnalysisId
-    b_id = b_app.emit_analysis().AnalysisId
+    assert a_app.analysis is not None
+    assert b_app.analysis is not None
+    a_id = a_app.cfg.aws.prefixed(a_app.analysis.analysis_id_suffix)
+    b_id = b_app.cfg.aws.prefixed(b_app.analysis.analysis_id_suffix)
     assert a_id != b_id
     assert "recon-spec" in a_id
     assert "recon-sasq" in b_id
@@ -361,90 +357,6 @@ def test_l2_flow_tracing_in_apps_tuple() -> None:
     assert "l2-flow-tracing" in APPS
 
 
-def test_cli_json_apply_l2_instance_flag(tmp_path: Path) -> None:
-    """Z.C — `--l2 PATH` selects the L2 topology. The generated
-    dataset filenames carry the cfg's deployment_name as the single
-    prefix segment (collapsed from M.2d.3's
-    `<resource_prefix>-<l2_prefix>-...` shape — the L2-instance
-    segment is gone; deployment_name is operator-set per cfg)."""
-    cfg_path = tmp_path / "config.yaml"
-    cfg_path.write_text(
-        "aws:\n"
-        "  account_id: '111122223333'\n"
-        "  region: us-west-2\n"
-        "  deployment_name: recon-l2ft-l2flag\n"
-        "  datasource:\n"
-        "    mode: adopt\n"
-        "    arn: 'arn:aws:quicksight:us-west-2:111122223333:datasource/test-ds'\n"
-        "db:\n"
-        "  dialect: postgres\n"
-        "  table_prefix: sasquatch_pr\n"
-    )
-    out_dir = tmp_path / "out"
-
-    runner = CliRunner()
-    result = runner.invoke(
-        main, [
-            "json", "apply",
-            "-c", str(cfg_path),
-            "-o", str(out_dir),
-            "--l2", str(SASQUATCH_PR_YAML),
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    # Dataset filenames carry the deployment_name from cfg, not the
-    # L2 yaml stem.
-    chain_inst = (
-        out_dir / "datasets"
-        / "recon-l2ft-l2flag-l2ft-chain-instances-dataset.json"
-    )
-    assert chain_inst.exists()
-
-
-def test_cli_json_apply_l2_flow_tracing_writes_files(tmp_path: Path) -> None:
-    """CLI smoke: ``recon-gen json apply`` writes theme + analysis
-    + dashboard + every dataset under datasets/ for L2 flow tracing.
-    M.3.10c — postings + meta-values replace the M.3.5 rails dataset
-    + the M.3.8 per-key dropdown fan-out."""
-    cfg_path = tmp_path / "config.yaml"
-    cfg_path.write_text(
-        # Z.C — required cfg fields (v14 nested shape).
-        "aws:\n"
-        "  account_id: '111122223333'\n"
-        "  region: us-west-2\n"
-        "  deployment_name: recon-l2ft-cli\n"
-        "  datasource:\n"
-        "    mode: adopt\n"
-        "    arn: 'arn:aws:quicksight:us-west-2:111122223333:datasource/test-ds'\n"
-        "db:\n"
-        "  dialect: postgres\n"
-        "  table_prefix: spec_example\n"
-    )
-    out_dir = tmp_path / "out"
-
-    runner = CliRunner()
-    result = runner.invoke(
-        main, [
-            "json", "apply",
-            "-c", str(cfg_path),
-            "-o", str(out_dir),
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    assert (out_dir / "theme.json").exists()
-    assert (out_dir / "l2-flow-tracing-analysis.json").exists()
-    assert (out_dir / "l2-flow-tracing-dashboard.json").exists()
-    # Z.C — dataset JSONs use the deployment_name single-prefix shape
-    # (was `qs-gen-<l2_prefix>-l2ft-...`).
-    assert (
-        out_dir / "datasets" / "recon-l2ft-cli-l2ft-postings-dataset.json"
-    ).exists()
-    assert (
-        out_dir / "datasets"
-        / "recon-l2ft-cli-l2ft-meta-values-dataset.json"
-    ).exists()
-
-
 # -- Rails sheet (M.3.10c — postings explorer + cascade) --------------------
 
 
@@ -525,10 +437,7 @@ def _chains_dataset_sql_against(yaml_path: Path) -> str:
     from dataclasses import replace
     inst = load_instance(yaml_path)
     cfg = replace(_CFG, db=replace(_CFG.db, table_prefix=yaml_path.stem))
-    aws_ds = build_chains_dataset(cfg, inst)
-    table = list(aws_ds.PhysicalTableMap.values())[0]
-    assert table.CustomSql is not None
-    return table.CustomSql.SqlQuery
+    return build_chains_dataset(cfg, inst).sql
 
 
 def test_chains_dataset_targets_prefixed_current_transactions() -> None:
@@ -618,17 +527,20 @@ def test_chains_dataset_orphan_rate_avoids_divide_by_zero() -> None:
 
 
 def test_chains_dataset_contract_columns_match_builder() -> None:
-    """Contract columns and SQL projection match — visual ds["col"]
-    references resolve cleanly."""
+    """Every contract column appears in the built SQL — visual ds["col"]
+    references resolve cleanly. (``build_chains_dataset`` is a legacy
+    builder not wired into ``build_all_l2_flow_tracing_datasets``, so it
+    isn't swept by ``test_dataset_sql_contract_projection``; this is its
+    only column-projection coverage.)"""
     from recon_gen.apps.l2_flow_tracing.datasets import (
         CHAINS_CONTRACT, build_chains_dataset,
     )
-    aws_ds = build_chains_dataset(_CFG, default_l2_instance())
-    cols = {
-        c.Name for c in _ds_columns(aws_ds)
-    }
-    expected = {c.name for c in CHAINS_CONTRACT.columns}
-    assert cols == expected
+    sql = build_chains_dataset(_CFG, default_l2_instance()).sql
+    missing = [
+        c.name for c in CHAINS_CONTRACT.columns
+        if not re.search(rf"\b{re.escape(c.name)}\b", sql)
+    ]
+    assert not missing, f"contract columns absent from SQL: {missing}"
 
 
 def test_chains_dataset_emits_same_sql_regardless_of_l2_chain_count() -> None:
@@ -770,10 +682,10 @@ def test_chain_instances_dataset_declares_cascade_and_pushdown_parameters() -> N
         P_L2FT_CHAINS_DATE_START,
     )
 
-    params = build_chain_instances_dataset(_CFG, inst).DatasetParameters
+    params = build_chain_instances_dataset(_CFG, inst).dataset_params
     # Phase BM — 4 pre-BM (pKey/pValues + pL2ftChainsChain/Completion)
     # + 2 BM date params (pL2ftChainsDateStart/End) = 6.
-    assert params is not None and len(params) == 6
+    assert len(params) == 6
     by_name = _string_ds_params(params)
     assert by_name["pKey"].ValueType == "SINGLE_VALUED"
     assert by_name["pValues"].ValueType == "SINGLE_VALUED"
@@ -794,8 +706,7 @@ def test_chain_instances_dataset_declares_cascade_and_pushdown_parameters() -> N
     from dataclasses import replace
     no_chains = replace(load_instance(SASQUATCH_PR_YAML), chains=())
     assert not declared_chain_parents(no_chains)
-    nc_params = build_chain_instances_dataset(_CFG, no_chains).DatasetParameters
-    assert nc_params is not None
+    nc_params = build_chain_instances_dataset(_CFG, no_chains).dataset_params
     nc_by_name = _string_ds_params(nc_params)
     assert nc_by_name["pL2ftChainsChain"].DefaultValues.StaticValues == [
         L2FT_ALL_SENTINEL,
@@ -910,10 +821,10 @@ def test_tt_datasets_declare_cascade_and_pushdown_parameters() -> None:
     )
     inst = load_instance(SASQUATCH_PR_YAML)
     for build in (build_tt_instances_dataset, build_tt_legs_dataset):
-        params = build(_CFG, inst).DatasetParameters
+        params = build(_CFG, inst).dataset_params
         # Phase BM — 4 pre-BM (pKey/pValues + Template/Completion) + 2
         # BM date params (pL2ftTtDateStart/End) = 6.
-        assert params is not None and len(params) == 6, build.__name__
+        assert len(params) == 6, build.__name__
         by_name = _string_ds_params(params)
         assert by_name["pKey"].ValueType == "SINGLE_VALUED"
         assert by_name["pValues"].ValueType == "SINGLE_VALUED"
@@ -935,8 +846,7 @@ def test_tt_datasets_declare_cascade_and_pushdown_parameters() -> None:
     from dataclasses import replace
     no_tt = replace(inst, transfer_templates=[])
     assert not declared_template_names(no_tt)
-    params = build_tt_instances_dataset(_CFG, no_tt).DatasetParameters
-    assert params is not None
+    params = build_tt_instances_dataset(_CFG, no_tt).dataset_params
     by_name = _string_ds_params(params)
     assert by_name["pL2ftTtTemplate"].DefaultValues.StaticValues == [
         L2FT_ALL_SENTINEL,
@@ -1016,7 +926,7 @@ def _exc_dataset_sql(builder_name: str, yaml_path: Path) -> str:
     inst = load_instance(yaml_path)
     cfg = replace(_CFG, db=replace(_CFG.db, table_prefix=yaml_path.stem))
     builder = getattr(ds_mod, builder_name)
-    aws_ds: DataSet = builder(cfg, inst)
+    aws_ds: BuiltDataset = builder(cfg, inst)
     return _ds_sql(aws_ds)
 
 
@@ -1145,8 +1055,13 @@ def test_exc_dead_limit_schedules_filters_outbound_debit() -> None:
 def test_exc_dataset_contract_columns_match_builder(
     ds_id: str, builder_name: str,
 ) -> None:
-    """Every exception dataset's contract columns match its SQL
-    projection — visual ds["col"] references resolve cleanly."""
+    """Every exception dataset's contract columns appear in its SQL —
+    visual ds["col"] references resolve cleanly. (These ``build_exc_*``
+    builders are legacy, not wired into
+    ``build_all_l2_flow_tracing_datasets`` — replaced by the unified
+    UNION-ALL dataset — so they aren't swept by
+    ``test_dataset_sql_contract_projection``; this is their only
+    column-projection coverage.)"""
     import recon_gen.apps.l2_flow_tracing.datasets as ds_mod
     contract_name_map = {
         "l2ft-exc-chain-orphans-ds": "EXC_CHAIN_ORPHANS_CONTRACT",
@@ -1161,12 +1076,12 @@ def test_exc_dataset_contract_columns_match_builder(
     }
     contract = getattr(ds_mod, contract_name_map[ds_id])
     builder = getattr(ds_mod, builder_name)
-    aws_ds = builder(_CFG, load_instance(SASQUATCH_PR_YAML))
-    cols = {
-        c.Name for c in _ds_columns(aws_ds)
-    }
-    expected = {c.name for c in contract.columns}
-    assert cols == expected
+    sql = builder(_CFG, load_instance(SASQUATCH_PR_YAML)).sql
+    missing = [
+        c.name for c in contract.columns
+        if not re.search(rf"\b{re.escape(c.name)}\b", sql)
+    ]
+    assert not missing, f"contract columns absent from SQL: {missing}"
 
 
 def test_exceptions_sheet_unified_shape() -> None:
@@ -1399,10 +1314,10 @@ def test_postings_dataset_declares_cascade_and_pushdown_parameters() -> None:
     )
     inst = load_instance(SASQUATCH_PR_YAML)
     aws_ds = build_postings_dataset(_CFG, inst)
-    params = aws_ds.DatasetParameters
+    params = aws_ds.dataset_params
     # Phase BM — 5 pre-BM (pKey/pValues + Rail/Status/Bundle) + 2 BM
     # date params (pL2ftDateStart/End) = 7.
-    assert params is not None and len(params) == 7
+    assert len(params) == 7
     date_param_names = {
         p.DateTimeDatasetParameter.Name
         for p in params if p.DateTimeDatasetParameter is not None
@@ -1493,7 +1408,7 @@ def test_meta_values_dataset_is_long_form_with_metadata_key_column() -> None:
     assert "AS metadata_key" in sql
     assert "AS metadata_value" in sql
     # No dataset parameters — cascade is column-match driven.
-    assert aws_ds.DatasetParameters is None or aws_ds.DatasetParameters == []
+    assert not aws_ds.dataset_params
 
 
 def test_meta_key_param_maps_to_postings_only() -> None:

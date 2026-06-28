@@ -11,7 +11,7 @@ The dependency graph drives:
 - Matview REFRESH ordering (REFRESH only the matviews backing
   Datasets that an updated deploy surface depends on).
 
-Construction-time check (in App.emit_analysis): every Dataset
+Construction-time check (in App.validate): every Dataset
 referenced from the tree must be registered on the App via
 ``app.add_dataset()``. Catches "visual references undeclared dataset"
 at emit time, where the existing string-keyed pattern lets the
@@ -39,7 +39,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from recon_gen.common.dataset_contract import get_contract
-from recon_gen.common.models import DataSetIdentifierDeclaration
 from recon_gen.common.tree._helpers import AUTO, AutoResolved, TimeGranularity
 
 if TYPE_CHECKING:
@@ -52,8 +51,8 @@ class Dataset:
 
     ``identifier`` is the logical identifier visuals/filters reference
     (the existing per-app DS_INV_ACCOUNT_NETWORK / DS_AR_TRANSACTIONS
-    strings — values like ``"inv-account-network-ds"``). ``arn`` is
-    the AWS QuickSight DataSetArn the deployed analysis points at.
+    strings — values like ``"inv-account-network-ds"``). It IS the
+    DataSetId the renderer keys on.
 
     Frozen because Dataset acts as the dependency-graph KEY: it must
     be hashable so visuals/filters that reference it can be collected
@@ -64,7 +63,6 @@ class Dataset:
     — see Column docstring for the chained factory pattern.
     """
     identifier: str
-    arn: str
 
     def __getitem__(self, name: str) -> Column:
         """Return a typed ``Column`` ref for ``name``.
@@ -90,12 +88,6 @@ class Dataset:
                 f"{sorted(contract.column_names)}"
             )
         return Column(dataset=self, name=name)
-
-    def emit_declaration(self) -> DataSetIdentifierDeclaration:
-        return DataSetIdentifierDeclaration(
-            Identifier=self.identifier, DataSetArn=self.arn,
-        )
-
 
 @dataclass(frozen=True)
 class Column:

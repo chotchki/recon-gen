@@ -132,12 +132,9 @@ and the same six check_types; the data populates per-instance.
 
 L1 and L2 Flow Tracing are sibling dashboards over one L2 instance,
 not layered ones. They share the same `{{ l2_instance_name }}_*` matviews on the
-same database schema and produce
-their dashboard IDs as `<deployment_name>-l1-dashboard` and
-`<deployment_name>-l2-flow-tracing` respectively — `cfg.aws.deployment_name`
-namespaces both apps under one stable prefix, so an integrator deploying
-both apps against the same L2 instance (the typical case) gets clean,
-non-colliding QS resource IDs.
+same database schema, so an integrator serving both apps against the
+same L2 instance (the typical case) gets two clean, non-colliding
+lenses over one per-instance prefixed schema.
 
 The natural workflow: **L2 Flow Tracing first to confirm the L2
 declaration is alive**; **L1 second to confirm the postings are
@@ -147,22 +144,22 @@ expect L2 Exceptions to fire freely on day one (most rails are
 L1 violations are the second-order signal — they only matter once
 the declaration itself is healthy.
 
-## Generation + deployment
+## Serving the dashboard
 
 ```bash
-# Generate JSON for all four bundled apps to run/out/
-recon-gen json apply -c run/config.yaml -o run/out
+# Serve all four bundled apps (HTMX dashboards) from run/config.yaml
+recon-gen dashboards -c run/config.yaml
 
 # Target a specific L2 YAML (substitute your own path)
-recon-gen json apply \
+recon-gen dashboards \
   --l2 tests/l2/<your-l2-instance>.yaml \
-  -c run/config.yaml -o run/out
+  -c run/config.yaml
 
-# Same emit, then deploy to AWS (delete-then-create)
-recon-gen json apply -c run/config.yaml -o run/out --execute
+# Same dashboards plus the Studio editor + implementation tools
+recon-gen studio -c run/config.yaml --l2 tests/l2/<your-l2-instance>.yaml
 ```
 
 The L2 instance defaults to the canonical `spec_example` fixture.
 Use `--l2 PATH` to target any other YAML; per-instance prefix
-isolation means multiple L2 instances can deploy into the same
-QuickSight account without colliding.
+isolation means multiple L2 instances coexist in the same database
+without colliding.

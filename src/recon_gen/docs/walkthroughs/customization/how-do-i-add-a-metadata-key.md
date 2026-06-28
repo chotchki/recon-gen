@@ -16,8 +16,9 @@ The dashboard side of the metadata-key contract is shorter than
 the ETL side and needs NO schema migration: `JSON_VALUE(metadata,
 '$.your_key')` in a dataset SQL, an entry in the matching
 `DatasetContract` and the visual reference picks it up. Because
-every dataset is direct-query (not SPICE), a new column appears
-the moment your next deploy completes — no refresh step.
+every dataset is direct-query (no cache to invalidate), a new
+column appears the moment you next serve the dashboards — no
+refresh step.
 
 This walkthrough covers the dashboard-side read pattern and the
 decision that actually drives the UX: when to surface a metadata
@@ -194,7 +195,7 @@ Rule of thumb from the existing dashboards:
   than picking from a list.
 - **Cardinality > 100 (merchant_account_id, statement_line_id)**:
   table column only. Filtering by a high-cardinality value is a
-  search problem, not a dropdown problem; QuickSight's
+  search problem, not a dropdown problem; the renderer's
   search-in-filter is functional but not great UX. Surface as
   a column and let the user use the table's Find function.
 
@@ -228,8 +229,8 @@ Once the new column is reading and rendering:
    Pass = projection and contract agree on the column shape.
    Fail = something drifted, usually a typo in the column alias
    (`originating_branch` vs `originating_brnach`).
-2. **Deploy and verify the visual.** `recon-gen json apply
-   -c config.yaml -o out/ --execute`. Open the dashboard,
+2. **Serve and verify the visual.** `recon-gen dashboards
+   -c config.yaml`. Open the dashboard,
    confirm the new column / filter / dimension renders with
    non-blank values. See it live: https://recon-gen-spec.hotchkiss.io/
 3. **Decide whether to document.** If the key is bank-specific

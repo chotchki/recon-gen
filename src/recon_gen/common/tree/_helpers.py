@@ -1,14 +1,9 @@
 """Internal helpers shared across tree submodules.
 
-Title / subtitle label builders + the action lists for QuickSight
-Analysis / Dashboard ResourcePermissions. Lifted from the per-app
-analysis modules so visual / control / structural nodes can reach
-them without re-importing across submodules.
-
-Plus shared ``Literal`` type aliases that more than one submodule
-references (e.g. ``TimeGranularity``, used by both filters and
-parameters). Pyright strict on ``common/tree/`` (L.1.20) catches
-out-of-set values at the wiring site; no runtime guard needed.
+Shared ``Literal`` type aliases that more than one submodule references
+(e.g. ``TimeGranularity``, used by both filters and parameters). Pyright
+strict on ``common/tree/`` (L.1.20) catches out-of-set values at the
+wiring site; no runtime guard needed.
 
 Plus the ``AUTO`` sentinel — distinguishes "truly optional, may stay
 unset at deploy" (``T | None``) from "must be filled in by
@@ -25,11 +20,6 @@ from __future__ import annotations
 import enum
 import uuid
 from typing import Final, Literal
-
-from recon_gen.common.models import (
-    VisualSubtitleLabelOptions,
-    VisualTitleLabelOptions,
-)
 
 
 # Project-pinned namespace for deterministic UUID v5s on tree-position
@@ -104,42 +94,4 @@ TimeGranularity = Literal[
 # tree primitives can grow into them.
 GridLayoutElementType = Literal[
     "VISUAL", "FILTER_CONTROL", "PARAMETER_CONTROL", "TEXT_BOX", "IMAGE",
-]
-
-
-def title_label(text: str) -> VisualTitleLabelOptions:
-    return VisualTitleLabelOptions(
-        Visibility="VISIBLE", FormatText={"PlainText": text},
-    )
-
-
-def subtitle_label(text: str) -> VisualSubtitleLabelOptions:
-    return VisualSubtitleLabelOptions(
-        Visibility="VISIBLE", FormatText={"PlainText": text},
-    )
-
-
-# ResourcePermission action lists — match the per-app
-# `_ANALYSIS_ACTIONS` / `_DASHBOARD_ACTIONS` lists used by the
-# existing imperative builders.
-ANALYSIS_ACTIONS = [
-    "quicksight:DescribeAnalysis",
-    "quicksight:DescribeAnalysisPermissions",
-    "quicksight:UpdateAnalysis",
-    "quicksight:UpdateAnalysisPermissions",
-    "quicksight:DeleteAnalysis",
-    "quicksight:QueryAnalysis",
-    "quicksight:RestoreAnalysis",
-]
-
-DASHBOARD_ACTIONS = [
-    "quicksight:DescribeDashboard",
-    "quicksight:ListDashboardVersions",
-    "quicksight:UpdateDashboardPermissions",
-    "quicksight:QueryDashboard",
-    "quicksight:UpdateDashboard",
-    "quicksight:DeleteDashboard",
-    "quicksight:DescribeDashboardPermissions",
-    "quicksight:UpdateDashboardPublishedVersion",
-    "quicksight:UpdateDashboardLinks",
 ]

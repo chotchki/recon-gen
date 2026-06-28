@@ -33,7 +33,7 @@ def _minimal_cfg(dialect: Dialect, *, demo_url: str | None = None) -> Config:
     the bridge never touches.
     """
     return Config(
-        aws=AwsConfig(account_id="000000000000", region="us-east-1", deployment_name="recon-test"),
+        aws=AwsConfig(deployment_name="recon-test"),
         db=DbConfig(table_prefix="recon_test", url=demo_url, dialect=dialect),
     )
 
@@ -97,8 +97,6 @@ def test_other_cfg_fields_preserved_on_swap() -> None:
     """
     cfg = _minimal_cfg(Dialect.POSTGRES, demo_url="old")
     out = _call_bridge(cfg, pg_url="new")
-    assert out.aws.account_id == cfg.aws.account_id
-    assert out.aws.region == cfg.aws.region
     assert out.aws.deployment_name == cfg.aws.deployment_name
     assert out.db.table_prefix == cfg.db.table_prefix
     # And the swap actually happened.

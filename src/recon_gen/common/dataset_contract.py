@@ -18,17 +18,7 @@ if TYPE_CHECKING:
     from recon_gen.common.html._tree_fetcher import PickerMatviewHint
 
 from recon_gen.common.config import Config
-from recon_gen.common.models import (
-    CustomSql,
-    DataSet,
-    DatasetParameter,
-    DataSetUsageConfiguration,
-    InputColumn,
-    LogicalTable,
-    LogicalTableSource,
-    PhysicalTable,
-    ResourcePermission,
-)
+from recon_gen.common.models import DatasetParameter
 
 
 class ColumnShape(Enum):
@@ -208,9 +198,6 @@ class ColumnSpec:
             return self.display_name
         return _smart_title(self.name)
 
-    def to_input_column(self) -> InputColumn:
-        return InputColumn(Name=self.name, Type=self.type)
-
 
 # Initialisms that should stay uppercase in the auto-derived label.
 # These are the snake_case word forms (lowercase, no separators) we'll
@@ -241,9 +228,6 @@ def _smart_title(snake: str) -> str:
 @dataclass
 class DatasetContract:
     columns: list[ColumnSpec]
-
-    def to_input_columns(self) -> list[InputColumn]:
-        return [c.to_input_column() for c in self.columns]
 
     @property
     def column_names(self) -> list[str]:
@@ -408,7 +392,7 @@ def isolated_dataset_registries() -> Generator[None, None, None]:
         def isolated_inv_app(isolated_cfg):
             with isolated_dataset_registries():
                 app = build_investigation_app(isolated_cfg, l2_instance=_INSTANCE)
-                app.emit_analysis()
+                app.validate()
                 yield app
 
     See BL.0 in ``PLAN_ARCHIVE.md`` + ``docs/audits/_archive/bl_0_shared_state_keying_smell.md``
@@ -428,29 +412,6 @@ def isolated_dataset_registries() -> Generator[None, None, None]:
         _DSP_REGISTRY.update(dsp_snapshot)
         _CONTRACT_REGISTRY.clear()
         _CONTRACT_REGISTRY.update(contract_snapshot)
-
-
-DATASET_ACTIONS = [
-    "quicksight:DescribeDataSet",
-    "quicksight:DescribeDataSetPermissions",
-    "quicksight:PassDataSet",
-    "quicksight:DescribeIngestion",
-    "quicksight:ListIngestions",
-    "quicksight:UpdateDataSet",
-    "quicksight:DeleteDataSet",
-    "quicksight:CreateIngestion",
-    "quicksight:CancelIngestion",
-    "quicksight:UpdateDataSetPermissions",
-]
-
-
-def dataset_permissions(cfg: Config) -> list[ResourcePermission] | None:
-    if not cfg.aws.principal_arns:
-        return None
-    return [
-        ResourcePermission(Principal=arn, Actions=DATASET_ACTIONS)
-        for arn in cfg.aws.principal_arns
-    ]
 
 
 def _oracle_lowercase_alias_wrapper(
@@ -525,6 +486,38 @@ def _assign_dataset_param_ids(
     return out
 
 
+@dataclass(frozen=True, slots=True)
+class BuiltDataset:
+    """Handle returned by :func:`build_dataset`.
+
+    Carries ``DataSetId`` (the dataset_id — every app's ``app.py`` reads
+    it to build the tree ``Dataset`` ARN via ``cfg.aws.dataset_arn``),
+    ``visual_identifier`` (the registry key App2's runtime lookups use),
+    and a snapshot of this build's ``sql`` / ``contract`` /
+    ``dataset_params``. The QS ``DataSet`` model graph this used to return
+    retired with the QS emitter (DW phase).
+
+    The sql/contract/params are stored on the HANDLE (not read-through the
+    module registry) on purpose: two datasets built from the same
+    ``visual_identifier`` but different cfgs (e.g. a per-dialect probe that
+    builds the liveness dataset for PG and Oracle in one test) each keep
+    their own SQL — the registry is last-write-wins by key, so a
+    read-through property would hand both handles the LAST build's SQL.
+    The pre-DW.8.1.b ``DataSet`` object held its own ``CustomSql.SqlQuery``
+    the same way. App2's runtime path still resolves SQL/params/contract by
+    ``visual_identifier`` via the module registry (``get_sql`` et al.) —
+    ``build_dataset`` populates both. ``DataSetId`` keeps its PascalCase
+    name so ``cfg.aws.dataset_arn(ds.DataSetId)`` read sites stay
+    byte-identical to the pre-DW.8.1.b ``DataSet.DataSetId``.
+    """
+
+    DataSetId: str
+    visual_identifier: str
+    sql: str
+    contract: DatasetContract
+    dataset_params: list[DatasetParameter]
+
+
 def build_dataset(
     cfg: Config,
     dataset_id: str,
@@ -535,13 +528,22 @@ def build_dataset(
     visual_identifier: str,
     dataset_parameters: list[DatasetParameter] | None = None,
     picker_matview_hint: "PickerMatviewHint | None" = None,
-) -> DataSet:
-    """Build an AWS-shape DataSet.
+) -> BuiltDataset:
+    """Register a dataset's SQL/params/contract and return its handle.
+
+    Pre-DW.8.1.b this built + returned an AWS-shape ``DataSet``; that
+    graph retired with the QS emitter. What remains are the registry
+    side-effects both renderers need — ``register_sql`` (App2's SQL
+    source of truth), ``register_dataset_params``, ``register_contract``,
+    and the optional picker-matview hint — plus a :class:`BuiltDataset`
+    handle carrying the dataset_id + visual_identifier. ``name`` and
+    ``table_key`` are retained on the signature for call-site stability
+    (they fed the now-gone ``DataSet.Name`` / ``PhysicalTable`` key).
 
     ``dataset_parameters``: optional list of dataset-level parameters
     that get substituted into ``sql`` via the ``<<$paramName>>``
-    syntax at QuickSight query time. Bridge to analysis params via
-    ``MappedDataSetParameters`` on the analysis ParameterDeclaration.
+    syntax at query time. App2's ``_sql_executor`` reads them to resolve
+    a placeholder's default when the URL doesn't supply that param.
 
     Phase BM dissolved the pre-BM ``app2_date_column=`` kwarg + the
     ``{date_filter}`` template slot in favor of unified
@@ -565,12 +567,13 @@ def build_dataset(
     # X.2.g.0 — register the dialect-correct SQL so the App2 tree
     # fetcher can resolve a Visual's dataset SQL by visual_identifier.
     register_sql(visual_identifier, sql)
-    # Y.2.app2.cde — register the dataset's QS parameters too, so the
-    # App2 executor can resolve a `<<$paramName>>` placeholder's default
+    # Y.2.app2.cde — register the dataset's parameters so the App2
+    # executor can resolve a `<<$paramName>>` placeholder's default
     # (string-substituted) when the URL doesn't supply that param.
-    # AK.1 — assign deterministic dataset-scoped UUIDs before registering
-    # + emitting. App2 keys off the param Name, so the Id remap is QS-side
-    # only; QS rejects colliding/non-UUID parameter Ids across an analysis.
+    # AK.1 — assign deterministic dataset-scoped UUIDs at registration.
+    # App2 keys off the param Name, so the Id stamp is legacy from the
+    # QS path (QS rejected colliding/non-UUID parameter Ids); harmless
+    # to App2, kept so the param Ids stay deterministic across runs.
     params = (
         _assign_dataset_param_ids(dataset_id, dataset_parameters)
         if dataset_parameters else None
@@ -586,38 +589,11 @@ def build_dataset(
             register_picker_matview_hint,
         )
         register_picker_matview_hint(visual_identifier, picker_matview_hint)
-    columns = contract.to_input_columns()
-    # Config.__post_init__ guarantees datasource_arn is non-None
-    # post-construction (raises if neither it nor demo_database_url
-    # is provided). The dataclass default is None for ergonomics, but
-    # by the time build_dataset runs the value is a real ARN string.
-    assert cfg.aws.datasource.arn is not None
-    physical = {
-        table_key: PhysicalTable(
-            CustomSql=CustomSql(
-                Name=name,
-                DataSourceArn=cfg.aws.datasource.arn,
-                SqlQuery=sql,
-                Columns=columns,
-            )
-        )
-    }
-    logical = {
-        f"{table_key}-logical": LogicalTable(
-            Alias=name,
-            Source=LogicalTableSource(PhysicalTableId=table_key),
-        )
-    }
     register_contract(visual_identifier, contract)
-    return DataSet(
-        AwsAccountId=cfg.aws.account_id,
+    return BuiltDataset(
         DataSetId=dataset_id,
-        Name=name,
-        PhysicalTableMap=physical,
-        LogicalTableMap=logical,
-        ImportMode="DIRECT_QUERY",
-        DataSetUsageConfiguration=DataSetUsageConfiguration(),
-        Permissions=dataset_permissions(cfg),
-        Tags=cfg.aws.tags(),
-        DatasetParameters=params,
+        visual_identifier=visual_identifier,
+        sql=sql,
+        contract=contract,
+        dataset_params=list(params or []),
     )

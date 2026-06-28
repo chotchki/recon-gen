@@ -163,17 +163,6 @@ custom matview added without a date column), so don't read it as staleness.
 - [Supersession Audit](supersession-audit.md) — when the drift signature looks
   like a botched correction.
 
-## QS parity notes
-
-- **Count-distinct quirk.** Pre-v8 QuickSight rendered the "Distinct Accounts" KPI
-  (row-count distinct-by-the-dimension) instead of the COUNT(DISTINCT account_id)
-  the schema specified. App2 emits this correctly via `Measure.kind == "count"`
-  SUM-of-1 workaround. See [quirks log §count-distinct-quirk-bl1](../../reference/quicksight-quirks.md).
-- **URL-driven account dropdown.** When you arrive at this sheet via a drill from
-  another app (e.g. Investigation's Money Trail), QS may filter the data correctly
-  but show the *Account* dropdown still at *All* — the data is right, the control
-  is lying. App2 doesn't have this defect. See [quirks log §dependent-dropdown-no-refresh](../../reference/quicksight-quirks.md).
-
 ---
 
 *First time here? See the [Vocabulary](../_glossary.md) for `L1`, `matview`,

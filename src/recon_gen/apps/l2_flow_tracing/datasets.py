@@ -1,4 +1,4 @@
-"""QuickSight DataSet builders for the L2 Flow Tracing app.
+"""Dataset builders for the L2 Flow Tracing app.
 
 The Chains / L2 Exceptions tabs join L2-declared values (static, from
 the L2 instance) to runtime activity (from the prefixed
@@ -37,6 +37,7 @@ from recon_gen.common.dataset_contract import (
     ColumnShape,
     ColumnSpec,
     DatasetContract,
+    BuiltDataset,
     build_dataset,
 )
 from recon_gen.common.l2 import (
@@ -47,7 +48,6 @@ from recon_gen.common.l2 import (
     posted_requirements_for,
 )
 from recon_gen.common.models import (
-    DataSet,
     DatasetParameter,
     DateTimeDatasetParameter,
     DateTimeDatasetParameterDefaultValues,
@@ -553,7 +553,7 @@ META_VALUES_CONTRACT = DatasetContract(columns=[
 
 def build_all_l2_flow_tracing_datasets(
     cfg: Config, l2_instance: L2Instance,
-) -> list[DataSet]:
+) -> list[BuiltDataset]:
     """Return every Dataset the L2 Flow Tracing app needs.
 
     Mirrors `build_all_l1_dashboard_datasets`: derives an L2-aware
@@ -732,7 +732,7 @@ def declared_template_names(l2_instance: L2Instance) -> list[str]:
 
 def build_postings_dataset(
     cfg: Config, l2_instance: L2Instance,
-) -> DataSet:
+) -> BuiltDataset:
     """One row per leg from ``<prefix>_current_transactions``,
     parameterized so the Rails sheet's filters push down into SQL via
     QS ``<<$param>>`` substitution.
@@ -867,7 +867,7 @@ def build_postings_dataset(
 
 def build_meta_values_dataset(
     cfg: Config, l2_instance: L2Instance,
-) -> DataSet:
+) -> BuiltDataset:
     """Long-form ``(metadata_key, metadata_value)`` for the cascade.
 
     Built as a UNION ALL across declared metadata keys, projecting one
@@ -927,7 +927,7 @@ def build_meta_values_dataset(
     )
 
 
-def build_chains_dataset(cfg: Config, l2_instance: L2Instance) -> DataSet:
+def build_chains_dataset(cfg: Config, l2_instance: L2Instance) -> BuiltDataset:
     """One row per declared Chain-row child (Z.A: a multi-children
     row contributes N rows) — the L2's parent→child topology joined
     to runtime parent firing counts + matched-child counts.
@@ -1014,7 +1014,7 @@ def build_chains_dataset(cfg: Config, l2_instance: L2Instance) -> DataSet:
 
 def build_chain_instances_dataset(
     cfg: Config, l2_instance: L2Instance,
-) -> DataSet:
+) -> BuiltDataset:
     """One row per parent transfer firing of a declared chain parent
     (M.3.10d, completion_status extended in M.3.10i for XOR groups).
     Backs the Chains sheet's per-instance explorer.
@@ -1220,7 +1220,7 @@ def build_chain_instances_dataset(
 
 def build_exc_chain_orphans_dataset(
     cfg: Config, l2_instance: L2Instance,
-) -> DataSet:
+) -> BuiltDataset:
     """L2.1 — Required Chain entries where parent fired but no
     matched child fired in the window.
 
@@ -1320,7 +1320,7 @@ def build_exc_chain_orphans_dataset(
 
 def build_exc_unmatched_rail_name_dataset(
     cfg: Config, l2_instance: L2Instance,
-) -> DataSet:
+) -> BuiltDataset:
     """L2.2 — Posted Transactions whose ``rail_name`` doesn't
     match any declared ``Rail.rail_name``.
 
@@ -1354,7 +1354,7 @@ def build_exc_unmatched_rail_name_dataset(
 
 def build_exc_dead_rails_dataset(
     cfg: Config, l2_instance: L2Instance,
-) -> DataSet:
+) -> BuiltDataset:
     """L2.3 — Rails declared in L2 with zero postings in the window.
 
     Same shape as the Rails dataset but pre-filtered to
@@ -1389,7 +1389,7 @@ def build_exc_dead_rails_dataset(
 
 def build_exc_dead_bundles_activity_dataset(
     cfg: Config, l2_instance: L2Instance,
-) -> DataSet:
+) -> BuiltDataset:
     """L2.4 — Aggregating-rail bundles_activity targets that no
     posting matched in the window.
 
@@ -1424,7 +1424,7 @@ def build_exc_dead_bundles_activity_dataset(
 
 def build_exc_dead_metadata_dataset(
     cfg: Config, l2_instance: L2Instance,
-) -> DataSet:
+) -> BuiltDataset:
     """L2.5 — Rail.metadata_keys declared in L2 that no posting
     carries a non-null value for in the window.
 
@@ -1457,7 +1457,7 @@ def build_exc_dead_metadata_dataset(
 
 def build_exc_dead_limit_schedules_dataset(
     cfg: Config, l2_instance: L2Instance,
-) -> DataSet:
+) -> BuiltDataset:
     """L2.6 — LimitSchedule (parent_role, rail_name) cells with
     zero outbound debit flow in the window.
 
@@ -1498,7 +1498,7 @@ def build_exc_dead_limit_schedules_dataset(
 
 def build_unified_l2_exceptions_dataset(
     cfg: Config, l2_instance: L2Instance,
-) -> DataSet:
+) -> BuiltDataset:
     """UNION ALL across the 6 L2 hygiene checks into one row-per-
     violation dataset (M.3.10l).
 
@@ -1980,7 +1980,7 @@ def _declared_templates_cte(
 
 def build_tt_instances_dataset(
     cfg: Config, l2_instance: L2Instance,
-) -> DataSet:
+) -> BuiltDataset:
     """One row per shared Transfer that matches a declared
     TransferTemplate (M.3.10f, completion_status reshaped M.3.10j).
 
@@ -2194,7 +2194,7 @@ def _tt_dataset_parameters(
 
 def build_tt_legs_dataset(
     cfg: Config, l2_instance: L2Instance,
-) -> DataSet:
+) -> BuiltDataset:
     """One row per Sankey edge segment for a TransferTemplate firing
     (M.3.10f, chain-edge UNION added in M.3.10i).
 

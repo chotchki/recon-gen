@@ -17,18 +17,22 @@ max-hops on ``depth``, min-hop-amount on ``hop_amount`` — all scoped
 ALL_VISUALS), three new parameters + controls (string root, integer
 max-hops slider, integer min-amount slider), and a Sankey diagram +
 hop-by-hop detail table side-by-side.
+
+DW.1 (QuickSight removal): the analysis-shape assertions below walk the
+TREE object graph (``build_investigation_app(...).analysis``) rather
+than the emitted ``models.Analysis`` — "Tree IS the source of truth".
+The dataset-builder assertions still go through ``build_all_datasets``
+(the dataset emit path stays). The QuickSight-API serializers (the
+analysis / dashboard / None-strip JSON emitters) are being retired in
+DW.8; nothing here calls them.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
+import re
 
-from click.testing import CliRunner
 
-from recon_gen.apps.investigation.app import (
-    build_analysis,
-    build_investigation_dashboard,
-)
+from recon_gen.apps.investigation.app import build_investigation_app
 from recon_gen.apps.investigation.constants import (
     CF_INV_ANETWORK_COUNTERPARTY_DISPLAY,
     CF_INV_ANETWORK_IS_INBOUND_EDGE,
@@ -66,27 +70,38 @@ from recon_gen.apps.investigation.datasets import (
     VOLUME_ANOMALIES_CONTRACT,
     build_all_datasets,  # pyright: ignore[reportUnknownVariableType]: L2Instance import alias reads as Unknown here despite datasets.py being typed
 )
-from recon_gen.cli import main
 from recon_gen.common.config import Config
 from recon_gen.common.spine._emit_helpers import DEFAULT_PREFIX
+from recon_gen.common.dataset_contract import BuiltDataset
 from recon_gen.common.models import (
-    Analysis,
-    DataSet,
-    FilterControl,
-    FilterGroup,
     IntegerDatasetParameter,
     IntegerDatasetParameterDefaultValues,
-    IntegerParameterDeclaration,
-    ParameterControl,
-    ParameterDeclaration,
-    PhysicalTable,
-    SankeyDiagramVisual,
-    SheetDefinition,
-    SheetVisualScopingConfiguration,
     StringDatasetParameter,
-    StringParameterDeclaration,
-    TableVisual,
 )
+from recon_gen.common.tree import (
+    Analysis,
+    App,
+    BarChart,
+    Dim,
+    Drill,
+    FilterDateTimePicker,
+    FilterControlLike,
+    FilterGroup,
+    IntegerParam,
+    LinkedValues,
+    Measure,
+    ParameterControlLike,
+    ParameterDeclLike,
+    ParameterDropdown,
+    ParameterSlider,
+    Sankey,
+    Sheet,
+    StringParam,
+    Table,
+    TimeRangeFilter,
+)
+from recon_gen.common.tree.calc_fields import resolve_column
+from recon_gen.common.tree.fields import ROW_ONE_CALC_PREFIX
 from tests._test_helpers import make_test_config
 
 
@@ -123,123 +138,77 @@ DEFAULT_MONEY_TRAIL_MAX_HOPS = 5
 AMOUNT_SLIDER_MIN = 0
 AMOUNT_SLIDER_MAX = 1000
 DEFAULT_MONEY_TRAIL_MIN_AMOUNT = 0
+# Same inline-the-literal convention: the app's ``_SANKEY_NODE_CAP``
+# caps source+destination nodes per Sankey. Mirrored here so a drift in
+# either side trips the chain-Sankey + account-network-Sankey node-cap
+# assertions.
+SANKEY_NODE_CAP = 50
+
+
+# ---------------------------------------------------------------------------
+# Tree-walk helpers — every analysis-shape test reads the App tree
+# (post-resolve), not an emitted model. ``build_investigation_app`` wires
+# the same tree the deploy path emits; ``resolve_auto_ids`` fills the
+# auto IDs (visual_id / field_id / control_id / drill target_sheet) so
+# the reads below see resolved values.
+# ---------------------------------------------------------------------------
+
+def _app(cfg: Config = _TEST_CFG) -> App:
+    app = build_investigation_app(cfg)
+    app.resolve_auto_ids()
+    return app
+
+
+def _analysis(cfg: Config = _TEST_CFG) -> Analysis:
+    app = _app(cfg)
+    assert app.analysis is not None, "Investigation App must carry an Analysis"
+    return app.analysis
 
 
 def _filter_groups(cfg: Config = _TEST_CFG) -> list[FilterGroup]:
-    """Walk the tree's emitted filter groups (post-resolve)."""
-    fgs = build_analysis(cfg).Definition.FilterGroups
-    assert fgs is not None, "Investigation analysis must declare FilterGroups"
-    return fgs
+    """Walk the tree's filter groups (post-resolve)."""
+    return _analysis(cfg).filter_groups
 
 
-def _parameter_declarations(
-    cfg: Config = _TEST_CFG,
-) -> list[ParameterDeclaration]:
-    """Walk the tree's emitted parameter declarations (post-resolve)."""
-    decls = build_analysis(cfg).Definition.ParameterDeclarations
-    assert decls is not None, (
-        "Investigation analysis must declare ParameterDeclarations"
-    )
-    return decls
+def _parameter_declarations(cfg: Config = _TEST_CFG) -> list[ParameterDeclLike]:
+    """Walk the tree's parameter declarations (post-resolve)."""
+    return _analysis(cfg).parameters
 
 
-def _sheet_by_id(sheet_id: str, cfg: Config = _TEST_CFG) -> SheetDefinition:  # typing-smell: ignore[bare-str-id]: sheet_id comes from callers as raw analyst string
-    """Find an emitted Sheet by its `SheetId`."""
-    sheets = build_analysis(cfg).Definition.Sheets
-    assert sheets is not None, "Investigation analysis must declare Sheets"
-    return next(s for s in sheets if s.SheetId == sheet_id)
+def _sheet_by_id(sheet_id: str, cfg: Config = _TEST_CFG) -> Sheet:  # typing-smell: ignore[bare-str-id]: sheet_id comes from callers as raw analyst string
+    """Find a tree Sheet by its `sheet_id`."""
+    return next(s for s in _analysis(cfg).sheets if s.sheet_id == sheet_id)
 
 
 def _filter_controls(
     sheet_id: str, cfg: Config = _TEST_CFG,  # typing-smell: ignore[bare-str-id]: sheet_id comes from callers as raw analyst string
-) -> list[FilterControl]:
-    return _sheet_by_id(sheet_id, cfg).FilterControls or []
+) -> list[FilterControlLike]:
+    return _sheet_by_id(sheet_id, cfg).filter_controls
 
 
 def _parameter_controls(
     sheet_id: str, cfg: Config = _TEST_CFG,  # typing-smell: ignore[bare-str-id]: sheet_id comes from callers as raw analyst string
-) -> list[ParameterControl]:
-    return _sheet_by_id(sheet_id, cfg).ParameterControls or []
+) -> list[ParameterControlLike]:
+    return _sheet_by_id(sheet_id, cfg).parameter_controls
 
 
-def _sheets(analysis: Analysis) -> list[SheetDefinition]:
-    """Optional-cascade strip: every Investigation analysis must declare Sheets."""
-    assert analysis.Definition.Sheets is not None, (
-        "Investigation analysis must declare Sheets"
-    )
-    return analysis.Definition.Sheets
+def _custom_sql(ds: BuiltDataset) -> str:
+    """Pull the registered SQL from a built dataset.
 
-
-def _parameter_declarations_of(
-    analysis: Analysis,
-) -> list[ParameterDeclaration]:
-    assert analysis.Definition.ParameterDeclarations is not None, (
-        "Investigation analysis must declare ParameterDeclarations"
-    )
-    return analysis.Definition.ParameterDeclarations
-
-
-def _custom_sql(ds: DataSet, key: str | None = None) -> str:
-    """Optional-cascade strip: pull the CustomSql.SqlQuery from a dataset.
-
-    All Investigation datasets are CustomSql-backed by construction, so
-    the ``CustomSql is not None`` assertion can never fail in practice.
+    ``build_dataset`` registers each dataset's SQL under its
+    visual_identifier; ``BuiltDataset.sql`` resolves it. Every dataset
+    builds exactly one physical table, so there's a single SQL per
+    dataset (the pre-DW.8.1.b per-table-key lookup was redundant).
     """
-    table: PhysicalTable = (
-        ds.PhysicalTableMap[key] if key is not None
-        else next(iter(ds.PhysicalTableMap.values()))
-    )
-    assert table.CustomSql is not None, "Dataset must be CustomSql-backed"
-    return table.CustomSql.SqlQuery
+    return ds.sql
 
 
-def _sheet_scopes(
-    fg: FilterGroup,
-) -> list[SheetVisualScopingConfiguration]:
-    """Optional-cascade strip:
-    fg.ScopeConfiguration.SelectedSheets.SheetVisualScopingConfigurations.
-    Every Investigation filter group declares its scope via SelectedSheets.
-    """
-    sel = fg.ScopeConfiguration.SelectedSheets
-    assert sel is not None, f"FilterGroup {fg.FilterGroupId} missing SelectedSheets"
-    scopes = sel.SheetVisualScopingConfigurations
-    assert scopes is not None, (
-        f"FilterGroup {fg.FilterGroupId} missing SheetVisualScopingConfigurations"
-    )
-    return scopes
-
-
-def _plain_title(visual_subobject: object) -> str | None:
-    """Optional-cascade strip: read ``visual.Title.FormatText['PlainText']``.
-
-    Every typed Visual subtype carries Title (a VisualTitleLabelOptions),
-    which itself is | None on the field declaration but always set by the
-    tree builder. Returns None when title text isn't populated.
-    """
-    title = getattr(visual_subobject, "Title", None)
-    if title is None or title.FormatText is None:
-        return None
-    fmt = title.FormatText  # pyright: ignore[reportAny]: dict[str, str] | None inferred
-    plain: object = fmt.get("PlainText")  # pyright: ignore[reportAny]: third-party stub or test scaffolding cascade
-    return plain if isinstance(plain, str) else None
-
-
-def _visual_kinds(sheet: SheetDefinition) -> list[str]:
-    """Return the kind ('KPIVisual', 'TableVisual', ...) of each visual
-    on the sheet in order. Used in lieu of explicit visual_ids for
-    "this sheet has [KPI, BarChart, Table] in this order" structure
-    checks (visual_ids are auto-generated post-L.1.21)."""
-    assert sheet.Visuals is not None, f"Sheet {sheet.SheetId} has no Visuals"
-    kinds: list[str] = []
-    for v in sheet.Visuals:
-        for inner_name in (
-            "KPIVisual", "TableVisual", "BarChartVisual",
-            "SankeyDiagramVisual", "PieChartVisual",
-        ):
-            if getattr(v, inner_name, None) is not None:
-                kinds.append(inner_name)
-                break
-    return kinds
+def _visual_kinds(sheet: Sheet) -> list[str]:
+    """Return the tree-type name ('KPI', 'Table', 'BarChart', 'Sankey')
+    of each visual on the sheet in order. Used in lieu of explicit
+    visual_ids for "this sheet has [KPI, BarChart, Table] in this order"
+    structure checks (visual_ids are auto-generated post-L.1.21)."""
+    return [type(v).__name__ for v in sheet.visuals]
 
 
 # ---------------------------------------------------------------------------
@@ -250,8 +219,8 @@ def test_analysis_has_six_sheets_in_expected_order():
     """5 content sheets + the M.4.4.5 App Info ("i") sheet last."""
     from recon_gen.apps.investigation.constants import SHEET_INV_APP_INFO
 
-    analysis = build_analysis(_TEST_CFG)
-    sheet_ids = [s.SheetId for s in _sheets(analysis)]
+    analysis = _analysis()
+    sheet_ids = [s.sheet_id for s in analysis.sheets]
     assert sheet_ids == [
         SHEET_INV_GETTING_STARTED,
         SHEET_INV_FANOUT,
@@ -266,34 +235,40 @@ def test_analysis_name_carries_deployment_name():
     # Z.C — every L2-fed app's analysis name follows the
     # ``Name (deployment_name)`` shape so multi-deploy QS accounts are
     # visually distinguishable in the dashboard list.
-    analysis = build_analysis(_TEST_CFG)
-    assert analysis.Name == f"Investigation ({_TEST_CFG.aws.deployment_name})"
+    analysis = _analysis()
+    assert analysis.name == f"Investigation ({_TEST_CFG.aws.deployment_name})"
 
 
 def test_dashboard_mirrors_analysis_definition():
-    analysis = build_analysis(_TEST_CFG)
-    dashboard = build_investigation_dashboard(_TEST_CFG)
-    # Both wrap the same definition builder, so sheet counts align.
-    assert dashboard.Definition.Sheets is not None
-    assert analysis.Definition.Sheets is not None
-    assert len(dashboard.Definition.Sheets) == len(analysis.Definition.Sheets)
-    assert dashboard.DashboardId == _TEST_CFG.aws.prefixed("investigation-dashboard")
+    app = _app()
+    assert app.analysis is not None
+    assert app.dashboard is not None
+    # Dashboard carries the SAME Analysis tree node it publishes, so the
+    # identity check IS the mirror signal — a len==len on the same object
+    # would be tautological.
+    assert app.dashboard.analysis is app.analysis
+    assert app.cfg.aws.prefixed(
+        app.dashboard.dashboard_id_suffix,
+    ) == _TEST_CFG.aws.prefixed("investigation-dashboard")
 
 
 def test_every_sheet_has_a_description():
     """Plain-language description per sheet — enforced across all apps."""
-    analysis = build_analysis(_TEST_CFG)
-    for sheet in _sheets(analysis):
-        assert sheet.Description, f"{sheet.SheetId} is missing a description"
+    for sheet in _analysis().sheets:
+        assert sheet.description, f"{sheet.sheet_id} is missing a description"
 
 
-def test_analysis_serializes_to_aws_json():
-    """to_aws_json() must succeed end-to-end — no None-strip crashes.
-
-    5 content sheets + the M.4.4.5 App Info ("i") sheet = 6 total."""
-    j = build_analysis(_TEST_CFG).to_aws_json()
-    assert j["AnalysisId"] == _TEST_CFG.aws.prefixed("investigation-analysis")
-    assert len(j["Definition"]["Sheets"]) == 6
+def test_analysis_id_suffix_and_sheet_count():
+    """Structural carry-over from the retired emit-serialization
+    test: the analysis ID reproduces the deployment-prefixed
+    ``investigation-analysis`` id, and the sheet count is exactly 6
+    (5 content sheets + the App Info "i" sheet)."""
+    app = _app()
+    assert app.analysis is not None
+    assert app.cfg.aws.prefixed(
+        app.analysis.analysis_id_suffix,
+    ) == _TEST_CFG.aws.prefixed("investigation-analysis")
+    assert len(app.analysis.sheets) == 6
 
 
 # ---------------------------------------------------------------------------
@@ -332,16 +307,21 @@ def test_investigation_datasets_declared_in_analysis():
     Y.1.b.companion added DS_INV_VOLUME_ANOMALIES_DISTRIBUTION;
     Y.2.a.companion added DS_INV_MONEY_TRAIL_ROOTS;
     BO.2 added DS_INV_ACCOUNT_NETWORK_INBOUND + _OUTBOUND;
-    DK.5.kpi added the latest-balance-day data_anchor reader."""
+    DK.5.kpi added the latest-balance-day data_anchor reader.
+
+    The deployed ``DataSetIdentifierDeclarations`` are exactly the
+    registered datasets that the tree references, in registration
+    order — reproduced here off the tree without an emit round-trip."""
     from recon_gen.common.sheets.app_info import (
         app_info_latest_balance_day_id,
         app_info_liveness_id, app_info_matviews_id,
     )
 
-    analysis = build_analysis(_TEST_CFG)
-    decls = analysis.Definition.DataSetIdentifierDeclarations
+    app = _app()
+    referenced = app.dataset_dependencies()
+    declared = [ds.identifier for ds in app.datasets if ds in referenced]
     # BO.5 — App Info datasets carry per-app identifiers.
-    assert [d.Identifier for d in decls] == [
+    assert declared == [
         DS_INV_RECIPIENT_FANOUT,
         DS_INV_VOLUME_ANOMALIES,
         DS_INV_VOLUME_ANOMALIES_DISTRIBUTION,
@@ -400,8 +380,7 @@ def test_filter_groups_in_expected_order():
     SQL; the inbound/outbound FGs remain to partition the
     pre-narrowed anchor-touching set per Sankey). Order is stable so
     the deployed Definition diff is readable."""
-    groups = _filter_groups()
-    ids = [g.FilterGroupId for g in groups]
+    ids = [g.filter_group_id for g in _filter_groups()]
     assert ids == [
         FG_INV_FANOUT_WINDOW,
         FG_INV_ANOMALIES_WINDOW,
@@ -451,12 +430,12 @@ def test_fanout_threshold_pushed_into_dataset_sql():
 
 
 def test_window_filter_is_a_time_range_on_posted_at():
-    groups = {g.FilterGroupId: g for g in _filter_groups()}
+    groups = {g.filter_group_id: g for g in _filter_groups()}
     window = groups[FG_INV_FANOUT_WINDOW]
-    trf = window.Filters[0].TimeRangeFilter
-    assert trf is not None
-    assert trf.Column.ColumnName == "posted_at"
-    assert trf.Column.DataSetIdentifier == DS_INV_RECIPIENT_FANOUT
+    trf = window.filters[0]
+    assert isinstance(trf, TimeRangeFilter)
+    assert resolve_column(trf.column) == "posted_at"
+    assert trf.dataset.identifier == DS_INV_RECIPIENT_FANOUT
 
 
 def test_parameter_declarations_carry_both_thresholds():
@@ -465,53 +444,39 @@ def test_parameter_declarations_carry_both_thresholds():
     K.4.8 account-network anchor (string) + min-amount (integer)."""
     decls = _parameter_declarations()
     assert len(decls) == 7
-    int_by_name = {
-        d.IntegerParameterDeclaration.Name: d.IntegerParameterDeclaration
-        for d in decls if d.IntegerParameterDeclaration
-    }
-    assert int_by_name[P_INV_FANOUT_THRESHOLD].DefaultValues == {
-        "StaticValues": [DEFAULT_FANOUT_THRESHOLD],
-    }
-    assert int_by_name[P_INV_ANOMALIES_SIGMA].DefaultValues == {
-        "StaticValues": [DEFAULT_ANOMALIES_SIGMA],
-    }
-    assert int_by_name[P_INV_MONEY_TRAIL_MAX_HOPS].DefaultValues == {
-        "StaticValues": [DEFAULT_MONEY_TRAIL_MAX_HOPS],
-    }
-    assert int_by_name[P_INV_MONEY_TRAIL_MIN_AMOUNT].DefaultValues == {
-        "StaticValues": [DEFAULT_MONEY_TRAIL_MIN_AMOUNT],
-    }
+    int_by_name = {p.name: p for p in decls if isinstance(p, IntegerParam)}
+    assert int_by_name[P_INV_FANOUT_THRESHOLD].default == [DEFAULT_FANOUT_THRESHOLD]
+    assert int_by_name[P_INV_ANOMALIES_SIGMA].default == [DEFAULT_ANOMALIES_SIGMA]
+    assert int_by_name[P_INV_MONEY_TRAIL_MAX_HOPS].default == [
+        DEFAULT_MONEY_TRAIL_MAX_HOPS,
+    ]
+    assert int_by_name[P_INV_MONEY_TRAIL_MIN_AMOUNT].default == [
+        DEFAULT_MONEY_TRAIL_MIN_AMOUNT,
+    ]
     # K.4.8 anchor amount slider reuses Money Trail's default of 0.
-    assert int_by_name[P_INV_ANETWORK_MIN_AMOUNT].DefaultValues == {
-        "StaticValues": [DEFAULT_MONEY_TRAIL_MIN_AMOUNT],
-    }
-    str_by_name = {
-        d.StringParameterDeclaration.Name: d.StringParameterDeclaration
-        for d in decls if d.StringParameterDeclaration
-    }
+    assert int_by_name[P_INV_ANETWORK_MIN_AMOUNT].default == [
+        DEFAULT_MONEY_TRAIL_MIN_AMOUNT,
+    ]
+    str_by_name = {p.name: p for p in decls if isinstance(p, StringParam)}
     # No default — the dropdown auto-populates from the matview's
     # distinct root_transfer_id values.
-    assert str_by_name[P_INV_MONEY_TRAIL_ROOT].DefaultValues == {
-        "StaticValues": [],
-    }
+    assert str_by_name[P_INV_MONEY_TRAIL_ROOT].default == []
     # No default — analyst picks the anchor on first render.
-    assert str_by_name[P_INV_ANETWORK_ANCHOR].DefaultValues == {
-        "StaticValues": [],
-    }
+    assert str_by_name[P_INV_ANETWORK_ANCHOR].default == []
 
 
 def test_fanout_sheet_carries_window_filter_and_threshold_slider():
     fc = _filter_controls(SHEET_INV_FANOUT)
     pc = _parameter_controls(SHEET_INV_FANOUT)
     assert len(fc) == 1
-    assert fc[0].DateTimePicker is not None  # date range widget
+    assert isinstance(fc[0], FilterDateTimePicker)  # date range widget
     assert len(pc) == 1
-    slider = pc[0].Slider
-    assert slider is not None
-    assert slider.SourceParameterName == P_INV_FANOUT_THRESHOLD
-    assert slider.MinimumValue == SLIDER_MIN
-    assert slider.MaximumValue == SLIDER_MAX
-    assert slider.StepSize == 1
+    slider = pc[0]
+    assert isinstance(slider, ParameterSlider)
+    assert slider.parameter.name == P_INV_FANOUT_THRESHOLD
+    assert slider.minimum_value == SLIDER_MIN
+    assert slider.maximum_value == SLIDER_MAX
+    assert slider.step_size == 1
 
 
 # ---------------------------------------------------------------------------
@@ -522,10 +487,7 @@ def test_distinct_sender_calc_field_dropped_in_y3a():
     """Y.3.a — distinct_senders is now a real dataset window column, no
     longer an analysis-level CalcField. Test guards against the calc
     field accidentally coming back via copy-paste."""
-    analysis = build_analysis(_TEST_CFG)
-    cf_names = {
-        cf["Name"] for cf in analysis.Definition.CalculatedFields or []
-    }
+    cf_names = {c.name for c in _analysis().calc_fields}
     assert CF_INV_FANOUT_DISTINCT_SENDERS not in cf_names, (
         "Y.3.a — recipient_distinct_sender_count should be a dataset "
         "column, not a CalcField"
@@ -537,18 +499,10 @@ def test_distinct_sender_calc_field_dropped_in_y3a():
 # ---------------------------------------------------------------------------
 
 def test_fanout_sheet_has_three_kpis_and_one_table():
-    analysis = build_analysis(_TEST_CFG)
-    fanout = next(
-        s for s in _sheets(analysis) if s.SheetId == SHEET_INV_FANOUT
-    )
-    assert fanout.Visuals is not None
+    fanout = _sheet_by_id(SHEET_INV_FANOUT)
     # Three KPIs followed by one Table (visual_ids are auto-generated
     # post-L.1.21; titles are the stable identifier for asserting order).
-    titles = [
-        _plain_title(v.KPIVisual) if v.KPIVisual else
-        _plain_title(v.TableVisual) if v.TableVisual else None
-        for v in fanout.Visuals
-    ]
+    titles = [getattr(v, "title") for v in fanout.visuals]
     # BO.7 — KPI is now "Distinct Senders (Union)" to disambiguate from
     # the per-recipient table column "Senders Feeding This Recipient".
     assert titles == [
@@ -560,23 +514,13 @@ def test_fanout_sheet_has_three_kpis_and_one_table():
 
 
 def test_fanout_table_aggregates_to_recipient_grain():
-    analysis = build_analysis(_TEST_CFG)
-    fanout = next(
-        s for s in _sheets(analysis) if s.SheetId == SHEET_INV_FANOUT
-    )
-    assert fanout.Visuals is not None
-    table = next(v.TableVisual for v in fanout.Visuals if v.TableVisual)
-    assert table.ChartConfiguration is not None
-    field_wells = table.ChartConfiguration.FieldWells
-    assert field_wells is not None
-    # Aggregated, not unaggregated — table groups by recipient identity.
-    assert field_wells.TableAggregatedFieldWells is not None
-    assert field_wells.TableAggregatedFieldWells.GroupBy is not None
-    group_by_cols = [
-        d.CategoricalDimensionField.Column.ColumnName
-        for d in field_wells.TableAggregatedFieldWells.GroupBy
-        if d.CategoricalDimensionField
-    ]
+    fanout = _sheet_by_id(SHEET_INV_FANOUT)
+    table = next(v for v in fanout.visuals if isinstance(v, Table))
+    # Aggregated, not unaggregated — table groups by recipient identity
+    # (group_by populated, no raw `columns`).
+    assert table.group_by
+    assert not table.columns
+    group_by_cols = [resolve_column(d.column) for d in table.group_by]
     assert group_by_cols == [
         "recipient_account_id",
         "recipient_account_name",
@@ -584,46 +528,36 @@ def test_fanout_table_aggregates_to_recipient_grain():
     ]
 
 
-def test_fanout_sheet_serializes_to_aws_json():
-    """End-to-end serialization sanity: filters, calc fields, params,
-    visuals, and layout all surface without dataclass-shape errors."""
-    j = build_analysis(_TEST_CFG).to_aws_json()
+def test_fanout_sheet_structure():
+    """Structural carry-over from the retired emit-serialization
+    test: 4 visuals, 1 filter control, 1 parameter control, 3
+    filter groups, 7 parameters, and ZERO hand-authored calc fields.
+
+    0 hand-authored calc fields after Y.3.a + Y.3.b: Y.3.a dropped
+    fanout distinct_senders calc; Y.3.b dropped is_inbound_edge +
+    is_outbound_edge + counterparty_display — all four are now dataset
+    columns. BL.1 (2026-05-27): every Dataset referenced by a
+    kind="count" Measure gets an auto-registered ``_row_one_<dataset>``
+    CalcField (literal 1 per row, backs NumericalMeasureField(SUM)
+    row-count semantic). Those are the only calc fields the analysis
+    carries — every hand-authored one is gone."""
+    analysis = _analysis()
     fanout = next(
-        s for s in j["Definition"]["Sheets"] if s["SheetId"] == SHEET_INV_FANOUT
+        s for s in analysis.sheets if s.sheet_id == SHEET_INV_FANOUT
     )
-    assert len(fanout["Visuals"]) == 4
-    assert len(fanout["FilterControls"]) == 1
-    assert len(fanout["ParameterControls"]) == 1
-    # Top-level: 3 filter groups (Y.1.d dropped FG_INV_ANOMALIES_SIGMA
-    # — σ now lives in dataset SQL; Y.2.a dropped the 3 parameter-bound
-    # FGs for money-trail root/hops/amount; Y.2.b dropped the broad
-    # anchor + min-amount account-network FGs; Y.3.a dropped
-    # FG_INV_FANOUT_THRESHOLD — distinct_senders is now a window column
-    # in dataset SQL, threshold pushed via <<$pInvFanoutThreshold>>;
-    # BO.2 dropped FG_INV_ANETWORK_INBOUND + _OUTBOUND — direction now
-    # in dataset SQL via the directional sibling datasets — leaving
-    # 1 fanout window + 1 anomalies window + 1 money-trail window).
-    # 0 hand-authored calc fields after Y.3.a + Y.3.b: Y.3.a dropped
-    # fanout distinct_senders calc; Y.3.b dropped is_inbound_edge +
-    # is_outbound_edge + counterparty_display — all four are now
-    # dataset columns. BL.1 (2026-05-27): every Dataset referenced by
-    # a kind="count" Measure now gets an auto-registered
-    # ``_row_one_<dataset_id>`` CalcField (literal 1 per row, backs
-    # NumericalMeasureField(SUM) row-count semantic — sidesteps the
-    # CategoricalMeasureField(COUNT) distinct quirk). All calc fields
-    # below this filter are BL.1's row-ones.
-    # 7 parameters (fanout threshold + sigma + money-trail
-    # root/hops/amount + account-network anchor/min-amount) — unchanged
-    # by Y.3.a/b/BO.2 since the slider/dropdown params still drive
-    # controls.
-    assert len(j["Definition"]["FilterGroups"]) == 3
-    from recon_gen.common.tree.fields import ROW_ONE_CALC_PREFIX
-    cfs: list[dict[str, str]] = j["Definition"].get("CalculatedFields") or []
+    assert len(fanout.visuals) == 4
+    assert len(fanout.filter_controls) == 1
+    assert len(fanout.parameter_controls) == 1
+    # 3 filter groups (1 fanout window + 1 anomalies window + 1
+    # money-trail window — every per-parameter / per-direction FG was
+    # pushed into dataset SQL across Y.1.d / Y.2.a / Y.2.b / Y.3.a / BO.2).
+    assert len(analysis.filter_groups) == 3
     hand_authored = [
-        cf for cf in cfs if not cf["Name"].startswith(ROW_ONE_CALC_PREFIX)
+        c for c in analysis.calc_fields
+        if isinstance(c.name, str) and not c.name.startswith(ROW_ONE_CALC_PREFIX)
     ]
     assert hand_authored == []
-    assert len(j["Definition"]["ParameterDeclarations"]) == 7
+    assert len(analysis.parameters) == 7
 
 
 # ---------------------------------------------------------------------------
@@ -678,22 +612,22 @@ def test_volume_anomalies_dataset_reads_from_matview():
 # ---------------------------------------------------------------------------
 
 def test_anomalies_window_filter_is_a_time_range_on_window_end():
-    groups = {g.FilterGroupId: g for g in _filter_groups()}
+    groups = {g.filter_group_id: g for g in _filter_groups()}
     window = groups[FG_INV_ANOMALIES_WINDOW]
-    trf = window.Filters[0].TimeRangeFilter
-    assert trf is not None
-    assert trf.Column.ColumnName == "window_end"
-    assert trf.Column.DataSetIdentifier == DS_INV_VOLUME_ANOMALIES
+    trf = window.filters[0]
+    assert isinstance(trf, TimeRangeFilter)
+    assert resolve_column(trf.column) == "window_end"
+    assert trf.dataset.identifier == DS_INV_VOLUME_ANOMALIES
 
 
 def test_sigma_pushdown_lives_in_dataset_sql_not_filter_group():
     """Y.1.b — σ filter is in the dataset SQL via ``<<$pInvAnomaliesSigma>>``;
     the analysis-level FG_INV_ANOMALIES_SIGMA FilterGroup is removed.
     Both QS (literal substitution) and App2 (bind translation) read
-    the same SQL. Drop in the FilterGroups dict confirms the analysis
+    the same SQL. Drop in the FilterGroups set confirms the analysis
     no longer carries the filter at the group level."""
-    groups = {g.FilterGroupId: g for g in _filter_groups()}
-    assert "fg-inv-anomalies-sigma" not in groups, (
+    fg_ids = {g.filter_group_id for g in _filter_groups()}
+    assert "fg-inv-anomalies-sigma" not in fg_ids, (
         "σ filter should live in dataset SQL post-Y.1, not as a "
         "FilterGroup on the analysis."
     )
@@ -707,9 +641,8 @@ def test_sigma_pushdown_dataset_carries_integer_dataset_parameter():
         build_volume_anomalies_dataset,
     )
     ds = build_volume_anomalies_dataset(_TEST_CFG)
-    assert ds.DatasetParameters is not None
-    assert len(ds.DatasetParameters) == 1
-    integer_param = ds.DatasetParameters[0].IntegerDatasetParameter
+    assert len(ds.dataset_params) == 1
+    integer_param = ds.dataset_params[0].IntegerDatasetParameter
     assert integer_param is not None
     assert integer_param.Name == "pInvAnomaliesSigma"
     assert integer_param.ValueType == "SINGLE_VALUED"
@@ -726,7 +659,7 @@ def test_sigma_pushdown_sql_contains_qs_placeholder():
         build_volume_anomalies_dataset,
     )
     ds = build_volume_anomalies_dataset(_TEST_CFG)
-    sql = _custom_sql(ds, "inv-volume-anomalies")
+    sql = _custom_sql(ds)
     assert "<<$pInvAnomaliesSigma>>" in sql
     assert "z_score >=" in sql
 
@@ -739,32 +672,14 @@ def test_distribution_chart_binds_to_companion_dataset_unfiltered():
     This test is the SELECTED_VISUALS workaround proof — it locks
     the per-dataset binding that replaces the pre-Y per-FilterGroup
     scope."""
-    analysis = build_analysis(_TEST_CFG)
-    sheet = next(
-        s for s in _sheets(analysis)
-        if s.SheetId == SHEET_INV_ANOMALIES
-    )
-    # Walk every visual on the sheet; collect dataset bindings.
-    # Distribution chart is a BarChart titled "Pair-Window σ Distribution"
-    # — find it and assert its dataset.
-    assert sheet.Visuals is not None
-    bar_visuals = [
-        v.BarChartVisual for v in sheet.Visuals
-        if v.BarChartVisual is not None
-    ]
+    sheet = _sheet_by_id(SHEET_INV_ANOMALIES)
+    # Distribution chart is the BarChart titled "Pair-Window σ
+    # Distribution" — find it and assert its category dataset binding.
     dist = next(
-        b for b in bar_visuals
-        if _plain_title(b) == "Pair-Window σ Distribution"
+        v for v in sheet.visuals
+        if isinstance(v, BarChart) and v.title == "Pair-Window σ Distribution"
     )
-    assert dist.ChartConfiguration is not None
-    assert dist.ChartConfiguration.FieldWells is not None
-    fw = dist.ChartConfiguration.FieldWells.BarChartAggregatedFieldWells
-    assert fw is not None
-    bar_ds_ids = {
-        cat.CategoricalDimensionField.Column.DataSetIdentifier
-        for cat in (fw.Category or [])
-        if cat.CategoricalDimensionField is not None
-    }
+    bar_ds_ids = {d.dataset.identifier for d in dist.category}
     assert bar_ds_ids == {DS_INV_VOLUME_ANOMALIES_DISTRIBUTION}
 
 
@@ -774,44 +689,43 @@ def test_sigma_param_bridges_to_dataset_param_via_mapping():
     DS_INV_VOLUME_ANOMALIES + dataset-param-name "pInvAnomaliesSigma".
     QS uses this mapping to substitute the analysis param's value
     into the dataset SQL's <<$pInvAnomaliesSigma>> placeholder."""
-    analysis = build_analysis(_TEST_CFG)
-    integer_decls = [
-        p.IntegerParameterDeclaration
-        for p in _parameter_declarations_of(analysis)
-        if p.IntegerParameterDeclaration is not None
-    ]
-    sigma_decl = next(
-        d for d in integer_decls if d.Name == P_INV_ANOMALIES_SIGMA
+    sigma = next(
+        p for p in _analysis().parameters if p.name == P_INV_ANOMALIES_SIGMA
     )
-    assert sigma_decl.MappedDataSetParameters is not None
-    assert len(sigma_decl.MappedDataSetParameters) == 1
-    mapping = sigma_decl.MappedDataSetParameters[0]
-    assert mapping.DataSetIdentifier == DS_INV_VOLUME_ANOMALIES
-    assert mapping.DataSetParameterName == "pInvAnomaliesSigma"
+    assert isinstance(sigma, IntegerParam)
+    assert sigma.mapped_dataset_params is not None
+    assert len(sigma.mapped_dataset_params) == 1
+    ds, dataset_param_name = sigma.mapped_dataset_params[0]
+    assert ds.identifier == DS_INV_VOLUME_ANOMALIES
+    assert dataset_param_name == "pInvAnomaliesSigma"
 
 
 def test_anomalies_window_filter_is_all_visuals_scope():
     """Window filter applies to every visual on the sheet — both the
-    KPI/table and the distribution chart should respect the date range."""
-    groups = {g.FilterGroupId: g for g in _filter_groups()}
+    KPI/table and the distribution chart should respect the date range.
+    ``scope_sheet`` records a single ``(sheet, None)`` entry, where the
+    ``None`` visual list IS the ALL_VISUALS scope."""
+    groups = {g.filter_group_id: g for g in _filter_groups()}
     window = groups[FG_INV_ANOMALIES_WINDOW]
-    sheet_scopes = _sheet_scopes(window)
-    assert len(sheet_scopes) == 1
-    assert sheet_scopes[0].Scope == SheetVisualScopingConfiguration.ALL_VISUALS
+    entries = window._scope_entries
+    assert len(entries) == 1
+    scoped_sheet, scoped_visuals = entries[0]
+    assert scoped_sheet.sheet_id == SHEET_INV_ANOMALIES
+    assert scoped_visuals is None  # None = ALL_VISUALS
 
 
 def test_anomalies_sheet_carries_window_filter_and_sigma_slider():
     fc = _filter_controls(SHEET_INV_ANOMALIES)
     pc = _parameter_controls(SHEET_INV_ANOMALIES)
     assert len(fc) == 1
-    assert fc[0].DateTimePicker is not None
+    assert isinstance(fc[0], FilterDateTimePicker)
     assert len(pc) == 1
-    slider = pc[0].Slider
-    assert slider is not None
-    assert slider.SourceParameterName == P_INV_ANOMALIES_SIGMA
-    assert slider.MinimumValue == SIGMA_SLIDER_MIN
-    assert slider.MaximumValue == SIGMA_SLIDER_MAX
-    assert slider.StepSize == 1
+    slider = pc[0]
+    assert isinstance(slider, ParameterSlider)
+    assert slider.parameter.name == P_INV_ANOMALIES_SIGMA
+    assert slider.minimum_value == SIGMA_SLIDER_MIN
+    assert slider.maximum_value == SIGMA_SLIDER_MAX
+    assert slider.step_size == 1
 
 
 # ---------------------------------------------------------------------------
@@ -819,67 +733,35 @@ def test_anomalies_sheet_carries_window_filter_and_sigma_slider():
 # ---------------------------------------------------------------------------
 
 def test_anomalies_sheet_has_kpi_distribution_and_table():
-    analysis = build_analysis(_TEST_CFG)
-    sheet = next(
-        s for s in _sheets(analysis)
-        if s.SheetId == SHEET_INV_ANOMALIES
-    )
-    assert sheet.Visuals is not None
+    sheet = _sheet_by_id(SHEET_INV_ANOMALIES)
     # KPI flagged-count, σ distribution bar chart, ranked table — in
     # that order. Visual_ids are auto-derived (L.1.21); kind ordering
     # is the stable structural assertion.
-    assert _visual_kinds(sheet) == ["KPIVisual", "BarChartVisual", "TableVisual"]
+    assert _visual_kinds(sheet) == ["KPI", "BarChart", "Table"]
 
 
 def test_distribution_chart_categorises_by_z_bucket():
     """Distribution chart's X-axis is the z-bucket dimension (e.g.
     '0-1 sigma', '1-2 sigma', ...). The Y-axis counts pair-window rows."""
-    analysis = build_analysis(_TEST_CFG)
-    sheet = next(
-        s for s in _sheets(analysis)
-        if s.SheetId == SHEET_INV_ANOMALIES
-    )
-    assert sheet.Visuals is not None
-    chart = next(v.BarChartVisual for v in sheet.Visuals if v.BarChartVisual)
-    assert chart.ChartConfiguration is not None
-    assert chart.ChartConfiguration.FieldWells is not None
-    fields = chart.ChartConfiguration.FieldWells.BarChartAggregatedFieldWells
-    assert fields is not None
-    assert fields.Category is not None
-    cat_cols = [
-        d.CategoricalDimensionField.Column.ColumnName
-        for d in fields.Category if d.CategoricalDimensionField
-    ]
+    sheet = _sheet_by_id(SHEET_INV_ANOMALIES)
+    chart = next(v for v in sheet.visuals if isinstance(v, BarChart))
+    cat_cols = [resolve_column(d.column) for d in chart.category]
     assert cat_cols == ["z_bucket"]
-    assert fields.Values is not None
-    assert len(fields.Values) == 1
+    assert len(chart.values) == 1
 
 
 def test_anomalies_table_sorted_by_z_score_desc():
-    analysis = build_analysis(_TEST_CFG)
-    sheet = next(
-        s for s in _sheets(analysis)
-        if s.SheetId == SHEET_INV_ANOMALIES
-    )
-    assert sheet.Visuals is not None
-    table = next(v.TableVisual for v in sheet.Visuals if v.TableVisual)
-    assert table.ChartConfiguration is not None
-    assert table.ChartConfiguration.SortConfiguration is not None
-    sort = table.ChartConfiguration.SortConfiguration["RowSort"][0]["FieldSort"]
-    # Field-ids are auto-derived (L.1.16). Look up the z_score field's
-    # auto-id by walking the table's Values list and matching column name.
-    assert table.ChartConfiguration.FieldWells is not None
-    table_fw = table.ChartConfiguration.FieldWells.TableAggregatedFieldWells
-    assert table_fw is not None
-    assert table_fw.Values is not None
-    z_score_field_id = next(
-        v.NumericalMeasureField.FieldId
-        for v in table_fw.Values
-        if v.NumericalMeasureField
-        and v.NumericalMeasureField.Column.ColumnName == "z_score"
-    )
-    assert sort["FieldId"] == z_score_field_id
-    assert sort["Direction"] == "DESC"
+    sheet = _sheet_by_id(SHEET_INV_ANOMALIES)
+    table = next(v for v in sheet.visuals if isinstance(v, Table))
+    sb = table.sort_by
+    assert sb is not None and not isinstance(sb, list)
+    ref, direction = sb
+    assert direction == "DESC"
+    # Sorted by the z_score measure — and that same measure is one of
+    # the table's values (the sort field has to project on the visual).
+    assert isinstance(ref, Measure)
+    assert resolve_column(ref.column) == "z_score"
+    assert ref in table.values
 
 
 # ---------------------------------------------------------------------------
@@ -948,7 +830,7 @@ def test_money_trail_dataset_declares_three_pushdown_parameters():
     ``apps/investigation/app.py``."""
     datasets = build_all_datasets(_TEST_CFG, _TEST_L2)
     money_trail = datasets[3]
-    params = money_trail.DatasetParameters or []
+    params = money_trail.dataset_params
     by_name: dict[str, StringDatasetParameter | IntegerDatasetParameter] = {}
     for dp in params:
         if dp.StringDatasetParameter is not None:
@@ -996,32 +878,22 @@ def test_money_trail_analysis_params_bridge_to_dataset_params():
     MappedDataSetParameter pointing at the money-trail dataset's
     same-named parameter. QS resolves <<$pInvMoneyTrail*>> in the
     dataset SQL by walking the bridge."""
-    decls = _parameter_declarations()
-    by_name: dict[
-        str, IntegerParameterDeclaration | StringParameterDeclaration,
-    ] = {}
-    for d in decls:
-        if d.IntegerParameterDeclaration:
-            by_name[d.IntegerParameterDeclaration.Name] = (
-                d.IntegerParameterDeclaration
-            )
-        if d.StringParameterDeclaration:
-            by_name[d.StringParameterDeclaration.Name] = (
-                d.StringParameterDeclaration
-            )
+    by_name = {p.name: p for p in _analysis().parameters}
     for pname in (
         P_INV_MONEY_TRAIL_ROOT,
         P_INV_MONEY_TRAIL_MAX_HOPS,
         P_INV_MONEY_TRAIL_MIN_AMOUNT,
     ):
         decl = by_name[pname]
-        bridges = decl.MappedDataSetParameters or []
+        assert isinstance(decl, (StringParam, IntegerParam))
+        bridges = decl.mapped_dataset_params or []
         assert len(bridges) == 1, (
             f"{pname} should bridge to one dataset parameter; "
             f"got {bridges}"
         )
-        assert bridges[0].DataSetIdentifier == DS_INV_MONEY_TRAIL
-        assert bridges[0].DataSetParameterName == str(pname)
+        bridge_ds, bridge_name = bridges[0]
+        assert bridge_ds.identifier == DS_INV_MONEY_TRAIL
+        assert bridge_name == str(pname)
 
 
 def test_money_trail_roots_companion_dataset_is_unfiltered():
@@ -1048,7 +920,7 @@ def test_money_trail_roots_companion_dataset_is_unfiltered():
     # Critical: NO pushdown parameters here — the dropdown's option
     # fetch must see every chain.
     assert "<<$" not in sql
-    assert not (roots.DatasetParameters or [])
+    assert not (roots.dataset_params)
 
 
 def test_money_trail_roots_contract_is_single_column():
@@ -1066,35 +938,34 @@ def test_money_trail_root_dropdown_links_to_companion_dataset():
     pc = _parameter_controls(SHEET_INV_MONEY_TRAIL)
     # 3 controls: root dropdown, hops slider, amount slider.
     assert len(pc) == 3
-    dropdown = pc[0].Dropdown
-    assert dropdown is not None
-    assert dropdown.SourceParameterName == P_INV_MONEY_TRAIL_ROOT
-    assert dropdown.Type == "SINGLE_SELECT"
-    assert dropdown.SelectableValues is not None
-    link = dropdown.SelectableValues["LinkToDataSetColumn"]
-    assert link["DataSetIdentifier"] == DS_INV_MONEY_TRAIL_ROOTS
-    assert link["ColumnName"] == "root_transfer_id"
+    dropdown = pc[0]
+    assert isinstance(dropdown, ParameterDropdown)
+    assert dropdown.parameter.name == P_INV_MONEY_TRAIL_ROOT
+    assert dropdown.type == "SINGLE_SELECT"
+    assert isinstance(dropdown.selectable_values, LinkedValues)
+    assert dropdown.selectable_values.dataset.identifier == DS_INV_MONEY_TRAIL_ROOTS
+    assert dropdown.selectable_values.column_name == "root_transfer_id"
 
 
 def test_money_trail_sliders_bind_to_their_parameters():
     """Hops slider + amount slider both wired to their respective
     parameters with the documented bounds."""
     pc = _parameter_controls(SHEET_INV_MONEY_TRAIL)
-    hops_slider = pc[1].Slider
-    assert hops_slider is not None
-    assert hops_slider.SourceParameterName == P_INV_MONEY_TRAIL_MAX_HOPS
-    assert hops_slider.MinimumValue == HOPS_SLIDER_MIN
-    assert hops_slider.MaximumValue == HOPS_SLIDER_MAX
-    assert hops_slider.StepSize == 1
+    hops_slider = pc[1]
+    assert isinstance(hops_slider, ParameterSlider)
+    assert hops_slider.parameter.name == P_INV_MONEY_TRAIL_MAX_HOPS
+    assert hops_slider.minimum_value == HOPS_SLIDER_MIN
+    assert hops_slider.maximum_value == HOPS_SLIDER_MAX
+    assert hops_slider.step_size == 1
 
-    amount_slider = pc[2].Slider
-    assert amount_slider is not None
-    assert amount_slider.SourceParameterName == P_INV_MONEY_TRAIL_MIN_AMOUNT
-    assert amount_slider.MinimumValue == AMOUNT_SLIDER_MIN
-    assert amount_slider.MaximumValue == AMOUNT_SLIDER_MAX
+    amount_slider = pc[2]
+    assert isinstance(amount_slider, ParameterSlider)
+    assert amount_slider.parameter.name == P_INV_MONEY_TRAIL_MIN_AMOUNT
+    assert amount_slider.minimum_value == AMOUNT_SLIDER_MIN
+    assert amount_slider.maximum_value == AMOUNT_SLIDER_MAX
     # Step 10 because $-units rounded to dollars; 1-step would feel
     # uselessly granular over a $0–$1000 slider range.
-    assert amount_slider.StepSize == 10
+    assert amount_slider.step_size == 10
 
 
 def test_money_trail_sheet_has_one_date_range_filter_control():
@@ -1105,7 +976,7 @@ def test_money_trail_sheet_has_one_date_range_filter_control():
     none."""
     fc = _filter_controls(SHEET_INV_MONEY_TRAIL)
     assert len(fc) == 1
-    titles = [c.DateTimePicker.Title for c in fc if c.DateTimePicker is not None]
+    titles = [c.title for c in fc if isinstance(c, FilterDateTimePicker)]
     assert titles == ["Date Range"]
 
 
@@ -1114,107 +985,48 @@ def test_money_trail_sheet_has_one_date_range_filter_control():
 # ---------------------------------------------------------------------------
 
 def test_money_trail_sheet_has_sankey_and_table():
-    analysis = build_analysis(_TEST_CFG)
-    sheet = next(
-        s for s in _sheets(analysis)
-        if s.SheetId == SHEET_INV_MONEY_TRAIL
-    )
-    assert sheet.Visuals is not None
-    assert _visual_kinds(sheet) == ["SankeyDiagramVisual", "TableVisual"]
+    sheet = _sheet_by_id(SHEET_INV_MONEY_TRAIL)
+    assert _visual_kinds(sheet) == ["Sankey", "Table"]
 
 
 def test_money_trail_sankey_field_wells_use_account_names_and_sum_hop_amount():
     """Sankey ribbons go from source_account_name → target_account_name,
     weighted by SUM(hop_amount). Account names (not IDs) so Sankey labels
     read as banking entities, not opaque identifiers."""
-    analysis = build_analysis(_TEST_CFG)
-    sheet = next(
-        s for s in _sheets(analysis)
-        if s.SheetId == SHEET_INV_MONEY_TRAIL
-    )
-    assert sheet.Visuals is not None
-    sankey = next(
-        v.SankeyDiagramVisual for v in sheet.Visuals if v.SankeyDiagramVisual
-    )
-    assert sankey.ChartConfiguration is not None
-    assert sankey.ChartConfiguration.FieldWells is not None
-    fw = sankey.ChartConfiguration.FieldWells.SankeyDiagramAggregatedFieldWells
-    assert fw is not None
-    assert fw.Source is not None
-    assert fw.Destination is not None
-    assert fw.Weight is not None
-    src = [
-        d.CategoricalDimensionField.Column.ColumnName
-        for d in fw.Source if d.CategoricalDimensionField
-    ]
-    dst = [
-        d.CategoricalDimensionField.Column.ColumnName
-        for d in fw.Destination if d.CategoricalDimensionField
-    ]
-    assert src == ["source_account_name"]
-    assert dst == ["target_account_name"]
-    weight = fw.Weight[0].NumericalMeasureField
-    assert weight is not None
-    assert weight.Column.ColumnName == "hop_amount"
-    assert weight.AggregationFunction is not None
-    assert weight.AggregationFunction.SimpleNumericalAggregation == "SUM"
+    sheet = _sheet_by_id(SHEET_INV_MONEY_TRAIL)
+    sankey = next(v for v in sheet.visuals if isinstance(v, Sankey))
+    assert sankey.source is not None
+    assert sankey.target is not None
+    assert sankey.weight is not None
+    assert resolve_column(sankey.source.column) == "source_account_name"
+    assert resolve_column(sankey.target.column) == "target_account_name"
+    assert resolve_column(sankey.weight.column) == "hop_amount"
+    assert sankey.weight.kind == "sum"
 
 
 def test_money_trail_sankey_sort_weight_desc_with_node_cap():
     """WeightSort DESC so the heaviest ribbons render first; both
     items-limits set to the node cap with OtherCategories=INCLUDE so we
     don't silently drop edges past the cap (a real chain may have many
-    siblings at the same depth)."""
-    analysis = build_analysis(_TEST_CFG)
-    sheet = next(
-        s for s in _sheets(analysis)
-        if s.SheetId == SHEET_INV_MONEY_TRAIL
-    )
-    assert sheet.Visuals is not None
-    sankey = next(
-        v.SankeyDiagramVisual for v in sheet.Visuals if v.SankeyDiagramVisual
-    )
-    assert sankey.ChartConfiguration is not None
-    sort = sankey.ChartConfiguration.SortConfiguration
-    assert sort is not None
-    assert sort.WeightSort is not None
-    assert sort.WeightSort[0]["FieldSort"]["Direction"] == "DESC"
-    assert sort.SourceItemsLimit is not None
-    assert sort.DestinationItemsLimit is not None
-    assert sort.SourceItemsLimit["OtherCategories"] == "INCLUDE"
-    assert sort.DestinationItemsLimit["OtherCategories"] == "INCLUDE"
-    # Both caps match (50) — using the same constant so the diagram is
-    # symmetric between source-side and destination-side density.
-    assert (
-        sort.SourceItemsLimit["ItemsLimit"]
-        == sort.DestinationItemsLimit["ItemsLimit"]
-    )
+    siblings at the same depth).
+
+    On the tree, ``weight`` drives the (emit-fixed) DESC weight sort and
+    a single ``items_limit`` drives both the source + destination caps
+    (emit pins OtherCategories=INCLUDE + symmetry). The tree facts that
+    DRIVE those emit constants are the weight + items_limit fields."""
+    sheet = _sheet_by_id(SHEET_INV_MONEY_TRAIL)
+    sankey = next(v for v in sheet.visuals if isinstance(v, Sankey))
+    assert sankey.weight is not None  # backs the DESC WeightSort
+    assert sankey.items_limit == SANKEY_NODE_CAP
 
 
 def test_money_trail_table_sorted_by_depth_asc_with_full_chain_grain():
     """Table aggregates to (depth, transfer_id, transfer_type, source,
     target, posted_at) so each row corresponds to one hop; sorted depth
     ASC so chains read top-to-bottom from root → leaf."""
-    analysis = build_analysis(_TEST_CFG)
-    sheet = next(
-        s for s in _sheets(analysis)
-        if s.SheetId == SHEET_INV_MONEY_TRAIL
-    )
-    assert sheet.Visuals is not None
-    table = next(v.TableVisual for v in sheet.Visuals if v.TableVisual)
-    assert table.ChartConfiguration is not None
-    assert table.ChartConfiguration.FieldWells is not None
-    fields = table.ChartConfiguration.FieldWells.TableAggregatedFieldWells
-    assert fields is not None
-    assert fields.GroupBy is not None
-    group_by_cols: list[str] = []
-    for d in fields.GroupBy:
-        if d.CategoricalDimensionField:
-            group_by_cols.append(d.CategoricalDimensionField.Column.ColumnName)
-        elif d.DateDimensionField:
-            group_by_cols.append(d.DateDimensionField.Column.ColumnName)
-        elif d.NumericalDimensionField:
-            group_by_cols.append(d.NumericalDimensionField.Column.ColumnName)
+    sheet = _sheet_by_id(SHEET_INV_MONEY_TRAIL)
+    table = next(v for v in sheet.visuals if isinstance(v, Table))
+    group_by_cols = [resolve_column(d.column) for d in table.group_by]
     assert group_by_cols == [
         "depth",
         "transfer_id",
@@ -1223,43 +1035,30 @@ def test_money_trail_table_sorted_by_depth_asc_with_full_chain_grain():
         "target_account_name",
         "posted_at",
     ]
-    assert table.ChartConfiguration.SortConfiguration is not None
-    sort = table.ChartConfiguration.SortConfiguration["RowSort"][0]["FieldSort"]
-    # Field-ids are auto-derived (L.1.16). Look up the depth field's
-    # auto-id by walking the table's GroupBy and matching column name.
-    depth_field_id = next(
-        d.NumericalDimensionField.FieldId
-        for d in fields.GroupBy
-        if d.NumericalDimensionField
-        and d.NumericalDimensionField.Column.ColumnName == "depth"
-    )
-    assert sort["FieldId"] == depth_field_id
-    assert sort["Direction"] == "ASC"
+    sb = table.sort_by
+    assert sb is not None and not isinstance(sb, list)
+    ref, direction = sb
+    assert direction == "ASC"
+    # Sorted by the depth dim — which is itself one of the group_by cols.
+    assert isinstance(ref, Dim)
+    assert resolve_column(ref.column) == "depth"
+    assert ref in table.group_by
 
 
-def test_money_trail_sheet_serializes_to_aws_json():
-    """End-to-end serialization of the new Sankey dataclass surfaces
-    cleanly through to_aws_json — no None-strip crashes, no missing
-    keys."""
-    j = build_analysis(_TEST_CFG).to_aws_json()
-    sheet = next(
-        s for s in j["Definition"]["Sheets"]
-        if s["SheetId"] == SHEET_INV_MONEY_TRAIL
-    )
-    assert len(sheet["Visuals"]) == 2
-    # 3 parameter controls (root dropdown + 2 sliders) + 1 filter
-    # control (Q.1.b — DATE_RANGE picker on `posted_at`).
-    assert len(sheet.get("FilterControls", [])) == 1
-    assert len(sheet["ParameterControls"]) == 3
-    # Sankey visual surfaces with its dataclass key. Visual_id is
-    # auto-derived as a UUID v5 from the position slug (M.4.4.10c);
-    # just confirm the wrapper key exists with a UUID-shape value.
-    import re as _re
-    sankey = next(
-        v for v in sheet["Visuals"] if "SankeyDiagramVisual" in v
-    )
-    vid = sankey["SankeyDiagramVisual"]["VisualId"]
-    assert _re.match(
+def test_money_trail_sheet_structure():
+    """Structural carry-over from the retired emit-serialization
+    test: 2 visuals (Sankey + table), 1 filter control (Q.1.b
+    DATE_RANGE picker), 3 parameter controls (root dropdown + 2 sliders),
+    and a resolved UUID-shaped visual_id on the Sankey (auto-derived as a
+    UUID v5 from the position slug, M.4.4.10c)."""
+    sheet = _sheet_by_id(SHEET_INV_MONEY_TRAIL)
+    assert len(sheet.visuals) == 2
+    assert len(sheet.filter_controls) == 1
+    assert len(sheet.parameter_controls) == 3
+    sankey = next(v for v in sheet.visuals if isinstance(v, Sankey))
+    vid = sankey.visual_id
+    assert isinstance(vid, str)  # resolved (not the AUTO sentinel)
+    assert re.match(
         r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
         vid,
     ), f"VisualId {vid!r} should be UUID-shape"
@@ -1302,7 +1101,7 @@ def test_account_network_dataset_declares_two_pushdown_parameters():
     its analysis-level twin via MappedDataSetParameters declared in
     ``apps/investigation/app.py``."""
     ds = build_all_datasets(_TEST_CFG, _TEST_L2)[5]
-    params = ds.DatasetParameters or []
+    params = ds.dataset_params
     by_name: dict[str, StringDatasetParameter | IntegerDatasetParameter] = {}
     for dp in params:
         if dp.StringDatasetParameter is not None:
@@ -1345,19 +1144,7 @@ def test_account_network_analysis_params_bridge_to_dataset_params():
     and the two directional siblings (one Sankey each). QS resolves
     <<$pInvANetwork*>> in each dataset SQL by walking the bridge so all
     three render off a single anchor pick."""
-    decls = _parameter_declarations()
-    by_name: dict[
-        str, IntegerParameterDeclaration | StringParameterDeclaration,
-    ] = {}
-    for d in decls:
-        if d.IntegerParameterDeclaration:
-            by_name[d.IntegerParameterDeclaration.Name] = (
-                d.IntegerParameterDeclaration
-            )
-        if d.StringParameterDeclaration:
-            by_name[d.StringParameterDeclaration.Name] = (
-                d.StringParameterDeclaration
-            )
+    by_name = {p.name: p for p in _analysis().parameters}
     expected_bridges = {
         DS_INV_ACCOUNT_NETWORK,
         DS_INV_ACCOUNT_NETWORK_INBOUND,
@@ -1365,23 +1152,22 @@ def test_account_network_analysis_params_bridge_to_dataset_params():
     }
     for pname in (P_INV_ANETWORK_ANCHOR, P_INV_ANETWORK_MIN_AMOUNT):
         decl = by_name[pname]
-        bridges = decl.MappedDataSetParameters or []
-        assert {b.DataSetIdentifier for b in bridges} == expected_bridges, (
+        assert isinstance(decl, (StringParam, IntegerParam))
+        bridges = decl.mapped_dataset_params or []
+        assert {ds.identifier for ds, _ in bridges} == expected_bridges, (
             f"{pname} should bridge to all three account-network "
             f"datasets; got {bridges}"
         )
-        for bridge in bridges:
-            assert bridge.DataSetParameterName == str(pname)
+        for _ds, name in bridges:
+            assert name == str(pname)
 
 
 def test_anchor_calc_field_dropped_after_y2b():
     """Y.2.b — ``is_anchor_edge`` calc field removed: the broad
     anchor narrow now lives in ds_anet's SQL (every row is_anchor_edge
     by construction). Y.3.b dropped the rest of the Account Network
-    calc fields too — CalculatedFields may be empty / None entirely."""
-    analysis = build_analysis(_TEST_CFG)
-    cfs = analysis.Definition.CalculatedFields or []
-    cf_names = {cf["Name"] for cf in cfs}
+    calc fields too — CalculatedFields may be empty / only row-ones."""
+    cf_names = {c.name for c in _analysis().calc_fields}
     assert "is_anchor_edge" not in cf_names
 
 
@@ -1395,39 +1181,15 @@ def test_bo_2_sankeys_source_from_directional_datasets():
     ds_anet would fail at unit time, not at the cold-read."""
     inbound, outbound, table = _account_network_visuals()
     # Inbound Sankey: source + target + weight all from the inbound dataset.
-    assert inbound.ChartConfiguration is not None
-    assert inbound.ChartConfiguration.FieldWells is not None
-    inb_fw = inbound.ChartConfiguration.FieldWells.SankeyDiagramAggregatedFieldWells
-    assert inb_fw is not None
-    assert inb_fw.Source is not None
-    assert inb_fw.Source[0].CategoricalDimensionField is not None
-    assert (
-        inb_fw.Source[0].CategoricalDimensionField.Column.DataSetIdentifier
-        == DS_INV_ACCOUNT_NETWORK_INBOUND
-    )
+    assert inbound.source is not None
+    assert inbound.source.dataset.identifier == DS_INV_ACCOUNT_NETWORK_INBOUND
     # Outbound Sankey: same, against the outbound dataset.
-    assert outbound.ChartConfiguration is not None
-    assert outbound.ChartConfiguration.FieldWells is not None
-    out_fw = outbound.ChartConfiguration.FieldWells.SankeyDiagramAggregatedFieldWells
-    assert out_fw is not None
-    assert out_fw.Source is not None
-    assert out_fw.Source[0].CategoricalDimensionField is not None
-    assert (
-        out_fw.Source[0].CategoricalDimensionField.Column.DataSetIdentifier
-        == DS_INV_ACCOUNT_NETWORK_OUTBOUND
-    )
+    assert outbound.source is not None
+    assert outbound.source.dataset.identifier == DS_INV_ACCOUNT_NETWORK_OUTBOUND
     # Touching-Edges Table keeps the bidirectional dataset (it shows
     # both directions by design).
-    assert table.ChartConfiguration is not None
-    assert table.ChartConfiguration.FieldWells is not None
-    tbl_fw = table.ChartConfiguration.FieldWells.TableAggregatedFieldWells
-    assert tbl_fw is not None
-    assert tbl_fw.GroupBy is not None
-    assert tbl_fw.GroupBy[0].CategoricalDimensionField is not None
-    assert (
-        tbl_fw.GroupBy[0].CategoricalDimensionField.Column.DataSetIdentifier
-        == DS_INV_ACCOUNT_NETWORK
-    )
+    assert table.group_by
+    assert table.group_by[0].dataset.identifier == DS_INV_ACCOUNT_NETWORK
 
 
 def test_bo_2_directional_datasets_apply_direction_predicate_in_sql():
@@ -1468,27 +1230,24 @@ def test_anetwork_anchor_dropdown_links_to_narrow_accounts_dataset():
     pc = _parameter_controls(SHEET_INV_ACCOUNT_NETWORK)
     # 2 controls: anchor dropdown, min-amount slider.
     assert len(pc) == 2
-    dropdown = pc[0].Dropdown
-    assert dropdown is not None
-    assert dropdown.SourceParameterName == P_INV_ANETWORK_ANCHOR
-    assert dropdown.Type == "SINGLE_SELECT"
-    assert dropdown.SelectableValues is not None
-    link = dropdown.SelectableValues["LinkToDataSetColumn"]
-    assert link["DataSetIdentifier"] == DS_INV_ANETWORK_ACCOUNTS
-    assert link["ColumnName"] == "source_display"
-    assert dropdown.DisplayOptions == {
-        "SelectAllOptions": {"Visibility": "HIDDEN"},
-    }
+    dropdown = pc[0]
+    assert isinstance(dropdown, ParameterDropdown)
+    assert dropdown.parameter.name == P_INV_ANETWORK_ANCHOR
+    assert dropdown.type == "SINGLE_SELECT"
+    assert isinstance(dropdown.selectable_values, LinkedValues)
+    assert dropdown.selectable_values.dataset.identifier == DS_INV_ANETWORK_ACCOUNTS
+    assert dropdown.selectable_values.column_name == "source_display"
+    assert dropdown.hidden_select_all is True
 
 
 def test_anetwork_amount_slider_binds_to_parameter():
     pc = _parameter_controls(SHEET_INV_ACCOUNT_NETWORK)
-    amount_slider = pc[1].Slider
-    assert amount_slider is not None
-    assert amount_slider.SourceParameterName == P_INV_ANETWORK_MIN_AMOUNT
-    assert amount_slider.MinimumValue == AMOUNT_SLIDER_MIN
-    assert amount_slider.MaximumValue == AMOUNT_SLIDER_MAX
-    assert amount_slider.StepSize == 10
+    amount_slider = pc[1]
+    assert isinstance(amount_slider, ParameterSlider)
+    assert amount_slider.parameter.name == P_INV_ANETWORK_MIN_AMOUNT
+    assert amount_slider.minimum_value == AMOUNT_SLIDER_MIN
+    assert amount_slider.maximum_value == AMOUNT_SLIDER_MAX
+    assert amount_slider.step_size == 10
 
 
 def test_account_network_sheet_has_no_filter_controls():
@@ -1501,15 +1260,8 @@ def test_account_network_sheet_has_two_sankeys_and_table():
     """K.4.8i: layout is inbound Sankey | outbound Sankey side-by-side
     on top, full-width touching-edges table below. The anchor visually
     meets in the middle of the row."""
-    analysis = build_analysis(_TEST_CFG)
-    sheet = next(
-        s for s in _sheets(analysis)
-        if s.SheetId == SHEET_INV_ACCOUNT_NETWORK
-    )
-    assert sheet.Visuals is not None
-    assert _visual_kinds(sheet) == [
-        "SankeyDiagramVisual", "SankeyDiagramVisual", "TableVisual",
-    ]
+    sheet = _sheet_by_id(SHEET_INV_ACCOUNT_NETWORK)
+    assert _visual_kinds(sheet) == ["Sankey", "Sankey", "Table"]
 
 
 def test_account_network_sankeys_field_wells_use_account_names_and_sum_hop_amount():
@@ -1521,116 +1273,40 @@ def test_account_network_sankeys_field_wells_use_account_names_and_sum_hop_amoun
     ``test_bo_2_sankeys_source_from_directional_datasets``."""
     inbound, outbound, _ = _account_network_visuals()
     for sankey in (inbound, outbound):
-        assert sankey.ChartConfiguration is not None
-        assert sankey.ChartConfiguration.FieldWells is not None
-        fw = sankey.ChartConfiguration.FieldWells.SankeyDiagramAggregatedFieldWells
-        assert fw is not None
-        assert fw.Source is not None
-        assert fw.Destination is not None
-        assert fw.Weight is not None
-        src = [
-            d.CategoricalDimensionField.Column.ColumnName
-            for d in fw.Source if d.CategoricalDimensionField
-        ]
-        dst = [
-            d.CategoricalDimensionField.Column.ColumnName
-            for d in fw.Destination if d.CategoricalDimensionField
-        ]
+        assert sankey.source is not None
+        assert sankey.target is not None
+        assert sankey.weight is not None
         # K.4.8f switched the field wells from raw _name to _display so a
         # Sankey click delivers the exact value the dropdown stores.
-        assert src == ["source_display"]
-        assert dst == ["target_display"]
-        weight = fw.Weight[0].NumericalMeasureField
-        assert weight is not None
-        assert weight.Column.ColumnName == "hop_amount"
-        assert weight.AggregationFunction is not None
-        assert weight.AggregationFunction.SimpleNumericalAggregation == "SUM"
+        assert resolve_column(sankey.source.column) == "source_display"
+        assert resolve_column(sankey.target.column) == "target_display"
+        assert resolve_column(sankey.weight.column) == "hop_amount"
+        assert sankey.weight.kind == "sum"
 
 
-def test_account_network_sheet_serializes_to_aws_json():
-    j = build_analysis(_TEST_CFG).to_aws_json()
-    sheet = next(
-        s for s in j["Definition"]["Sheets"]
-        if s["SheetId"] == SHEET_INV_ACCOUNT_NETWORK
-    )
-    # K.4.8i: 3 visuals — inbound Sankey | outbound Sankey | table.
-    assert len(sheet["Visuals"]) == 3
-    assert sheet.get("FilterControls", []) == []
-    # 2 parameter controls (anchor dropdown + amount slider).
-    assert len(sheet["ParameterControls"]) == 2
+def test_account_network_sheet_structure():
+    """Structural carry-over from the retired emit-serialization
+    test: 3 visuals (inbound Sankey | outbound Sankey | table), no
+    filter controls, 2 parameter controls (anchor dropdown + amount
+    slider)."""
+    sheet = _sheet_by_id(SHEET_INV_ACCOUNT_NETWORK)
+    assert len(sheet.visuals) == 3
+    assert sheet.filter_controls == []
+    assert len(sheet.parameter_controls) == 2
 
 
-def _account_network_visuals() -> tuple[
-    SankeyDiagramVisual, SankeyDiagramVisual, TableVisual,
-]:
+def _account_network_visuals() -> tuple[Sankey, Sankey, Table]:
     """Helper: returns (inbound_sankey, outbound_sankey, table) from
-    the deployed Account Network sheet — mirrors the K.4.8i layout.
-    Visual_ids are auto-derived (L.1.21); look up by title."""
-    analysis = build_analysis(_TEST_CFG)
-    sheet = next(
-        s for s in _sheets(analysis)
-        if s.SheetId == SHEET_INV_ACCOUNT_NETWORK
-    )
-    assert sheet.Visuals is not None
-    sankeys_by_title: dict[str, SankeyDiagramVisual] = {}
-    for v in sheet.Visuals:
-        if v.SankeyDiagramVisual:
-            title = _plain_title(v.SankeyDiagramVisual)
-            if title is not None:
-                sankeys_by_title[title] = v.SankeyDiagramVisual
+    the Account Network sheet — mirrors the K.4.8i layout. Visual_ids
+    are auto-derived (L.1.21); look up by title."""
+    sheet = _sheet_by_id(SHEET_INV_ACCOUNT_NETWORK)
+    sankeys_by_title = {
+        v.title: v for v in sheet.visuals if isinstance(v, Sankey)
+    }
     inbound = sankeys_by_title["Inbound — counterparties → anchor"]
     outbound = sankeys_by_title["Outbound — anchor → counterparties"]
-    table = next(
-        v.TableVisual for v in sheet.Visuals if v.TableVisual
-    )
+    table = next(v for v in sheet.visuals if isinstance(v, Table))
     return inbound, outbound, table
-
-
-def _sankey_field_id_for_column(
-    sankey: SankeyDiagramVisual, role: str, column_name: str,
-) -> str:
-    """Look up the auto-derived field_id of a Sankey leaf by role +
-    column. Field-ids are auto-derived (L.1.16) so tests resolve them
-    via column-name lookup rather than hardcoded strings."""
-    assert sankey.ChartConfiguration is not None
-    assert sankey.ChartConfiguration.FieldWells is not None
-    field_wells = sankey.ChartConfiguration.FieldWells.SankeyDiagramAggregatedFieldWells
-    assert field_wells is not None
-    if role == "source":
-        leaves = field_wells.Source or []
-    elif role == "target":
-        leaves = field_wells.Destination or []
-    else:
-        raise ValueError(f"Unknown role: {role!r}")
-    for leaf in leaves:
-        if leaf.CategoricalDimensionField:
-            if leaf.CategoricalDimensionField.Column.ColumnName == column_name:
-                return leaf.CategoricalDimensionField.FieldId
-    raise AssertionError(
-        f"No Sankey {role} field with column {column_name!r}"
-    )
-
-
-def _table_groupby_field_id_for_column(
-    table: TableVisual, column_name: str,
-) -> str:
-    """Look up the auto-derived field_id of a Table GroupBy leaf by
-    column name."""
-    assert table.ChartConfiguration is not None
-    assert table.ChartConfiguration.FieldWells is not None
-    field_wells = table.ChartConfiguration.FieldWells.TableAggregatedFieldWells
-    assert field_wells is not None
-    for leaf in field_wells.GroupBy or []:
-        for sub in (
-            leaf.CategoricalDimensionField,
-            leaf.DateDimensionField,
-            leaf.NumericalDimensionField,
-        ):
-            if sub and sub.Column.ColumnName == column_name:
-                return sub.FieldId
-    raise AssertionError(
-        f"No Table GroupBy field with column {column_name!r}"
-    )
 
 
 def test_anetwork_inbound_sankey_left_click_walks_to_source_counterparty():
@@ -1639,25 +1315,21 @@ def test_anetwork_inbound_sankey_left_click_walks_to_source_counterparty():
     side when the target is the anchor — and writes it into the
     anchor parameter."""
     inbound, _, _ = _account_network_visuals()
-    actions = inbound.Actions
-    assert actions is not None
-    assert len(actions) == 1
-    walk = actions[0]
-    assert walk.Name == "Walk to this counterparty"
-    assert walk.Trigger == "DATA_POINT_CLICK"
-    nav = walk.ActionOperations[0].NavigationOperation
-    assert nav is not None
-    assert nav.LocalNavigationConfiguration.TargetSheetId == (
-        SHEET_INV_ACCOUNT_NETWORK
-    )
-    set_params = walk.ActionOperations[1].SetParametersOperation
-    assert set_params is not None
-    cfg = set_params.ParameterValueConfigurations
-    assert len(cfg) == 1
-    assert cfg[0]["DestinationParameterName"] == P_INV_ANETWORK_ANCHOR
-    assert cfg[0]["Value"]["SourceField"] == _sankey_field_id_for_column(
-        inbound, "source", "source_display",
-    )
+    drills = [a for a in inbound.actions if isinstance(a, Drill)]
+    assert len(drills) == 1
+    walk = drills[0]
+    assert walk.name == "Walk to this counterparty"
+    assert walk.trigger == "DATA_POINT_CLICK"
+    # Same-sheet walk — target_sheet back-fills to the owning sheet.
+    assert isinstance(walk.target_sheet, Sheet)
+    assert walk.target_sheet.sheet_id == SHEET_INV_ACCOUNT_NETWORK
+    assert len(walk.writes) == 1
+    param, src = walk.writes[0]
+    assert param.name == P_INV_ANETWORK_ANCHOR
+    # The drill reads the Sankey's own source field (source_display).
+    assert src is inbound.source
+    assert isinstance(src, Dim)
+    assert resolve_column(src.column) == "source_display"
 
 
 def test_anetwork_outbound_sankey_left_click_walks_to_target_counterparty():
@@ -1666,64 +1338,48 @@ def test_anetwork_outbound_sankey_left_click_walks_to_target_counterparty():
     side when the source is the anchor — and writes it into the
     anchor parameter."""
     _, outbound, _ = _account_network_visuals()
-    actions = outbound.Actions
-    assert actions is not None
-    assert len(actions) == 1
-    walk = actions[0]
-    assert walk.Name == "Walk to this counterparty"
-    assert walk.Trigger == "DATA_POINT_CLICK"
-    nav = walk.ActionOperations[0].NavigationOperation
-    assert nav is not None
-    assert nav.LocalNavigationConfiguration.TargetSheetId == (
-        SHEET_INV_ACCOUNT_NETWORK
-    )
-    set_params = walk.ActionOperations[1].SetParametersOperation
-    assert set_params is not None
-    cfg = set_params.ParameterValueConfigurations
-    assert len(cfg) == 1
-    assert cfg[0]["DestinationParameterName"] == P_INV_ANETWORK_ANCHOR
-    assert cfg[0]["Value"]["SourceField"] == _sankey_field_id_for_column(
-        outbound, "target", "target_display",
-    )
+    drills = [a for a in outbound.actions if isinstance(a, Drill)]
+    assert len(drills) == 1
+    walk = drills[0]
+    assert walk.name == "Walk to this counterparty"
+    assert walk.trigger == "DATA_POINT_CLICK"
+    assert isinstance(walk.target_sheet, Sheet)
+    assert walk.target_sheet.sheet_id == SHEET_INV_ACCOUNT_NETWORK
+    assert len(walk.writes) == 1
+    param, src = walk.writes[0]
+    assert param.name == P_INV_ANETWORK_ANCHOR
+    # The drill reads the Sankey's own target field (target_display).
+    assert src is outbound.target
+    assert isinstance(src, Dim)
+    assert resolve_column(src.column) == "target_display"
 
 
 def test_anetwork_table_wires_single_counterparty_walk_action():
     """K.4.8f-3: Table carries a single, unambiguous "Walk to other
-    account on this edge" action that SourceFields off the analysis-
-    level counterparty_display calc field — that field always projects
-    the side that ISN'T the current anchor, so the walk can never be a
-    no-op."""
+    account on this edge" action that SourceFields off the
+    counterparty_display column — that column always projects the side
+    that ISN'T the current anchor, so the walk can never be a no-op."""
     _, _, table = _account_network_visuals()
-    actions = table.Actions
-    assert actions is not None
-    assert len(actions) == 1
-    walk = actions[0]
-    assert walk.Name == "Walk to other account on this edge"
-    assert walk.Trigger == "DATA_POINT_MENU"
-    set_params = walk.ActionOperations[1].SetParametersOperation
-    assert set_params is not None
-    cfg = set_params.ParameterValueConfigurations
-    assert len(cfg) == 1
-    assert cfg[0]["DestinationParameterName"] == P_INV_ANETWORK_ANCHOR
-    assert cfg[0]["Value"]["SourceField"] == _table_groupby_field_id_for_column(
-        table, CF_INV_ANETWORK_COUNTERPARTY_DISPLAY,
-    )
+    drills = [a for a in table.actions if isinstance(a, Drill)]
+    assert len(drills) == 1
+    walk = drills[0]
+    assert walk.name == "Walk to other account on this edge"
+    assert walk.trigger == "DATA_POINT_MENU"
+    assert len(walk.writes) == 1
+    param, src = walk.writes[0]
+    assert param.name == P_INV_ANETWORK_ANCHOR
+    assert isinstance(src, Dim)
+    assert resolve_column(src.column) == CF_INV_ANETWORK_COUNTERPARTY_DISPLAY
+    # The drill source IS one of the table's group_by columns.
+    assert src in table.group_by
 
 
 def test_anetwork_table_columns_use_display_strings():
     """Table source / target columns are the display strings AND the
-    counterparty_display calc field is exposed as a column so the
-    single-action walk has a SourceField to read off."""
+    counterparty_display column is exposed so the single-action walk
+    has a SourceField to read off."""
     _, _, table = _account_network_visuals()
-    assert table.ChartConfiguration is not None
-    assert table.ChartConfiguration.FieldWells is not None
-    fields = table.ChartConfiguration.FieldWells.TableAggregatedFieldWells
-    assert fields is not None
-    assert fields.GroupBy is not None
-    cols: list[str] = []
-    for d in fields.GroupBy:
-        if d.CategoricalDimensionField:
-            cols.append(d.CategoricalDimensionField.Column.ColumnName)
+    cols = [resolve_column(d.column) for d in table.group_by]
     assert "source_display" in cols
     assert "target_display" in cols
     assert CF_INV_ANETWORK_COUNTERPARTY_DISPLAY in cols
@@ -1768,10 +1424,7 @@ def test_anetwork_calc_fields_pushed_into_dataset_sql():
     )
 
     # 3. CalcFields no longer carry these names.
-    analysis = build_analysis(_TEST_CFG)
-    cf_names = {
-        cf["Name"] for cf in analysis.Definition.CalculatedFields or []
-    }
+    cf_names = {c.name for c in _analysis().calc_fields}
     assert CF_INV_ANETWORK_IS_INBOUND_EDGE not in cf_names
     assert CF_INV_ANETWORK_IS_OUTBOUND_EDGE not in cf_names
     assert CF_INV_ANETWORK_COUNTERPARTY_DISPLAY not in cf_names
@@ -1782,69 +1435,14 @@ def test_money_trail_root_dropdown_hides_select_all():
     a Sankey with no chain root selected renders blank, so 'All' is
     misleading. SelectAll HIDDEN forces QS to land on the first row."""
     pc = _parameter_controls(SHEET_INV_MONEY_TRAIL)
-    dropdown = pc[0].Dropdown
-    assert dropdown is not None
-    assert dropdown.SourceParameterName == P_INV_MONEY_TRAIL_ROOT
-    assert dropdown.DisplayOptions == {
-        "SelectAllOptions": {"Visibility": "HIDDEN"},
-    }
+    dropdown = pc[0]
+    assert isinstance(dropdown, ParameterDropdown)
+    assert dropdown.parameter.name == P_INV_MONEY_TRAIL_ROOT
+    assert dropdown.hidden_select_all is True
 
 
 # ---------------------------------------------------------------------------
 # CLI wiring
 # ---------------------------------------------------------------------------
 
-def _write_min_config(tmp_path: Path) -> Path:
-    cfg_path = tmp_path / "config.yaml"
-    # Z.C — required cfg fields.
-    cfg_path.write_text(
-        "aws:\n"
-        "  account_id: '111122223333'\n"
-        "  region: us-west-2\n"
-        "  deployment_name: recon-inv-cli\n"
-        "  datasource:\n"
-        "    mode: adopt\n"
-        "    arn: 'arn:aws:quicksight:us-west-2:111122223333:datasource/x'\n"
-        "db:\n"
-        "  dialect: postgres\n"
-        "  table_prefix: spec_example\n",
-        encoding="utf-8",
-    )
-    return cfg_path
 
-
-def test_json_apply_writes_investigation_files(tmp_path: Path):
-    """Q.3.a: ``json apply`` is the bundled emit verb; investigation
-    JSON files (analysis, dashboard, theme, recipient-fanout dataset)
-    land in the output dir."""
-    cfg_path = _write_min_config(tmp_path)
-    out_dir = tmp_path / "out"
-    runner = CliRunner()
-    result = runner.invoke(
-        main,
-        ["json", "apply", "-c", str(cfg_path), "-o", str(out_dir)],
-    )
-    assert result.exit_code == 0, result.output
-    assert (out_dir / "theme.json").is_file()
-    assert (out_dir / "investigation-analysis.json").is_file()
-    assert (out_dir / "investigation-dashboard.json").is_file()
-    # K.4.3 — recipient-fanout dataset JSON must be written too.
-    # Z.C — deployment_name from _write_min_config (recon-inv-cli) is
-    # the single ID prefix.
-    fanout_ds = out_dir / "datasets" / (
-        "recon-inv-cli-inv-recipient-fanout-dataset.json"
-    )
-    assert fanout_ds.is_file()
-
-
-def test_json_apply_writes_investigation_app_jsons(tmp_path: Path):
-    """Q.3.a: same `json apply` verb covers every app — re-asserts
-    investigation lands in the bundled emit alongside the others."""
-    cfg_path = _write_min_config(tmp_path)
-    out_dir = tmp_path / "out-all"
-    runner = CliRunner()
-    result = runner.invoke(
-        main, ["json", "apply", "-c", str(cfg_path), "-o", str(out_dir)],
-    )
-    assert result.exit_code == 0, result.output
-    assert (out_dir / "investigation-analysis.json").is_file()

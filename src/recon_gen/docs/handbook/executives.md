@@ -77,14 +77,14 @@ Standard App Info canary — matview row counts + deploy stamp. See
 the [App Info convention](../concepts/index.md) for the diagnostic
 ladder when a sheet renders blank.
 
-## Generation + deployment
+## Viewing the dashboard
 
 ```bash
-# Generate JSON for all four bundled apps to run/out/
-recon-gen json apply -c run/config.yaml -o run/out
+# Serve all four bundled apps (Executives included)
+recon-gen dashboards -c run/config.yaml
 
-# Same emit, then deploy to AWS (delete-then-create)
-recon-gen json apply -c run/config.yaml -o run/out --execute
+# Or full Studio — the dashboards plus the L2 editor + data-shaping panel
+recon-gen studio -c run/config.yaml
 ```
 
 Defaults to the bundled `{{ l2_instance_name }}` L2 fixture. To target a

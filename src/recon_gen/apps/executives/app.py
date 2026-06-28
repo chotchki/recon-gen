@@ -42,8 +42,6 @@ from recon_gen.common.ids import (
     VisualId,
 )
 from recon_gen.common.l2 import L2Instance, ThemePreset
-from recon_gen.common.models import Analysis as ModelAnalysis
-from recon_gen.common.models import Dashboard as ModelDashboard
 from recon_gen.common.sheets.app_info import (
     APP_INFO_SHEET_DESCRIPTION,
     APP_INFO_SHEET_NAME,
@@ -291,7 +289,9 @@ def _datasets(cfg: Config) -> dict[str, Dataset]:
     M.4.4.5 — last 2 entries are the App Info datasets, mirroring the
     order in `build_all_datasets`.
     """
-    built = build_all_datasets(cfg)
+    # Register every dataset's contract + SQL (build side-effects); the
+    # returned BuiltDataset list is no longer consumed post-DW.
+    build_all_datasets(cfg)
     names = [
         DS_EXEC_TRANSACTION_SUMMARY,
         # AO.5 — per-active-day rollup for the avg-daily KPI.
@@ -309,8 +309,8 @@ def _datasets(cfg: Config) -> dict[str, Dataset]:
         _DS_APP_INFO_LATEST_BALANCE_DAY,
     ]
     return {
-        name: Dataset(identifier=name, arn=cfg.aws.dataset_arn(ds.DataSetId))
-        for name, ds in zip(names, built)
+        name: Dataset(identifier=name)
+        for name in names
     }
 
 
@@ -996,29 +996,3 @@ def build_executives_app(
     )
     return app
 
-
-# ---------------------------------------------------------------------------
-# CLI / external-caller shims. Same shape as the other apps' shims.
-# Wired into the CLI in L.6.10.
-# ---------------------------------------------------------------------------
-
-def build_analysis(
-    cfg: Config, *, l2_instance: L2Instance | None = None,
-) -> ModelAnalysis:
-    """Build the complete Executives Analysis resource via the tree.
-
-    Forwards ``l2_instance`` to ``build_executives_app``; default
-    is the persona-neutral spec_example.
-    """
-    return build_executives_app(
-        cfg, l2_instance=l2_instance,
-    ).emit_analysis()
-
-
-def build_executives_dashboard(
-    cfg: Config, *, l2_instance: L2Instance | None = None,
-) -> ModelDashboard:
-    """Build the Executives Dashboard resource via the tree."""
-    return build_executives_app(
-        cfg, l2_instance=l2_instance,
-    ).emit_dashboard()

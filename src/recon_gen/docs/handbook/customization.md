@@ -12,8 +12,8 @@ Integration ETL engineer loading the two base tables (that's the
 
 The product is built around a small, deliberate set of
 customer-mutable surfaces. Swap the SQL behind a dataset, swap
-the colors on a theme, point the deploy at a different AWS
-account or extend the metadata contract — each happens in ONE
+the colors on a theme, point the dashboards at a different
+database or extend the metadata contract — each happens in ONE
 place, with one test that catches the regression. The visual,
 filter and drill layer above the data binds to a stable column
 contract; you change WHAT fills the contract, not HOW the
@@ -38,12 +38,12 @@ new persona work or dashboard redesigns:
   portable `JSON_VALUE` syntax.
 - **Theme presets** — color tokens, fonts, naming prefix.
   Your brand drops in via one preset registration.
-- **`config.yaml` + CLI** — account, region, principals,
-  resource prefix, datasource ARN, all configurable from one
-  file (or env vars). The CLI itself (`recon-gen json apply` /
-  `json clean` for emit + deploy + cleanup, `schema apply` /
-  `data apply` for the demo DB) is the customer-facing surface
-  and won't change shape without a major version bump.
+- **`config.yaml` + CLI** — database URL, table prefix, theme,
+  all configurable from one file (or env vars). The CLI itself
+  (`recon-gen dashboards` / `studio` for serving the apps,
+  `schema apply` / `data apply` for the demo DB, `audit apply`
+  for the regulator PDF) is the customer-facing surface and
+  won't change shape without a major version bump.
 
 ## What this handbook does NOT cover
 
@@ -59,34 +59,27 @@ new persona work or dashboard redesigns:
 
 ## How filters work
 
-A filter — a date range, a status dropdown, a sigma-threshold slider — is a parameter substituted into the dataset's SQL `WHERE` clause, NOT a UI-side filter applied after the fact. The dataset query already carries a `<<$paramName>>` placeholder (or, for the universal date range, a `{date_filter}` slot the `build_dataset` helper fills); when the analyst moves a control, the renderer substitutes the value into that query and the database returns the narrowed set. The two renderers do the same thing the same way:
-
-- **QuickSight** substitutes the literal value into the dataset's CustomSql at fetch time, bridged from an analysis-level parameter via `MappedDataSetParameters`.
-- **The self-hosted renderer** translates the same `<<$paramName>>` into a `:param_name` bind before running the query.
+A filter — a date range, a status dropdown, a sigma-threshold slider — is a parameter substituted into the dataset's SQL `WHERE` clause, NOT a UI-side filter applied after the fact. The dataset query already carries a `<<$paramName>>` placeholder (or, for the universal date range, a `{date_filter}` slot the `build_dataset` helper fills); when the analyst moves a control, the renderer translates that placeholder into a `:param_name` bind, runs the narrowed query and the database returns the narrowed set.
 
 Two consequences worth knowing if you're swapping SQL behind a dataset:
 
 1. **Keep the placeholders.** If the dataset you're replacing has a `{date_filter}` slot or a `<<$pSomething>>` in its `WHERE`, your replacement SQL needs the equivalent — that's how the date control / dropdown / slider stays wired. The `DatasetContract` still locks the projection (column names + types); the placeholders are the parameter contract on top of it.
 2. **It narrows at the database.** A filtered view fetches fewer rows, not "all rows then hide some" — relevant when you're sizing matview/index work for your own data volumes.
 
-This is internal renderer architecture (a v9.0.0 change). It does NOT touch your `config.yaml` or your L2 instance YAML — the `theme:` block, the optional `persona:` block, your rails / chains / accounts / limit schedules are all unchanged. If you carried a customization across the v9.0.0 line, your YAML didn't need to move; only the generated QuickSight definitions did.
+This is internal renderer architecture (a v9.0.0 change). It does NOT touch your `config.yaml` or your L2 instance YAML — the `theme:` block, the optional `persona:` block, your rails / chains / accounts / limit schedules are all unchanged. If you carried a customization across the v9.0.0 line, your YAML didn't need to move; only the generated dashboard definitions did.
 
 ## Setup
 
-<p class="snb-section-label">Get the dashboards landed against your data</p>
+<p class="snb-section-label">Get the dashboards running against your data</p>
 
 <div class="snb-card-grid">
   <a class="snb-card" href="../../walkthroughs/customization/how-do-i-map-my-database/">
     <h3>How do I map my production database to the two base tables?</h3>
     <p>Pattern-level mapping from your source system to <code>transactions</code> + <code>daily_balances</code>. The first walkthrough a new product owner reads.</p>
   </a>
-  <a class="snb-card" href="../../walkthroughs/customization/how-do-i-configure-the-deploy/">
-    <h3>How do I configure the deploy for my AWS account?</h3>
-    <p><code>config.yaml</code> fields, environment-variable overrides, production datasource ARN vs. demo connection string, principals + tags + naming prefix.</p>
-  </a>
-  <a class="snb-card" href="../../walkthroughs/customization/how-do-i-run-my-first-deploy/">
-    <h3>How do I run my first deploy?</h3>
-    <p>The <code>json apply</code> emit + deploy + <code>json clean</code> cleanup loop, idempotent delete-then-create, dry-run before live, <code>ManagedBy</code> tag scoping.</p>
+  <a class="snb-card" href="../../reference/self-host/">
+    <h3>How do I serve the dashboards against my data?</h3>
+    <p><code>recon-gen dashboards</code> for just the apps, <code>recon-gen studio</code> for the editor + implementation tools on top — both read your <code>config.yaml</code> database and L2 instance, no deploy step.</p>
   </a>
 </div>
 
@@ -153,7 +146,7 @@ them when you can give the dashboard rail-accurate signal:
 ## The L2-fed pattern (M.2b)
 
 The sections above cover the per-surface customization path — swap
-a dataset's SQL, register a theme, point the deploy at your account.
+a dataset's SQL, register a theme, point the dashboards at your database.
 The **L2-fed pattern** is the recommended approach going forward:
 declare your institution as an L2 instance YAML once and the L1
 dashboard renders against it generically.
@@ -209,20 +202,21 @@ sql = refresh_matviews_sql(instance)
 # 24 matviews × 2 statements each = 48 (REFRESH + ANALYZE) per call
 ```
 
-### 4. Deploy the L1 dashboard against your instance
+### 4. Serve the L1 dashboard against your instance
 
-The CLI defaults to the bundled `{{ l2_instance_name }}` fixture; swap to your
-own instance by editing the build call site or providing your own
-`l2_instance` kwarg via a small wrapper script. Then:
+Point the dashboards server at your config + your instance YAML:
 
 ```bash
-recon-gen json apply -c run/config.yaml -o run/out
-recon-gen json apply -c run/config.yaml -o run/out --execute
+recon-gen dashboards -c run/config.yaml --l2 path/to/myorg.yaml
+# → http://127.0.0.1:8765/dashboards
 ```
+
+Want the editor + implementation tools (unified diagram, L2 editor,
+data-shaping panel) on top? Run `recon-gen studio` instead — same flags.
 
 ### 5. Verify with the test runner
 
-The `./run_tests.sh up_to=db --variants=sp_pg_aw` chain (or `sp_or_aw`
+The `./run_tests.sh up_to=db --variants=sp_pg_lo` chain (or `sp_or_lo`
 for Oracle) applies the schema, plants the canonical seed scenarios,
 refreshes matviews and asserts each L1 invariant view returns rows
 for every planted scenario via the e2e harness tests. For your own

@@ -98,7 +98,7 @@ register_contract("x2g-sankey-ds", DatasetContract(columns=[
 
 
 def _ds(identifier: str = "test-ds") -> Dataset:
-    return Dataset(identifier=identifier, arn=f"arn::{identifier}")
+    return Dataset(identifier=identifier)
 
 
 def test_find_dataset_id_via_kpi_values() -> None:

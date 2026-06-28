@@ -130,7 +130,7 @@ def _build_apps(cfg: Config | None = None) -> Sequence[tuple[str, App]]:
     """Construct all 4 apps against the default L2 (``spec_example``).
 
     Cheap — no DB / AWS contact; the App build is a pure tree
-    construction. ``emit_analysis()`` resolves auto-IDs so the tree's
+    construction. ``resolve_auto_ids()`` resolves auto-IDs so the tree's
     Sheet.parameter_controls walk gets stable identifiers.
     """
     # Late import — avoid circular at module-import time + keep the
@@ -158,7 +158,7 @@ def _build_apps(cfg: Config | None = None) -> Sequence[tuple[str, App]]:
             effective_cfg, l2_instance=l2)),
     ]
     for _, app in apps:
-        app.emit_analysis()  # resolves auto-IDs
+        app.validate()  # resolves auto-IDs + runs the full validation walk
     return apps
 
 

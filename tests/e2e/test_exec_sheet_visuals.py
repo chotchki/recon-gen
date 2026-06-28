@@ -39,8 +39,8 @@ if TYPE_CHECKING:
 pytestmark = [
     pytest.mark.e2e,
     pytest.mark.browser,
-    tier(Tier.QS_BROWSER),
-    needs(Need.AWS_QS, Need.PLAYWRIGHT),
+    tier(Tier.APP2),
+    needs(Need.PLAYWRIGHT),
 ]
 
 
@@ -88,9 +88,7 @@ def _sql_for(
     URL binds omit them — no ``_exec_default_date_binds(cfg)`` helper.
     """
     ds = builder(*args)
-    physical = next(iter(ds.PhysicalTableMap.values()))
-    assert physical.CustomSql is not None, "Dataset missing CustomSql"
-    return physical.CustomSql.SqlQuery, list(ds.DatasetParameters or [])
+    return ds.sql, list(ds.dataset_params)
 
 
 def test_bg5_transaction_volume_kpis_match_dataset_aggregates(

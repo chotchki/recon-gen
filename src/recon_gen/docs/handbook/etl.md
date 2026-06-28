@@ -242,16 +242,14 @@ SPICE invalidation step.
 
 While you're on the **Info** sheet, glance at the **Liveness** KPI
 on the left. It runs a real query against the database catalog. If
-it shows a number, QuickSight's rendering pipeline is healthy and
-any blank visual elsewhere on the dashboard is a data or SQL issue
-(stale matviews, an empty filter, an unexpected `WHERE` narrowing).
-If the Liveness KPI is ALSO blank, QuickSight itself has
-hung — every visual on every sheet stuck on the spinner with no
-error banner. That's a separate failure mode; the fix is to wait
-it out, open in a fresh incognito window or force a full
-delete-then-create of the QuickSight resource graph (theme,
-datasource, datasets, analysis, dashboard) plus a clean re-seed
-and matview refresh.
+it shows a number, the renderer is healthy and any blank visual
+elsewhere on the dashboard is a data or SQL issue (stale matviews,
+an empty filter, an unexpected `WHERE` narrowing). If the Liveness
+KPI is ALSO blank, the dashboard server itself is the problem —
+every visual on every sheet stuck with no data and no error banner.
+That's a separate failure mode; the fix is to restart the dashboard
+server (`recon-gen dashboards` / `recon-gen studio`) plus a clean
+re-seed and matview refresh.
 
 ## Reference
 

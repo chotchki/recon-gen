@@ -57,8 +57,8 @@ from tests.e2e._studio_deploy_helpers import (
 
 
 pytestmark = [
-    tier(Tier.QS_BROWSER),
-    needs(Need.AWS_QS, Need.PLAYWRIGHT),
+    tier(Tier.APP2),
+    needs(Need.PLAYWRIGHT),
     pytest.mark.skipif(
         not docker_available(),
         reason="docker not available — skipping postgres-in-docker e2e",

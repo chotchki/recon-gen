@@ -51,7 +51,8 @@ from recon_gen.common.env_keys import (
     RECON_GEN_TEST_L2_INSTANCE,
 )
 from recon_gen.common.l2 import L2Instance, load_instance
-from recon_gen.common.models import DataSet, DatasetParameter
+from recon_gen.common.dataset_contract import BuiltDataset
+from recon_gen.common.models import DatasetParameter
 
 # CB.17.d (2026-06-04) — module-import still loads cfg+L2 because
 # pytest-parametrize needs the dataset NAME list at collection time.
@@ -127,17 +128,13 @@ def _wrap_smoke(sql: str) -> str:
     return f"SELECT * FROM (\n{sql}\n) sub WHERE 1=0"
 
 
-def _custom_sql(ds: DataSet) -> tuple[str, str]:
-    for table_key, physical in ds.PhysicalTableMap.items():
-        if physical.CustomSql is not None:
-            return physical.CustomSql.SqlQuery, table_key
-    raise AssertionError(
-        f"Dataset {ds.DataSetId!r} has no CustomSql in PhysicalTableMap "
-        f"— this verifier only handles CustomSql datasets."
-    )
+def _custom_sql(ds: BuiltDataset) -> tuple[str, str]:
+    """Registered SQL + the dataset's registry key (the visual_identifier,
+    used only for the diagnostic message)."""
+    return ds.sql, ds.visual_identifier
 
 
-def _smoke_one(conn: Any, ds: DataSet) -> tuple[bool, str]:
+def _smoke_one(conn: Any, ds: BuiltDataset) -> tuple[bool, str]:
     """Smoke-test one dataset. Returns (success, message).
 
     Rolls back the connection's transaction on any error so subsequent
@@ -147,7 +144,7 @@ def _smoke_one(conn: Any, ds: DataSet) -> tuple[bool, str]:
     dataset bugs behind a cascade of bookkeeping errors.
     """
     raw_sql, table_key = _custom_sql(ds)
-    sub_sql = _substitute_qs_params(raw_sql, ds.DatasetParameters)
+    sub_sql = _substitute_qs_params(raw_sql, ds.dataset_params)
     smoke_sql = _wrap_smoke(sub_sql)
     cur = conn.cursor()
     # try/finally + manual close instead of ``with conn.cursor() as cur``
@@ -172,7 +169,7 @@ def _smoke_one(conn: Any, ds: DataSet) -> tuple[bool, str]:
     return True, ""
 
 
-def _build_all_datasets(cfg: Config, l2: L2Instance) -> list[DataSet]:
+def _build_all_datasets(cfg: Config, l2: L2Instance) -> list[BuiltDataset]:
     """Every dataset across all 4 apps. Z.C — the DB-table prefix lives
     on cfg.db.table_prefix (was previously stamped from L2Instance.instance);
     the cfg the operator points at the test e2e DB already carries the
@@ -222,19 +219,20 @@ def _load_l2() -> L2Instance:
 # pytest-parametrize can enumerate test cases at collection. Pure-Python
 # build — no DB or AWS contact. ``_build_all_datasets`` is deterministic
 # in its ordering, so collection-time PLAIN cfg index N corresponds to
-# runtime ``seeded_cfg`` index N — only the cfg-prefix-baked fields
-# (DataSetId, CustomSql.Name) differ; structural ordering is identical.
-# Names go into pytest's ``ids=`` for test-ID readability (pytest
+# runtime ``seeded_cfg`` index N — only the cfg-prefix-baked ``DataSetId``
+# differs; structural ordering is identical. The ``visual_identifier``
+# (registry key) is NOT prefix-baked, so it's stable across cfgs and
+# goes into pytest's ``ids=`` for test-ID readability (pytest
 # auto-disambiguates duplicates as `name0`, `name1`, ...).
 _COLLECTION_CFG = _load_cfg()
 _COLLECTION_L2 = _load_l2()
 _COLLECTION_DATASETS = _build_all_datasets(_COLLECTION_CFG, _COLLECTION_L2)
 _DATASET_INDICES = list(range(len(_COLLECTION_DATASETS)))
-_DATASET_TEST_IDS = [ds.Name for ds in _COLLECTION_DATASETS]
+_DATASET_TEST_IDS = [ds.visual_identifier for ds in _COLLECTION_DATASETS]
 
 
 @pytest.fixture(scope="module")
-def runtime_datasets(seeded_cfg: Config) -> list[DataSet]:
+def runtime_datasets(seeded_cfg: Config) -> list[BuiltDataset]:
     """Rebuild datasets against ``seeded_cfg`` (the per-worker isolated
     prefix). Returns a list in the same order as ``_COLLECTION_DATASETS``
     — index N at collection = index N at runtime.
@@ -277,7 +275,7 @@ def smoke_conn(seeded_cfg: Config) -> Iterator[Any]:
 def test_dataset_sql_parses_and_executes(
     dataset_idx: int,
     smoke_conn: Any,
-    runtime_datasets: list[DataSet],
+    runtime_datasets: list[BuiltDataset],
 ) -> None:
     """The dataset's CustomSQL parses, binds default-value
     substitutions, and executes against the live demo DB without

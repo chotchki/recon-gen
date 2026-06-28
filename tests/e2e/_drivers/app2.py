@@ -197,7 +197,7 @@ class App2Driver:
         if analysis is None:
             raise RuntimeError(
                 "App2Driver.serving() needs an emitted tree — call "
-                "tree_app.emit_analysis() first (resolves auto-IDs)."
+                "tree_app.validate() first (resolves auto-IDs)."
             )
         sheet_id_by_name = {s.name: str(s.sheet_id) for s in analysis.sheets}
         with html2_server(

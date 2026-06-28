@@ -11,7 +11,7 @@ small set of primitives:
 
 Every artifact module imports from here so the apply/emit/clean/test
 implementations are thin wrappers around the production library
-(``common/l2/``, ``common/datasource.py``, ``common/theme.py``).
+(``common/l2/``, ``common/theme.py``).
 """
 
 from __future__ import annotations

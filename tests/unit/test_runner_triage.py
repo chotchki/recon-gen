@@ -14,8 +14,8 @@ Coverage:
   empty / absolute nodeid, unknown nodeid).
 - ``cmd_triage_down`` gates (--yes required, missing state file is a
   successful no-op).
-- Extraction-correctness checks for the ``_build_deploy_command``
-  refactor + ``_setup_thin_chain_environment`` helper.
+- Layer-chain design locks (post-QuickSight: LAYERS tuple shape with
+  agreement terminal, deploy arm retired).
 """
 
 from __future__ import annotations
@@ -38,29 +38,22 @@ from recon_gen._dev import runner as r
 # ---------------------------------------------------------------------------
 
 
-def test_infer_layer_qs_browser_subdir() -> None:
-    """Rule 1: nodeids under tests/e2e/qs_browser/ -> qs_browser."""
+def test_infer_layer_agreement_subdir() -> None:
+    """Rule 1 (DW.3): nodeids under tests/e2e/agreement/ -> agreement."""
     assert r._infer_layer_from_nodeid(
-        "tests/e2e/qs_browser/test_inv_anomaly_qs.py::test_x"
-    ) == "qs_browser"
-
-
-def test_infer_layer_qs_api_subdir() -> None:
-    """Rule 2: nodeids under tests/e2e/qs_api/ -> qs_api."""
-    assert r._infer_layer_from_nodeid(
-        "tests/e2e/qs_api/test_describe_foo.py::test_y"
-    ) == "qs_api"
+        "tests/e2e/agreement/test_inv_anomaly_agreement.py::test_anomaly_agreement"
+    ) == "agreement"
 
 
 def test_infer_layer_app2_subdir() -> None:
-    """Rule 3: nodeids under tests/e2e/app2/ -> app2."""
+    """Rule 2: nodeids under tests/e2e/app2/ -> app2."""
     assert r._infer_layer_from_nodeid(
         "tests/e2e/app2/test_bv33_trainer.py::test_x"
     ) == "app2"
 
 
 def test_infer_layer_db_subdir() -> None:
-    """Rule 4: nodeids under tests/e2e/db/ -> db."""
+    """Rule 3: nodeids under tests/e2e/db/ -> db."""
     assert r._infer_layer_from_nodeid(
         "tests/e2e/db/test_dataset_sql_smoke.py::test_one"
     ) == "db"
@@ -77,25 +70,24 @@ def test_infer_layer_db_subdir() -> None:
         "test_cq_picker_search_and_find.py",
         "test_studio_deploy_browser.py",
         "test_parameter_anchored_sheets.py",
-        "test_db3_parity_snaps.py",
     ],
 )
 def test_infer_layer_root_e2e_parametrized(filename: str) -> None:
-    """Rule 5: tests/e2e/<root parametrized file> → qs_browser.
+    """Rule 4 (DW.5.2): tests/e2e/<root parametrized file> → app2_browser.
 
-    qs_browser is a strict superset of app2's prereqs, so default to
-    the higher layer; operator can downshift via ``--layer=app2``.
-    """
-    nodeid = f"tests/e2e/{filename}::test_renders[qs]"
-    assert r._infer_layer_from_nodeid(nodeid) == "qs_browser"
+    The root e2e browser files are app2-only post-DW.6; the terminal
+    ``app2_browser`` tier runs them (QuickSight's qs_browser tier is
+    gone)."""
+    nodeid = f"tests/e2e/{filename}::test_renders[app2]"
+    assert r._infer_layer_from_nodeid(nodeid) == "app2_browser"
 
 
-def test_infer_layer_root_e2e_parametrized_app2_param_still_qs_browser() -> None:
-    """Even the [app2] callspec of a root-e2e parametrized test
-    defaults to qs_browser (operator downshifts via --layer)."""
+def test_infer_layer_root_e2e_parametrized_app2_param() -> None:
+    """The [app2] callspec of a root-e2e parametrized test infers to the
+    app2_browser terminal tier."""
     assert r._infer_layer_from_nodeid(
         "tests/e2e/test_l1_filters.py::test_x[app2]"
-    ) == "qs_browser"
+    ) == "app2_browser"
 
 
 @pytest.mark.parametrize(
@@ -110,20 +102,20 @@ def test_infer_layer_root_e2e_parametrized_app2_param_still_qs_browser() -> None
     ],
 )
 def test_infer_layer_unit_prefixes(prefix: str) -> None:
-    """Rule 6: pytest-only trees -> unit."""
+    """Rule 5: pytest-only trees -> unit."""
     nodeid = f"{prefix}test_foo.py::test_bar"
     assert r._infer_layer_from_nodeid(nodeid) == "unit"
 
 
 @pytest.mark.parametrize("prefix", ["tests/audit/", "tests/data/"])
 def test_infer_layer_audit_data_fallback(prefix: str) -> None:
-    """Rule 7: gap-handling — audit/data return unit (safe floor)."""
+    """Rule 6: gap-handling — audit/data return unit (safe floor)."""
     nodeid = f"{prefix}test_foo.py::test_bar"
     assert r._infer_layer_from_nodeid(nodeid) == "unit"
 
 
 def test_infer_layer_unknown_returns_none() -> None:
-    """Rule 8: unknown prefix returns None."""
+    """Rule 7: unknown prefix returns None."""
     assert r._infer_layer_from_nodeid("tests/foo/test_bar.py::baz") is None
 
 
@@ -177,14 +169,12 @@ def test_argparse_triage_parses_nodeid_and_flags() -> None:
     parser = r._build_parser()
     ns = parser.parse_args([
         "triage",
-        "tests/e2e/qs_browser/test_x.py::test_y",
-        "--layer", "qs_browser",
-        "--allow-dirty-deploy",
+        "tests/e2e/test_l1_filters.py::test_y",
+        "--layer", "app2_browser",
         "--force",
     ])
-    assert ns.nodeid == "tests/e2e/qs_browser/test_x.py::test_y"
-    assert ns.layer == "qs_browser"
-    assert ns.allow_dirty_deploy is True
+    assert ns.nodeid == "tests/e2e/test_l1_filters.py::test_y"
+    assert ns.layer == "app2_browser"
     assert ns.force is True
 
 
@@ -197,13 +187,12 @@ def test_argparse_triage_layer_choices_rejects_unknown() -> None:
         ])
 
 
-def test_argparse_triage_down_default_no_keeps() -> None:
-    """Both ``--keep-container`` and ``--keep-qs`` default to False."""
+def test_argparse_triage_down_default_keep_container_false() -> None:
+    """``--keep-container`` defaults to False."""
     parser = r._build_parser()
     ns = parser.parse_args(["triage-down", "--yes"])
     assert ns.yes is True
     assert ns.keep_container is False
-    assert ns.keep_qs is False
 
 
 def test_argparse_triage_down_yes_default_false() -> None:
@@ -317,8 +306,8 @@ def test_triage_state_write_read_roundtrip(triage_state_tmp: Path) -> None:
     state: dict[str, Any] = {
         "run_id": "20260614T120000Z-deadbee",
         "run_dir": "/runs/x",
-        "nodeid": "tests/e2e/qs_browser/test_foo.py::test_bar",
-        "layer": "qs_browser",
+        "nodeid": "tests/e2e/test_l1_filters.py::test_bar",
+        "layer": "app2_browser",
         "screen_name": "recon-gen-triage",
         "cfg_path": "/run/config.yaml",
         "deployed": True,
@@ -358,15 +347,13 @@ def test_triage_state_non_object_raises(triage_state_tmp: Path) -> None:
 
 
 def _mk_triage_args(
-    nodeid: str = "tests/e2e/qs_browser/test_x.py::test_y",
+    nodeid: str = "tests/e2e/test_l1_filters.py::test_y",
     *,
     layer: str | None = None,
-    allow_dirty_deploy: bool = False,
     force: bool = False,
 ) -> argparse.Namespace:
     return argparse.Namespace(
-        nodeid=nodeid, layer=layer,
-        allow_dirty_deploy=allow_dirty_deploy, force=force,
+        nodeid=nodeid, layer=layer, force=force,
     )
 
 
@@ -431,10 +418,9 @@ def test_cmd_triage_unknown_nodeid_returns_config_error(
 
 def _mk_triage_down_args(
     *, yes: bool = False, keep_container: bool = False,
-    keep_qs: bool = False,
 ) -> argparse.Namespace:
     return argparse.Namespace(
-        yes=yes, keep_container=keep_container, keep_qs=keep_qs,
+        yes=yes, keep_container=keep_container,
     )
 
 
@@ -479,10 +465,12 @@ def test_cmd_triage_down_unparseable_state_returns_needs_operator(
     assert "unparseable" in buf.getvalue()
 
 
-def test_cmd_triage_down_kills_screen_and_skips_qs_when_not_deployed(
+def test_cmd_triage_down_kills_screen_and_removes_state(
     triage_state_tmp: Path,
 ) -> None:
-    """When state says deployed=False, QS sweep is skipped + screen killed."""
+    """Screen killed + state file removed; container stop skipped via
+    --keep-container. (Post-DW.7: no QS sweep step — the chain is fully
+    local, nothing in AWS to clean.)"""
     state: dict[str, Any] = {
         "run_id": "20260614T120000Z-deadbee",
         "run_dir": "/runs/x",
@@ -490,7 +478,6 @@ def test_cmd_triage_down_kills_screen_and_skips_qs_when_not_deployed(
         "layer": "db",
         "screen_name": "recon-gen-triage",
         "cfg_path": "/run/config.yaml",
-        "deployed": False,
         "as_of_anchor": "2026-06-14",
     }
     r._write_triage_state(state)
@@ -506,128 +493,29 @@ def test_cmd_triage_down_kills_screen_and_skips_qs_when_not_deployed(
     out = buf.getvalue()
     assert "killing screen session" in out
     assert "screen session terminated" in out
-    assert "skipping QS sweep" in out
     assert "--keep-container" in out
     # State file must be removed.
     assert not triage_state_tmp.exists()
 
 
-def test_cmd_triage_down_keep_qs_skips_sweep(
-    triage_state_tmp: Path,
-) -> None:
-    """--keep-qs skips the QS sweep even when deployed=True."""
-    state: dict[str, Any] = {
-        "run_id": "20260614T120000Z-deadbee",
-        "run_dir": "/runs/x",
-        "nodeid": "tests/e2e/qs_browser/test_foo.py::test_bar",
-        "layer": "qs_browser",
-        "screen_name": "recon-gen-triage",
-        "cfg_path": "/run/config.yaml",
-        "deployed": True,
-        "as_of_anchor": "2026-06-14",
-    }
-    r._write_triage_state(state)
-    args = _mk_triage_down_args(yes=True, keep_qs=True, keep_container=True)
-    with (
-        patch.object(r, "_screen_kill", return_value=True),
-        patch.object(r, "_triage_qs_sweep") as mock_sweep,
-    ):
-        buf = io.StringIO()
-        with redirect_stdout(buf):
-            rc = r.cmd_triage_down(args)
-    assert rc == r.EXIT_SUCCESS
-    mock_sweep.assert_not_called()
-    assert "skipping QS resource sweep" in buf.getvalue()
-    assert not triage_state_tmp.exists()
-
-
 # ---------------------------------------------------------------------------
-# Extraction-correctness — _build_deploy_command parity.
+# Layer-chain design locks (post-QuickSight).
 # ---------------------------------------------------------------------------
-
-
-def test_build_deploy_command_returns_none_when_l2_missing(
-    tmp_path: Path,
-) -> None:
-    """No RECON_GEN_TEST_L2_INSTANCE in env → None."""
-    variant_env: dict[str, str] = {
-        r.RECON_GEN_CONFIG.name: "/path/to/cfg.yaml",
-    }
-    result = r._build_deploy_command(variant_env, tmp_path)
-    assert result is None
-
-
-def test_build_deploy_command_with_cfg_and_l2_returns_cmd(
-    tmp_path: Path,
-) -> None:
-    """When cfg + L2 both present, returns the expected argv shape."""
-    cfg = tmp_path / "cfg.yaml"
-    cfg.write_text("placeholder")
-    l2 = tmp_path / "l2.yaml"
-    l2.write_text("placeholder")
-    variant_env = {
-        r.RECON_GEN_CONFIG.name: str(cfg),
-        r.RECON_GEN_TEST_L2_INSTANCE.name: str(l2),
-    }
-    result = r._build_deploy_command(variant_env, tmp_path)
-    assert result is not None
-    cmd, env_addl = result
-    assert "json" in cmd
-    assert "apply" in cmd
-    assert "--execute" in cmd
-    assert str(cfg) in cmd
-    assert str(l2) in cmd
-    assert env_addl == {}
-    # out_dir must have been created.
-    assert (tmp_path / "deploy" / "out").is_dir()
-
-
-def test_build_deploy_command_prefers_qs_cfg_over_local_cfg(
-    tmp_path: Path,
-) -> None:
-    """When both RECON_GEN_QS_CONFIG and RECON_GEN_CONFIG are set, QS wins."""
-    local_cfg = tmp_path / "local.yaml"
-    qs_cfg = tmp_path / "qs.yaml"
-    local_cfg.write_text("placeholder")
-    qs_cfg.write_text("placeholder")
-    l2 = tmp_path / "l2.yaml"
-    l2.write_text("placeholder")
-    variant_env = {
-        r.RECON_GEN_CONFIG.name: str(local_cfg),
-        r.RECON_GEN_QS_CONFIG.name: str(qs_cfg),
-        r.RECON_GEN_TEST_L2_INSTANCE.name: str(l2),
-    }
-    result = r._build_deploy_command(variant_env, tmp_path)
-    assert result is not None
-    cmd, _env = result
-    assert str(qs_cfg) in cmd
-    assert str(local_cfg) not in cmd
 
 
 def test_deploy_retired_from_layers_tuple() -> None:
-    """DI phase: ``deploy`` is gone from the LAYERS chain.
-
-    The session-autouse ``qs_deployed`` fixture in
-    tests/e2e/conftest.py owns QS deploy; qs_api inherits as the
-    first AWS-touching chain layer. Locks the design lock here so
-    a future re-introduction of the deploy chain layer trips this
-    test instead of silently splitting the deploy code path.
+    """DW.5.2: the QS tiers (``qs_api`` / ``qs_browser``) are gone from
+    the LAYERS chain along with ``deploy``. DW.11 made ``agreement`` the
+    terminal layer (the final cross-renderer cross-check), with
+    ``app2_browser`` the browser tier below it. Locks the chain order so
+    a future re-introduction or re-shuffle trips this test.
     """
     assert "deploy" not in r.LAYERS
-    assert r.LAYERS == ("unit", "db", "app2", "qs_api", "qs_browser")
-
-
-def test_aws_touching_layers_starts_at_qs_api() -> None:
-    """DI phase: AWS_TOUCHING_LAYERS = (qs_api, qs_browser).
-
-    The qs_deployed fixture fires when a session's collected tests
-    pull in AWS-dependent fixtures (qs_client / qs_driver / etc.) —
-    which only the qs_api + qs_browser tiers do. Db + app2 tiers
-    inherit tests/e2e/conftest.py but their fixture closures don't
-    touch AWS, so qs_deployed bails via _session_needs_aws.
-    """
-    assert r.AWS_TOUCHING_LAYERS == ("qs_api", "qs_browser")
-    assert "deploy" not in r.AWS_TOUCHING_LAYERS
+    assert "qs_api" not in r.LAYERS
+    assert "qs_browser" not in r.LAYERS
+    assert r.LAYERS == (
+        "unit", "db", "app2", "app2_browser", "agreement",
+    )
 
 
 def test_layer_command_deploy_arm_removed(tmp_path: Path) -> None:
@@ -644,34 +532,27 @@ def test_layer_command_deploy_arm_removed(tmp_path: Path) -> None:
     ) is None
 
 
-def test_is_aws_touching_layer_qs_api_and_later() -> None:
-    """DI phase: dirty-tree refusal triggers on qs_api and qs_browser
-    (not earlier). Renamed from _is_deploy_or_later.
-    """
-    assert r._is_aws_touching_layer("qs_api") is True
-    assert r._is_aws_touching_layer("qs_browser") is True
-    assert r._is_aws_touching_layer("app2") is False
-    assert r._is_aws_touching_layer("db") is False
-    assert r._is_aws_touching_layer("unit") is False
-
-
-def test_chain_through_qs_browser_skips_deploy() -> None:
-    """``chain_through("qs_browser")`` no longer transits ``deploy``.
-
-    Concrete proof that ``up_to=qs_browser`` is a 5-layer chain
-    (not 6) post-DI. The qs_deployed fixture absorbs the deploy
-    work into the qs_api / qs_browser session at start.
-    """
-    chain = r.chain_through("qs_browser")
-    assert chain == ["unit", "db", "app2", "qs_api", "qs_browser"]
+def test_chain_through_app2_browser_stops_before_agreement() -> None:
+    """DW.11: ``up_to=app2_browser`` runs unit→db→app2→app2_browser and
+    stops short of the terminal ``agreement`` layer (no ``deploy`` /
+    ``qs_api`` / ``qs_browser``)."""
+    chain = r.chain_through("app2_browser")
+    assert chain == [
+        "unit", "db", "app2", "app2_browser",
+    ]
+    assert "agreement" not in chain
     assert "deploy" not in chain
+    assert "qs_api" not in chain
+    assert "qs_browser" not in chain
 
 
-def test_chain_through_qs_api_is_4_layers() -> None:
-    """``up_to=qs_api`` runs the full chain through qs_api — 4 layers."""
-    chain = r.chain_through("qs_api")
-    assert chain == ["unit", "db", "app2", "qs_api"]
-    assert "deploy" not in chain
+def test_chain_through_agreement_is_full_chain() -> None:
+    """DW.11: ``agreement`` is the terminal layer, so ``up_to=agreement``
+    runs the full 5-layer chain — the comprehensive gate that closes with
+    the cross-renderer agreement check after everything has rendered."""
+    chain = r.chain_through("agreement")
+    assert chain == ["unit", "db", "app2", "app2_browser", "agreement"]
+    assert chain[-1] == "agreement"
 
 
 # ---------------------------------------------------------------------------
@@ -701,28 +582,28 @@ def test_cmd_triage_state_file_omits_run_id_layer_as_of_anchor(
     assert '"nodeid"' in state_block
     assert '"screen_name"' in state_block
     assert '"cfg_path"' in state_block
-    assert '"qs_cfg_path"' in state_block
-    assert '"deployed"' in state_block
     # Slimmed away.
     assert '"run_id"' not in state_block
     assert '"layer"' not in state_block
     assert '"as_of_anchor"' not in state_block
+    # DW.11 — QuickSight gone: no QS-side cfg, no deploy prediction.
+    assert '"qs_cfg_path"' not in state_block
+    assert '"deployed"' not in state_block
 
 
 def test_cmd_triage_body_drops_inline_deploy_block() -> None:
-    """DI phase: cmd_triage no longer calls ``_build_deploy_command``
-    or ``_spawn_with_tee`` from inside its body. Deploy is owned by
-    the session-autouse qs_deployed fixture in tests/e2e/conftest.py;
-    cmd_triage's body purely sets up env + spawns the screen session
-    that fires pytest (which fires the fixture).
+    """cmd_triage doesn't call ``_build_deploy_command`` or
+    ``_spawn_with_tee`` from inside its body — its body purely sets up
+    env + spawns the screen session that fires pytest. (DW.5.2: with
+    QuickSight removed there is no deploy at all; this lock survives as
+    a guard against a future inline-deploy callsite creeping back in.)
     """
     import inspect
     cmd_triage_source = inspect.getsource(r.cmd_triage)
     # The old block called these helpers directly from cmd_triage's
     # body; deploy retirement removed those callsites.
     assert "_build_deploy_command(" not in cmd_triage_source, (
-        "cmd_triage should not call _build_deploy_command — deploy "
-        "is owned by tests/e2e/conftest.py::qs_deployed."
+        "cmd_triage should not call _build_deploy_command inline."
     )
     # _spawn_with_tee survives elsewhere in cmd_triage's flow (for
     # things like sweep / seed); the assertion that proves deploy is
@@ -730,10 +611,9 @@ def test_cmd_triage_body_drops_inline_deploy_block() -> None:
 
 
 def test_cmd_triage_no_inline_deploy_step_log_string() -> None:
-    """DI phase: the operator-facing deploy-step banner
+    """The operator-facing deploy-step banner
     (``runner: deploying QS resources``) is gone from cmd_triage.
-    The qs_deployed fixture prints its own banner from inside the
-    pytest session.
+    (DW.5.2: QuickSight removed — there is no deploy step.)
     """
     import inspect
     cmd_triage_source = inspect.getsource(r.cmd_triage)

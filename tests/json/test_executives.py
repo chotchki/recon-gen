@@ -12,11 +12,9 @@ for invariant checks (dataset / filter / visual presence).
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from click.testing import CliRunner
 
 from recon_gen.apps.executives.app import (
     SHEET_EXEC_ACCOUNT_COVERAGE,
@@ -32,14 +30,13 @@ from recon_gen.apps.executives.datasets import (
     EXEC_TRANSACTION_SUMMARY_CONTRACT,
     build_all_datasets,
 )
-from recon_gen.cli import main
 from recon_gen.common.spine._emit_helpers import DEFAULT_PREFIX
 from tests._test_helpers import make_test_config
 
 if TYPE_CHECKING:
-    from recon_gen.common.models import Analysis as _ModelsAnalysis
-    from recon_gen.common.models import SheetDefinition as _SheetDefinition
+    from recon_gen.common.tree import Analysis as _TreeAnalysis
     from recon_gen.common.tree import App as _App
+    from recon_gen.common.tree import Sheet as _TreeSheet
 
 
 # N.4.b: Executives is now L2-fed and requires the cfg's db_table_prefix
@@ -51,29 +48,35 @@ _TEST_CFG = make_test_config(db_table_prefix=DEFAULT_PREFIX)
 
 @pytest.fixture(scope="module")
 def exec_app() -> "_App":
-    """Tree-built Executives App (post-emit, auto-IDs resolved)."""
+    """Tree-built Executives App (auto-IDs resolved).
+
+    DW.1 — the tree IS the source of truth; resolve_auto_ids() stamps
+    visual / drill IDs without round-tripping through the QS-API
+    serializers (being deleted in DW.8)."""
     app = build_executives_app(_TEST_CFG)
-    app.emit_analysis()
+    app.resolve_auto_ids()
     return app
 
 
 @pytest.fixture(scope="module")
-def exec_analysis(exec_app: "_App") -> "_ModelsAnalysis":
-    return exec_app.emit_analysis()
+def exec_analysis(exec_app: "_App") -> "_TreeAnalysis":
+    """The App's tree Analysis node — walked directly, never emitted."""
+    assert exec_app.analysis is not None
+    return exec_app.analysis
 
 
 # ---------------------------------------------------------------------------
 # Top-level shape
 # ---------------------------------------------------------------------------
 
-def test_analysis_has_six_sheets_in_expected_order(exec_analysis: "_ModelsAnalysis") -> None:
+def test_analysis_has_six_sheets_in_expected_order(exec_analysis: "_TreeAnalysis") -> None:
     """5 content sheets + the M.4.4.5 App Info ("i") sheet last.
     CF.2 inserted Program Health between Getting Started and Account
     Coverage so the board-cadence tripwire reads before the volume
     tabs."""
     from recon_gen.apps.executives.app import SHEET_EXEC_APP_INFO
 
-    sheet_ids = [s.SheetId for s in exec_analysis.Definition.Sheets]
+    sheet_ids = [s.sheet_id for s in exec_analysis.sheets]
     assert sheet_ids == [
         SHEET_EXEC_GETTING_STARTED,
         SHEET_EXEC_PROGRAM_HEALTH,
@@ -84,38 +87,44 @@ def test_analysis_has_six_sheets_in_expected_order(exec_analysis: "_ModelsAnalys
     ]
 
 
-def test_analysis_name_is_executives(exec_analysis: "_ModelsAnalysis") -> None:
+def test_analysis_name_is_executives(exec_analysis: "_TreeAnalysis") -> None:
     # Z.C — every L2-fed app's analysis name follows the
     # ``Name (deployment_name)`` shape so multi-deploy QS accounts are
     # visually distinguishable in the dashboard list. Replaces the
     # prior ``(instance)`` shape (instance was auto-stamped from the
     # L2 yaml; now lives on cfg.aws.deployment_name).
-    assert exec_analysis.Name == f"Executives ({_TEST_CFG.aws.deployment_name})"
+    assert exec_analysis.name == f"Executives ({_TEST_CFG.aws.deployment_name})"
 
 
-def test_analysis_serializes_to_aws_json(exec_analysis: "_ModelsAnalysis") -> None:
-    """to_aws_json() must succeed end-to-end — no None-strip crashes."""
-    j = exec_analysis.to_aws_json()
-    assert j["AnalysisId"] == _TEST_CFG.aws.prefixed("executives-analysis")
-    assert len(j["Definition"]["Sheets"]) == 6
+def test_analysis_id_and_sheet_count(exec_analysis: "_TreeAnalysis") -> None:
+    """DW.1 — the QS-API serialization round-trip is gone (the emitter
+    is being deleted in DW.8); keep the two structural checks it carried:
+    the analysis-id suffix reconstructs the emitted AnalysisId, and the
+    six-sheet count holds — both walked off the tree, no emit."""
+    assert _TEST_CFG.aws.prefixed(exec_analysis.analysis_id_suffix) == (
+        _TEST_CFG.aws.prefixed("executives-analysis")
+    )
+    assert len(exec_analysis.sheets) == 6
 
 
 def test_dashboard_mirrors_analysis(exec_app: "_App") -> None:
-    dashboard = exec_app.emit_dashboard()
-    assert dashboard.DashboardId == _TEST_CFG.aws.prefixed(
-        "executives-dashboard",
+    """The Dashboard tree node publishes the SAME Analysis the App owns
+    (object ref, not a re-emitted copy), so it mirrors by construction.
+    Tree-walk: the DashboardId reconstructs via cfg.aws.prefixed and the
+    dashboard points back at the App's analysis — no emit."""
+    assert exec_app.dashboard is not None
+    assert exec_app.analysis is not None
+    dashboard_id = exec_app.cfg.aws.prefixed(
+        exec_app.dashboard.dashboard_id_suffix,
     )
-    assert dashboard.Definition.Sheets is not None
-    assert (
-        len(dashboard.Definition.Sheets)
-        == len(exec_app.analysis.sheets)
-    )
+    assert dashboard_id == _TEST_CFG.aws.prefixed("executives-dashboard")
+    assert exec_app.dashboard.analysis is exec_app.analysis
 
 
-def test_every_sheet_has_a_description(exec_analysis: "_ModelsAnalysis") -> None:
-    for sheet in exec_analysis.Definition.Sheets:
-        assert sheet.Description, (
-            f"{sheet.SheetId} is missing a description"
+def test_every_sheet_has_a_description(exec_analysis: "_TreeAnalysis") -> None:
+    for sheet in exec_analysis.sheets:
+        assert sheet.description, (
+            f"{sheet.sheet_id} is missing a description"
         )
 
 
@@ -159,10 +168,15 @@ def test_datasets_in_expected_order():
     )
 
 
-def test_datasets_declared_in_analysis(exec_analysis: "_ModelsAnalysis") -> None:
+def test_datasets_declared_in_analysis(exec_app: "_App") -> None:
     """6 content datasets (CF.2 added program-health rollup; BH.8
     added transaction-legs; Y.2.h split account into base + active;
-    AO.5 added daily rollup) + the 2 M.4.4.5 App Info datasets."""
+    AO.5 added daily rollup) + the 2 M.4.4.5 App Info datasets.
+
+    DW.1 — the emitted ``DataSetIdentifierDeclarations`` were exactly
+    ``[d for d in app.datasets if d in app.dataset_dependencies()]``
+    (registration order, filtered to referenced); reproduce that off the
+    tree directly."""
     from recon_gen.apps.executives.datasets import (
         DS_EXEC_ACCOUNT_SUMMARY_ACTIVE,
         DS_EXEC_PROGRAM_HEALTH,
@@ -175,12 +189,13 @@ def test_datasets_declared_in_analysis(exec_analysis: "_ModelsAnalysis") -> None
         app_info_liveness_id, app_info_matviews_id,
     )
 
-    decls = exec_analysis.Definition.DataSetIdentifierDeclarations
+    deps = exec_app.dataset_dependencies()
+    declared = [ds.identifier for ds in exec_app.datasets if ds in deps]
     # BO.5 — App Info dataset identifiers are per-app-segmented now (the
     # process-global App2 SQL registry would otherwise collide across the
     # four-app server). DK.5.kpi added latest_balance_day as the third
     # App Info dataset.
-    assert [d.Identifier for d in decls] == [
+    assert declared == [
         DS_EXEC_TRANSACTION_SUMMARY,
         DS_EXEC_TRANSACTION_DAILY,
         DS_EXEC_TRANSACTION_LEGS,
@@ -222,7 +237,7 @@ def test_transaction_summary_sql_aggregates_per_transfer():
     CTE stays in the SQL."""
     datasets = build_all_datasets(_TEST_CFG)
     txn_ds = datasets[0]
-    sql = next(iter(txn_ds.PhysicalTableMap.values())).CustomSql.SqlQuery
+    sql = txn_ds.sql
     assert "WITH per_transfer AS" in sql, (
         "exec_transaction_summary must aggregate per transfer_id first"
     )
@@ -243,7 +258,7 @@ def test_account_summary_sql_left_joins_activity():
     # BH.8 follow-up shifted account_summary to index 3 (after the
     # transaction-legs dataset at index 2; transaction-daily is index 1).
     acct_ds = datasets[3]
-    sql = next(iter(acct_ds.PhysicalTableMap.values())).CustomSql.SqlQuery
+    sql = acct_ds.sql
     assert "LEFT JOIN activity" in sql
 
 
@@ -273,7 +288,7 @@ def test_both_content_datasets_filter_to_status_posted():
     for ds in build_all_datasets(_TEST_CFG):
         if ds.DataSetId in skip_ids:
             continue
-        sql = next(iter(ds.PhysicalTableMap.values())).CustomSql.SqlQuery
+        sql = ds.sql
         assert "status = 'Posted'" in sql, (
             f"{ds.DataSetId} must filter status='Posted'"
         )
@@ -283,19 +298,17 @@ def test_both_content_datasets_filter_to_status_posted():
 # Account Coverage sheet
 # ---------------------------------------------------------------------------
 
-def _visual_ids(sheet: "_SheetDefinition") -> list[str]:
-    out: list[str] = []
-    for v in sheet.Visuals or []:
-        for body in vars(v).values():
-            if body is not None and hasattr(body, "VisualId"):
-                out.append(body.VisualId)
-    return out
+def _visual_ids(sheet: "_TreeSheet") -> list[str]:
+    """Tree-walk: each typed Visual subtype carries its own
+    ``visual_id`` (resolved by ``App.resolve_auto_ids()``). The
+    Executives visuals all pin explicit IDs."""
+    return [str(v.visual_id) for v in sheet.visuals]
 
 
-def test_account_coverage_has_kpis_bars_and_table(exec_analysis: "_ModelsAnalysis") -> None:
+def test_account_coverage_has_kpis_bars_and_table(exec_analysis: "_TreeAnalysis") -> None:
     sheet = next(
-        s for s in exec_analysis.Definition.Sheets
-        if s.SheetId == SHEET_EXEC_ACCOUNT_COVERAGE
+        s for s in exec_analysis.sheets
+        if s.sheet_id == SHEET_EXEC_ACCOUNT_COVERAGE
     )
     expected = {
         "exec-account-kpi-open",
@@ -307,48 +320,42 @@ def test_account_coverage_has_kpis_bars_and_table(exec_analysis: "_ModelsAnalysi
     assert set(_visual_ids(sheet)) == expected
 
 
-def test_account_coverage_legacy_active_filter_dropped(exec_analysis: "_ModelsAnalysis") -> None:
+def test_account_coverage_legacy_active_filter_dropped(exec_analysis: "_TreeAnalysis") -> None:
     """Y.2.h — the visual-pinned ``NumericRangeFilter`` that narrowed
     the Active KPI + bar to ``activity_count >= 1`` is gone, replaced
     by ``DS_EXEC_ACCOUNT_SUMMARY_ACTIVE`` whose SQL bakes the
     predicate in. The pinned filter narrowed in QS but not in App2;
     baking it into a second dataset fixes both renderers.
-
-    Phase BM — ``FilterGroups`` may be None entirely now (the per-
-    dataset date ``TimeRangeFilter`` FGs dissolved with the dual-SQL
-    form); coerce to a list before scanning.
     """
-    fgs = exec_analysis.Definition.FilterGroups or []
     legacy_fg_ids = [
-        g.FilterGroupId for g in fgs
-        if g.FilterGroupId == "fg-exec-account-active-only"
+        fg.filter_group_id for fg in exec_analysis.filter_groups
+        if fg.filter_group_id == "fg-exec-account-active-only"
     ]
     assert legacy_fg_ids == [], (
         "fg-exec-account-active-only should be gone after Y.2.h dataset split"
     )
 
 
-def test_account_coverage_active_dataset_declared(exec_analysis: "_ModelsAnalysis") -> None:
+def test_account_coverage_active_dataset_declared(exec_app: "_App") -> None:
     """The Y.2.h active-only dataset is declared on the Executives
-    analysis (so the active KPI + bar can reference it)."""
+    analysis (so the active KPI + bar can reference it). DW.1 — the
+    emitted declarations are exactly the referenced datasets, so a
+    membership check walks ``dataset_dependencies()`` off the tree."""
     from recon_gen.apps.executives.datasets import (
         DS_EXEC_ACCOUNT_SUMMARY_ACTIVE,
     )
-    decls = {
-        d.Identifier
-        for d in exec_analysis.Definition.DataSetIdentifierDeclarations
-    }
-    assert DS_EXEC_ACCOUNT_SUMMARY_ACTIVE in decls
+    declared = {ds.identifier for ds in exec_app.dataset_dependencies()}
+    assert DS_EXEC_ACCOUNT_SUMMARY_ACTIVE in declared
 
 
 # ---------------------------------------------------------------------------
 # Transaction Volume + Money Moved sheets
 # ---------------------------------------------------------------------------
 
-def test_transaction_volume_visuals(exec_analysis: "_ModelsAnalysis") -> None:
+def test_transaction_volume_visuals(exec_analysis: "_TreeAnalysis") -> None:
     sheet = next(
-        s for s in exec_analysis.Definition.Sheets
-        if s.SheetId == SHEET_EXEC_TRANSACTION_VOLUME
+        s for s in exec_analysis.sheets
+        if s.sheet_id == SHEET_EXEC_TRANSACTION_VOLUME
     )
     expected = {
         "exec-txn-kpi-total",
@@ -361,10 +368,10 @@ def test_transaction_volume_visuals(exec_analysis: "_ModelsAnalysis") -> None:
     assert set(_visual_ids(sheet)) == expected
 
 
-def test_money_moved_visuals(exec_analysis: "_ModelsAnalysis") -> None:
+def test_money_moved_visuals(exec_analysis: "_TreeAnalysis") -> None:
     sheet = next(
-        s for s in exec_analysis.Definition.Sheets
-        if s.SheetId == SHEET_EXEC_MONEY_MOVED
+        s for s in exec_analysis.sheets
+        if s.sheet_id == SHEET_EXEC_MONEY_MOVED
     )
     expected = {
         "exec-money-kpi-net",
@@ -379,52 +386,3 @@ def test_money_moved_visuals(exec_analysis: "_ModelsAnalysis") -> None:
 # CLI smoke
 # ---------------------------------------------------------------------------
 
-class TestCli:
-    def _base_config(self, tmp_path: Path) -> Path:
-        p = tmp_path / "config.yaml"
-        p.write_text(
-            # Z.C — required cfg fields (v14 nested shape).
-            "aws:\n"
-            "  account_id: '111122223333'\n"
-            "  region: us-west-2\n"
-            "  deployment_name: recon-exec-cli\n"
-            "  datasource:\n"
-            "    mode: adopt\n"
-            "    arn: arn:aws:quicksight:us-west-2:111122223333:datasource/ds\n"
-            "db:\n"
-            "  dialect: postgres\n"
-            "  table_prefix: spec_example\n"
-        )
-        return p
-
-    def test_json_apply_writes_executives(self, tmp_path: Path):
-        """Q.3.a: ``json apply`` always emits all four apps; verify
-        the executives JSON files land in the output dir."""
-        config = self._base_config(tmp_path)
-        out = tmp_path / "out"
-        runner = CliRunner()
-        result = runner.invoke(
-            main,
-            ["json", "apply", "-c", str(config), "-o", str(out)],
-        )
-        assert result.exit_code == 0, result.output
-        assert (out / "executives-analysis.json").exists()
-        assert (out / "executives-dashboard.json").exists()
-
-    def test_json_apply_writes_all_apps(self, tmp_path: Path):
-        """Q.3.a: ``json apply`` is the single bundled-emit verb;
-        every app's analysis + dashboard JSON must show up."""
-        config = self._base_config(tmp_path)
-        out = tmp_path / "out"
-        runner = CliRunner()
-        result = runner.invoke(
-            main, ["json", "apply", "-c", str(config), "-o", str(out)],
-        )
-        assert result.exit_code == 0, result.output
-        for stem in (
-            "investigation",
-            "executives",
-            "l1-dashboard",
-        ):
-            assert (out / f"{stem}-analysis.json").exists()
-            assert (out / f"{stem}-dashboard.json").exists()

@@ -28,9 +28,10 @@ What's checked across every L2 instance:
 - The metadata-driven dropdowns scale exactly with the L2's declared
   keys; an instance with 5 keys gets 5 dropdowns + 5 parameters; an
   instance with 28 gets 28 + 28.
-- ``emit_analysis()`` + ``emit_dashboard()`` both succeed (full tree
-  validation pass) — catches "L2 instance X has a shape that breaks
-  the tree validator" regressions early.
+- The tree resolves + validates clean for every L2 instance
+  (``resolve_auto_ids`` + the App validator walks) — catches "L2
+  instance X has a shape that breaks the tree validator" regressions
+  early, with no QuickSight emit in the loop (DW.1).
 
 Aurora deploy verification is M.3.10 — this file is unit-test only.
 """
@@ -138,23 +139,13 @@ def test_dataset_count_is_fourteen_per_instance(
     assert len(app.datasets) == 14
 
 
-def test_every_dataset_id_carries_deployment_prefix(
-    l2_instance: L2Instance,
-) -> None:
-    """Z.C — every dataset ID is prefixed by ``cfg.aws.deployment_name``
-    so multiple deploys (dev/staging/prod, or co-tenanted L2s with
-    distinct cfg.yaml) don't collide in the same QS account. Mirrors
-    `test_l1_dashboard_structure.py`'s prefix check."""
-    app = build_l2_flow_tracing_app(_CFG, l2_instance=l2_instance)
-    expected_prefix = f"{_CFG.aws.deployment_name}-"
-    for ds in app.datasets:
-        # The arn carries the dataset ID; pull it out of the ARN's
-        # `:dataset/<id>` suffix.
-        ds_id = ds.arn.rsplit("/", 1)[-1]
-        assert ds_id.startswith(expected_prefix), (
-            f"dataset {ds.identifier!r} ID {ds_id!r} doesn't carry "
-            f"the deployment prefix {expected_prefix!r}"
-        )
+# DW (dead-config sweep) — retired `test_every_dataset_id_carries_deployment_prefix`
+# + `test_deployments_produce_different_dataset_id_namespaces`. Both asserted
+# the deployment-prefixed dataset ID via `ds.arn` (the QuickSight DataSetArn),
+# whose whole purpose was avoiding collisions in a shared QS account. QuickSight
+# is gone, the arn field is gone, and the tree Dataset.identifier is the logical
+# const (never prefixed). The analysis/dashboard-ID prefix test below STAYS —
+# those IDs really are prefixed + URL-facing.
 
 
 def test_analysis_and_dashboard_ids_carry_deployment_prefix(
@@ -162,23 +153,49 @@ def test_analysis_and_dashboard_ids_carry_deployment_prefix(
 ) -> None:
     """Mirror — analysis + dashboard IDs both use the same deployment
     prefix shape so deploys don't collide and cleanup-by-tag scopes
-    correctly."""
+    correctly. Tree-walk: the emitted IDs are
+    ``cfg.aws.prefixed(<suffix>)`` — reconstruct them without emit and
+    pin the full composed shape (prefix + the app's fixed suffix), which
+    stays invariant across L2 instances."""
     app = build_l2_flow_tracing_app(_CFG, l2_instance=l2_instance)
-    analysis = app.emit_analysis()
-    dashboard = app.emit_dashboard()
+    assert app.analysis is not None
+    assert app.dashboard is not None
     expected_prefix = f"{_CFG.aws.deployment_name}-"
-    assert analysis.AnalysisId.startswith(expected_prefix)
-    assert dashboard.DashboardId.startswith(expected_prefix)
+    analysis_id = app.cfg.aws.prefixed(app.analysis.analysis_id_suffix)
+    dashboard_id = app.cfg.aws.prefixed(app.dashboard.dashboard_id_suffix)
+    assert analysis_id.startswith(expected_prefix)
+    assert dashboard_id.startswith(expected_prefix)
+    assert analysis_id == f"{expected_prefix}l2-flow-tracing-analysis"
+    assert dashboard_id == f"{expected_prefix}l2-flow-tracing"
 
 
-def test_emit_analysis_and_dashboard_succeed(
+def test_tree_validates_for_every_l2_instance(
     l2_instance: L2Instance,
 ) -> None:
     """Full tree validation passes for every L2 instance — catches
-    'this YAML produces a shape the validator rejects' regressions."""
+    'this YAML produces a shape the validator rejects' regressions.
+
+    DW.1 — runs the exact validator suite the old QuickSight emit path
+    fired (ID resolution + dataset / calc-field / parameter /
+    filter-settability / drill-destination reference checks + the
+    App2-parity walk), minus the QuickSight model construction that
+    DW.8 deletes. A fuzz YAML whose shape the validators reject raises
+    here, same as it did through the emitter."""
+    from recon_gen.common.tree.app2_parity_registry import check_app2_parity
+
     app = build_l2_flow_tracing_app(_CFG, l2_instance=l2_instance)
-    assert app.emit_analysis() is not None
-    assert app.emit_dashboard() is not None
+    assert app.analysis is not None
+    assert app.dashboard is not None
+    # These are exactly the walks the old QS emit path ran before
+    # building the (being-deleted) QS model — no QuickSight serialization.
+    app.resolve_auto_ids()
+    app._validate_dataset_references()
+    app._validate_calc_field_references()
+    app._validate_parameter_references()
+    app._validate_filter_param_settability()
+    app._validate_drill_destinations()
+    app._validate_no_bare_string_columns()
+    check_app2_parity(app)
 
 
 # -- Metadata cascade — fixed shape per L2 (M.3.10c) ------------------------
@@ -228,32 +245,6 @@ def test_metadata_key_dropdown_binds_to_shared_metadata_keys_dataset(
 
 
 # -- Cross-instance differentiation ------------------------------------------
-
-
-def test_deployments_produce_different_dataset_id_namespaces() -> None:
-    """Sanity: building the same app against two distinct cfgs (different
-    ``deployment_name``) produces non-overlapping dataset ID sets — so a
-    multi-deploy QuickSight account can host both without collision.
-
-    Z.C — the per-deployment namespace lives on cfg.aws.deployment_name (was
-    previously auto-stamped from ``L2Instance.instance``), so the test
-    swaps the cfg per build, not the L2 instance. Two integrators
-    pointing at the same L2 yaml MUST still get isolated namespaces by
-    setting different deployment_names in their cfg.yamls."""
-    from pathlib import Path
-    from recon_gen.common.l2 import load_instance
-
-    sasq = load_instance(
-        Path(__file__).parent.parent / "l2" / "sasquatch_pr.yaml"
-    )
-    cfg_a = make_test_config(aws_deployment_name="recon-deploy-a")
-    cfg_b = make_test_config(aws_deployment_name="recon-deploy-b")
-    a_app = build_l2_flow_tracing_app(cfg_a, l2_instance=sasq)
-    b_app = build_l2_flow_tracing_app(cfg_b, l2_instance=sasq)
-
-    a_ds_ids = {ds.arn.rsplit("/", 1)[-1] for ds in a_app.datasets}
-    b_ds_ids = {ds.arn.rsplit("/", 1)[-1] for ds in b_app.datasets}
-    assert a_ds_ids.isdisjoint(b_ds_ids), (
-        "Deployment-prefix isolation broken — dataset IDs overlap "
-        "between two cfgs with distinct deployment_name values"
-    )
+# (The dataset-ID-namespace-isolation test retired with the QS DataSetArn —
+# see the note above the analysis/dashboard-prefix test. Cross-deployment
+# isolation now rides the analysis/dashboard IDs, which are still prefixed.)

@@ -204,11 +204,11 @@ Once you've decided this product fits your data:
    cleanly. KPIs spiking unexpectedly is the signal to walk
    [What do I do when the demo passes but my prod data fails?](../etl/what-do-i-do-when-demo-passes-but-prod-fails.md)
    with your ETL team.
-4. **Configure the deploy for your AWS account.** Once the
-   data side works, the deployment side is one config file
-   away — that's the
-   [How do I configure the deploy?](how-do-i-configure-the-deploy.md)
-   walkthrough.
+4. **Serve the dashboards yourself.** Once the data side
+   works, the serving side is one command away — point
+   `recon-gen dashboards -c run/config.yaml --l2 <your.yaml>`
+   (or `recon-gen studio` for the full editor) at your config.
+   See [the self-hosting reference](../../reference/self-host.md).
 
 ## Related walkthroughs
 

@@ -253,10 +253,7 @@ def _dataset_running_balance(
     return the ``running_balance`` column in display (posting, id) order
     for ``account_display`` on the picked day."""
     ds = build_daily_statement_transactions_dataset(cfg, default_l2_instance())
-    physical = next(iter(ds.PhysicalTableMap.values()))
-    assert physical.CustomSql is not None
-    sql = physical.CustomSql.SqlQuery
-    assert sql is not None
+    sql = ds.sql
     rows = query_db_via_cfg(
         cfg, sql,
         binds={

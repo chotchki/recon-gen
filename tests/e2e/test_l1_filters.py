@@ -61,8 +61,8 @@ if TYPE_CHECKING:
 pytestmark = [
     pytest.mark.e2e,
     pytest.mark.browser,
-    tier(Tier.QS_BROWSER),
-    needs(Need.AWS_QS, Need.PLAYWRIGHT),
+    tier(Tier.APP2),
+    needs(Need.PLAYWRIGHT),
 ]
 
 
@@ -84,9 +84,7 @@ def _sql_and_params_for(
     ``_l1_default_date_binds(cfg)`` helper needed.
     """
     ds = builder(cfg, l2)
-    physical = next(iter(ds.PhysicalTableMap.values()))
-    assert physical.CustomSql is not None, "Dataset missing CustomSql"
-    return physical.CustomSql.SqlQuery, list(ds.DatasetParameters or [])
+    return ds.sql, list(ds.dataset_params)
 
 
 @pytest.mark.xfail(

@@ -59,8 +59,8 @@ if TYPE_CHECKING:
 pytestmark = [
     pytest.mark.e2e,
     pytest.mark.browser,
-    tier(Tier.QS_BROWSER),
-    needs(Need.AWS_QS, Need.PLAYWRIGHT),
+    tier(Tier.APP2),
+    needs(Need.PLAYWRIGHT),
 ]
 
 
@@ -71,10 +71,7 @@ def _summary_sql_and_params(
     by calling the production builder. BG.2's honest gate compares
     rendered KPI values to the SAME SQL the dashboard issues."""
     ds = build_daily_statement_summary_dataset(cfg, l2)
-    physical = next(iter(ds.PhysicalTableMap.values()))
-    assert physical.CustomSql is not None, "Dataset missing CustomSql"
-    sql_str = physical.CustomSql.SqlQuery
-    return sql_str, list(ds.DatasetParameters or [])
+    return ds.sql, list(ds.dataset_params)
 
 
 # CQ.4 — Daily Statement Account picker (post-Role-cascade-drop) ----------

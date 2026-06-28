@@ -1,25 +1,21 @@
 # Install
 
 `recon-gen` is one PyPI package with opt-in extras. Pick the extra that
-matches what you actually run — the CLI surface is broad (emit JSON,
-deploy to AWS, seed a demo DB, render audit PDFs, build the docs site)
-and each of those surfaces drags an unrelated dependency footprint.
-There are four extras: `[prod]`, `[dev]`, `[e2e]` and `[quicksight]`.
+matches what you actually run — the CLI surface is broad (emit SQL,
+serve the self-hosted dashboards, seed a demo DB, render audit PDFs,
+build the docs site) and each of those surfaces drags an unrelated
+dependency footprint. There are three extras: `[prod]`, `[dev]` and
+`[e2e]`.
 
-> **QuickSight support is being REMOVED.** boto3 — and the AWS
-> QuickSight deploy it powers — now lives behind the optional
-> `[quicksight]` extra, no longer in `[prod]`. That renderer goes away
-> in an upcoming release (Phase DW) — AWS's flat
-> [$250 / account / month infrastructure fee](https://aws.amazon.com/quick/pricing/)
-> (Professional tier and up) doesn't fit an offline-first tool. MIGRATE
-> NOW to the self-hosted dashboards (`recon-gen dashboards` /
-> `recon-gen studio`) — the supported path, no AWS account.
+> The pre-v15 `[quicksight]` extra (AWS QuickSight deploy via boto3) is
+> GONE — the self-hosted dashboards (`recon-gen dashboards` /
+> `recon-gen studio`) are the supported renderer, no AWS account.
 
 The bare install stays tiny on purpose — Click + PyYAML + the Graphviz
-Python wrapper + DuckDB — so anyone who just wants to emit JSON for
-their own deploy pipeline doesn't pull boto3 / reportlab / mkdocs / DB
-drivers. DuckDB rides along in the base because every `recon-gen`
-invocation imports it as the default local dialect.
+Python wrapper + DuckDB — so anyone who just wants to emit the SQL for
+their own pipeline doesn't pull reportlab / mkdocs / DB drivers. DuckDB
+rides along in the base because every `recon-gen` invocation imports it
+as the default local dialect.
 
 See it live: https://recon-gen-spec.hotchkiss.io/
 
@@ -27,11 +23,10 @@ See it live: https://recon-gen-spec.hotchkiss.io/
 
 | Extra | Adds | Unlocks |
 |---|---|---|
-| *(none)* | `click`, `pyyaml`, `graphviz`, `duckdb` | `recon-gen json apply` — emits JSON to disk for hand-off to your own pipeline. No AWS credentials or DB drivers needed |
-| `[prod]` | The App2 server stack (`starlette`, `uvicorn`, `httpx`, `python-multipart`); the auth libs (`authlib`, `pyjwt`, `itsdangerous`); `psycopg[binary,pool]` (PostgreSQL) + `oracledb` thin mode (Oracle); `reportlab` + `pypdf` + `pyhanko`; `mkdocs` + `mkdocs-material` + `mkdocs-click` + `mkdocs-macros-plugin` | Every operator verb EXCEPT the AWS QuickSight deploy (that needs `[quicksight]`). The self-hosted App2 server (`recon-gen dashboards` / `recon-gen studio` — the supported renderer); `schema/data apply --execute` against PostgreSQL 17+ OR Oracle 19c+; `audit apply --execute` (regulator-ready PDF); `docs apply` (build this handbook) + `docs serve` (live-preview this handbook with reload). `oracledb` thin mode needs no Oracle Instant Client install. As of the `[quicksight]` split this no longer pulls `boto3` — a `[prod]` install is QS-free |
-| `[quicksight]` | `boto3` + `botocore[crt]` | The optional AWS QuickSight deploy — `json apply --execute` (push to AWS QuickSight) + `json clean --execute` (sweep `ManagedBy:recon-gen` resources). `botocore[crt]` is needed for AWS SSO (`aws sso login`) auth. **BEING REMOVED** — this renderer goes away in an upcoming release (Phase DW); the self-hosted dashboards are the supported path |
-| `[dev]` | The test + build tooling — `pytest`, `pytest-xdist`, `pyright`, `boto3-stubs`, `testcontainers`, `playwright`, `build`, `twine` — plus the prod runtime deps it tests against | Full developer environment — runs every test suite + type-check. Note: the docs-build deps (`mkdocs` + plugins) live in `[prod]`, not `[dev]`, so use `uv sync --all-extras` when you also want `docs apply` |
-| `[e2e]` | `pytest`, `pytest-xdist`, `boto3`, `botocore[crt]`, `playwright` + the App2 server stack | End-to-end test suite (browser + API) against deployed dashboards. Also requires a one-time `playwright install webkit` to download the browser binary |
+| *(none)* | `click`, `pyyaml`, `graphviz`, `duckdb` | `recon-gen schema apply` / `data apply` (no `--execute`) — emit SQL to disk for hand-off to your own pipeline. No DB drivers needed |
+| `[prod]` | The App2 server stack (`starlette`, `uvicorn`, `httpx`, `python-multipart`); the auth libs (`authlib`, `pyjwt`, `itsdangerous`); `psycopg[binary,pool]` (PostgreSQL) + `oracledb` thin mode (Oracle); `reportlab` + `pypdf` + `pyhanko`; `mkdocs` + `mkdocs-material` + `mkdocs-click` + `mkdocs-macros-plugin` | Every operator verb. The self-hosted App2 server (`recon-gen dashboards` / `recon-gen studio`); `schema/data apply --execute` against PostgreSQL 17+ OR Oracle 19c+; `audit apply --execute` (regulator-ready PDF); `docs apply` (build this handbook) + `docs serve` (live-preview this handbook with reload). `oracledb` thin mode needs no Oracle Instant Client install |
+| `[dev]` | The test + build tooling — `pytest`, `pytest-xdist`, `pyright`, `testcontainers`, `playwright`, `build`, `twine` — plus the prod runtime deps it tests against | Full developer environment — runs every test suite + type-check. Note: the docs-build deps (`mkdocs` + plugins) live in `[prod]`, not `[dev]`, so use `uv sync --all-extras` when you also want `docs apply` |
+| `[e2e]` | `pytest`, `pytest-xdist`, `playwright` + the App2 server stack | End-to-end browser test suite against the self-hosted dashboards. Also requires a one-time `playwright install webkit` to download the browser binary |
 
 Pre-BS.6 the split was per-feature (`[deploy]` / `[demo]` /
 `[demo-oracle]` / `[audit]` / `[docs]` …). Operators always wanted one
@@ -40,30 +35,29 @@ confusion without payoff — collapsed to one knob per persona.
 
 ## Common shapes
 
-### "I just want the JSON"
+### "I just want the SQL"
 
 ```bash
 pip install recon-gen
-recon-gen json apply -c config.yaml -o out/
+recon-gen schema apply -c config.yaml -o out/
+recon-gen data   apply -c config.yaml -o out/
 ```
 
-Writes `out/*.json` for the four bundled apps. Your own pipeline picks
-them up. No AWS credentials or DB drivers needed.
+Writes the schema DDL + seed SQL to `out/`. Your own pipeline picks
+them up. No DB drivers or credentials needed.
 
-### "I want to deploy to AWS"
-
-QuickSight support is BEING REMOVED (Phase DW) — the self-hosted
-dashboards are the supported path. While the renderer is still here,
-its boto3 dependency lives in the `[quicksight]` extra:
+### "I want to see the dashboards"
 
 ```bash
-pip install "recon-gen[prod,quicksight]"
-recon-gen json apply -c config.yaml -o out/ --execute
+pip install "recon-gen[prod]"
+recon-gen dashboards -c config.yaml
 ```
 
-`--execute` does a delete-then-create against AWS QuickSight using
-the credentials your environment already has (env vars, `~/.aws/`,
-SSO session, instance profile).
+Serves the four bundled apps (L1 Dashboard / L2 Flow Tracing /
+Investigation / Executives) over the self-hosted HTMX renderer — no
+AWS account, offline-first. `recon-gen studio` adds the L2 editor +
+data-shaping panel + diagram viewer on top for the offline iteration
+loop.
 
 ### "I want to seed the demo database"
 
@@ -79,7 +73,6 @@ Instant Client needed). Then:
 recon-gen schema apply -c config.yaml --execute
 recon-gen data   apply -c config.yaml --execute
 recon-gen data   refresh -c config.yaml --execute
-recon-gen json   apply -c config.yaml -o out/ --execute
 ```
 
 ### "I want to render the audit PDF"

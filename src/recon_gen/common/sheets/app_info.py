@@ -5,9 +5,9 @@ three things:
 
 1. **Liveness KPI** — counts user-visible tables (Postgres:
    ``information_schema.tables`` filtered to ``public``; Oracle:
-   ``USER_TABLES``). Real query, hits the database, never QS-cached
-   (Direct Query). KPI shows a number → QS rendering pipeline
-   works. KPI blank → QS itself is broken.
+   ``USER_TABLES``). Real query, hits the database every time
+   (Direct Query, no caching). KPI shows a number → the render
+   pipeline works. KPI blank → the renderer itself is broken.
 2. **Per-matview row count table** — caller-supplied list of matview
    names UNION'd into one dataset. Freshly-loaded matviews showing 0
    means the ETL hasn't refreshed them.
@@ -15,9 +15,9 @@ three things:
    at generate time so a viewer can tell which build of the dashboard
    they're looking at.
 
-Diagnostic value: collapses the QS spinner-footgun ladder (Aurora
-returns rows → describe_data_set CREATION_SUCCESSFUL → fresh incognito
-→ assume QS broken; CLAUDE.md ops footgun) to a single glance at "i".
+Diagnostic value: collapses the "did it render or is the DB empty?"
+question to a single glance at "i" — a number means the renderer +
+the data path are both healthy.
 
 Usage from an app's `build_*_app(cfg, ...)`:
 
@@ -39,10 +39,8 @@ matviews_aws = build_matview_status_dataset(
         ...,
     ],
 )
-liveness_ds = Dataset(identifier=app_info_liveness_id("l1"),
-                     arn=cfg.aws.dataset_arn(liveness_aws.DataSetId))
-matviews_ds = Dataset(identifier=app_info_matviews_id("l1"),
-                     arn=cfg.aws.dataset_arn(matviews_aws.DataSetId))
+liveness_ds = Dataset(identifier=app_info_liveness_id("l1"))
+matviews_ds = Dataset(identifier=app_info_matviews_id("l1"))
 
 # As LAST sheet on the analysis:
 app_info_sheet = analysis.add_sheet(Sheet(
@@ -71,11 +69,11 @@ from recon_gen.common.config import Config
 from recon_gen.common.dataset_contract import (
     ColumnSpec,
     DatasetContract,
+    BuiltDataset,
     build_dataset,
 )
 from recon_gen.common.l2 import ThemePreset
 from recon_gen.common.l2.primitives import L2Instance, resolve_cadence
-from recon_gen.common.models import DataSet
 from recon_gen.common.sql import Dialect, dual_from
 from recon_gen.common.tree.datasets import Dataset
 from recon_gen.common.tree.structure import Sheet
@@ -236,7 +234,7 @@ def _matview_status_sql(
 
 def build_latest_balance_day_dataset(
     cfg: Config, *, app_segment: str,
-) -> DataSet:
+) -> BuiltDataset:
     """DK.5.kpi — Latest Balance Day KPI dataset.
 
     Real-query against the DK.1 singleton matview ``<prefix>_data_anchor``.
@@ -267,7 +265,7 @@ def build_latest_balance_day_dataset(
     )
 
 
-def build_liveness_dataset(cfg: Config, *, app_segment: str) -> DataSet:
+def build_liveness_dataset(cfg: Config, *, app_segment: str) -> BuiltDataset:
     """Trivial liveness query against the database catalog.
 
     Postgres queries ``information_schema.tables``; Oracle queries
@@ -299,7 +297,7 @@ def build_liveness_dataset(cfg: Config, *, app_segment: str) -> DataSet:
 
 def build_matview_status_dataset(
     cfg: Config, *, app_segment: str, view_specs: list[ViewSpec],
-) -> DataSet:
+) -> BuiltDataset:
     """Per-matview row count + most-recent date table.
 
     ``view_specs`` is a list of ``(name, date_col)`` tuples — the

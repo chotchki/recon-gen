@@ -60,7 +60,7 @@ If all three conditions are met (recent refresh, non-empty base table, zero Post
 
 ## Cross-sheet drills
 
-This sheet has no click-through drills defined in the current release. To inspect individual transfers or accounts in detail, navigate to the Account Reconciliation dashboard (the main dashboard in your QuickSight console) and open the Transactions sheet.
+This sheet has no click-through drills defined in the current release. To inspect individual transfers or accounts in detail, navigate to the Account Reconciliation dashboard (the main dashboard) and open the Transactions sheet.
 
 ## Related handbook pages
 

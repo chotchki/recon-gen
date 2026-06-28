@@ -23,10 +23,6 @@ common errors:
 - `tier(unit)` + `dialects(...)` → ERROR (unit doesn't open a DB;
   tests that emit + assert SQL strings don't carry a dialects mark —
   they're cross-dialect by construction)
-- `tier(qs_*)` without `aws_qs` in `needs` → ERROR (QS-touching tests
-  must declare the AWS dep so the runner can skip when AWS is paused)
-- `tier(qs_browser)` without `playwright` in `needs` → ERROR (QS embed
-  renders in a browser)
 - `dialects()` empty + tier ≠ unit → WARNING (tier above unit usually
   means a DB is touched; empty dialects is probably an oversight)
 - `l2()` empty + tier ≠ unit → WARNING (same shape as the dialects
@@ -47,13 +43,23 @@ import pytest
 
 class Tier(StrEnum):
     """Test tier — required on every test, exactly one of:
-    `UNIT | DB | APP2 | QS_API | QS_BROWSER`."""
+    `UNIT | DB | APP2 | AGREEMENT`.
+
+    `AGREEMENT` (DW.3) is the high-watermark cross-renderer validator
+    tier — pure JSON-artifact readers that compare what the db + app2
+    producers rendered (scenario_plants ⊆ direct == App2 == PDF). It
+    needs no AWS, no browser, no DB of its own; it reads the artifacts
+    the earlier layers wrote under the shared run dir.
+
+    Browser tests carry `Tier.APP2` + `@pytest.mark.browser`; the
+    runner's terminal `app2_browser` LAYER selects them via the
+    `browser` marker (there is no separate browser *tier*). The
+    QuickSight QS_API / QS_BROWSER tiers were removed in Phase DW."""
 
     UNIT = "unit"
     DB = "db"
     APP2 = "app2"
-    QS_API = "qs_api"
-    QS_BROWSER = "qs_browser"
+    AGREEMENT = "agreement"
 
 
 class Dialect(StrEnum):
@@ -110,13 +116,12 @@ class Need(StrEnum):
 
     DOCKER = "docker"
     PLAYWRIGHT = "playwright"
-    AWS_QS = "aws_qs"
     ORACLEDB_CLIENT = "oracledb_client"
 
 
 def tier(t: Tier) -> pytest.MarkDecorator:
-    """`@tier(Tier.X)` — exactly one of `Tier.UNIT | DB | APP2 | QS_API
-    | QS_BROWSER`. Required on every test."""
+    """`@tier(Tier.X)` — exactly one of `Tier.UNIT | DB | APP2 |
+    AGREEMENT`. Required on every test."""
     return pytest.mark.tier(t.value)
 
 
@@ -229,7 +234,7 @@ def isolation_consumer(scope: IsolationScope) -> pytest.MarkDecorator:
 
     Tests in a consumer file should not write — they trust the
     producer's seeded state and assert against it. Multiple consumer
-    files per scope are expected (one per tier: app2, qs_browser).
+    files per scope are expected (one per tier: db, app2).
     """
     return pytest.mark.isolation_scope(scope.value, "consumer")
 
@@ -277,12 +282,10 @@ def inputs(*nodeids: str) -> pytest.MarkDecorator:
 
     Example shape (agreement-test decomposition):
 
-        @tier(Tier.QS_BROWSER)
-        @needs(Need.AWS_QS, Need.PLAYWRIGHT)
+        @tier(Tier.AGREEMENT)
         @inputs(
             "tests/e2e/db/test_inv_matview_direct.py::test_drift",
             "tests/e2e/app2/test_inv_renders_app2.py::test_drift_sheet",
-            "tests/e2e/qs_browser/test_inv_renders_qs.py::test_drift_sheet",
         )
         def test_inv_agreement_validator_drift(): ...
 
@@ -293,12 +296,12 @@ def inputs(*nodeids: str) -> pytest.MarkDecorator:
     (`<file>::<func>[<param-id>]`).
 
     Runner ordering: the validator can't fire standalone — when the
-    runner runs `--tier=qs_browser` without first running tier=db +
+    runner runs `--tier=agreement` without first running tier=db +
     tier=app2, the artifact reads fail with "missing artifact" by
     design. The validator's place in the chain is at the high
-    watermark (qs_browser tier), which the runner's
-    `unit → db → app2 → deploy → api → browser` chain naturally
-    satisfies via `./run_tests.sh up_to=browser`.
+    watermark (agreement tier), which the runner's
+    `unit → db → app2 → agreement` chain naturally satisfies via
+    `./run_tests.sh up_to=agreement`.
 
     Type intent: `nodeids` are pytest nodeids
     (`<rel_path>::<func>` or `<rel_path>::<Class>::<method>` or those

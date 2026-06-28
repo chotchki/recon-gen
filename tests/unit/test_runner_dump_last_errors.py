@@ -151,7 +151,7 @@ def test_dump_failing_layer_surfaces_header_env_and_traceback(
     run_dir = runs_dir / _RUN_ID_NEW
     run_dir.mkdir()
     _write_layer(
-        run_dir, "sp_pg_aw", "qs_browser",
+        run_dir, "sp_pg_aw", "app2_browser",
         exit_code=1, duration=12.5,
         stdout=_PYTEST_STDOUT_WITH_FAILURE,
         env={
@@ -161,7 +161,7 @@ def test_dump_failing_layer_surfaces_header_env_and_traceback(
         },
     )
     out = _dump(runs_dir)
-    assert "[sp_pg_aw/qs_browser] exit=1 duration=12.5s" in out
+    assert "[sp_pg_aw/app2_browser] exit=1 duration=12.5s" in out
     assert "RECON_GEN_DEPLOYMENT_NAME=recon-sp_pg_aw" in out
     assert "RECON_GEN_FUZZ_SEED=42" in out
     assert "1 FAILED test(s)" in out
@@ -199,7 +199,7 @@ def test_dump_browser_failure_with_capture_dir_no_warning(
     run_dir = runs_dir / _RUN_ID_NEW
     run_dir.mkdir()
     _write_layer(
-        run_dir, "sp_pg_aw", "qs_browser",
+        run_dir, "sp_pg_aw", "app2_browser",
         exit_code=1,
         stdout=_PYTEST_STDOUT_WITH_FAILURE,
     )
@@ -222,7 +222,7 @@ def test_dump_browser_failure_without_capture_warns(runs_dir: Path) -> None:
     run_dir = runs_dir / _RUN_ID_NEW
     run_dir.mkdir()
     _write_layer(
-        run_dir, "sp_pg_aw", "qs_browser",
+        run_dir, "sp_pg_aw", "app2_browser",
         exit_code=1,
         stdout=_PYTEST_STDOUT_WITH_FAILURE,
     )
@@ -240,7 +240,7 @@ def test_dump_browser_failure_with_empty_capture_dir_warns(
     run_dir = runs_dir / _RUN_ID_NEW
     run_dir.mkdir()
     _write_layer(
-        run_dir, "sp_pg_aw", "qs_browser",
+        run_dir, "sp_pg_aw", "app2_browser",
         exit_code=1,
         stdout=_PYTEST_STDOUT_WITH_FAILURE,
     )
@@ -306,12 +306,12 @@ def test_dump_variant_arg_deprecated_warns_then_ignores(runs_dir: Path) -> None:
     under the run dir, not just the named variant."""
     run_dir = runs_dir / _RUN_ID_NEW
     run_dir.mkdir()
-    _write_layer(run_dir, "sp_pg_aw", "qs_browser", exit_code=1, stdout="FAILED tests/aw.py::test_aw\n")
-    _write_layer(run_dir, "sp_or_lo", "qs_browser", exit_code=1, stdout="FAILED tests/or.py::test_or\n")
+    _write_layer(run_dir, "sp_pg_aw", "app2_browser", exit_code=1, stdout="FAILED tests/aw.py::test_aw\n")
+    _write_layer(run_dir, "sp_or_lo", "app2_browser", exit_code=1, stdout="FAILED tests/or.py::test_or\n")
     out = _dump(runs_dir, variant="sp_pg_aw")
     # Both cells surface — --variant was ignored, no cell narrowing.
-    assert "sp_pg_aw/qs_browser" in out
-    assert "sp_or_lo/qs_browser" in out
+    assert "sp_pg_aw/app2_browser" in out
+    assert "sp_or_lo/app2_browser" in out
 
 
 # -- prelude handling --------------------------------------------------------

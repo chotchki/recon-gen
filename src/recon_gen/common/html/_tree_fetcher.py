@@ -78,7 +78,7 @@ from recon_gen.common.tree.structure import App
 # AO.R.1 — reuse the EXACT label QuickSight stamps on a table header so
 # App2 headers match QS by construction (single source of truth; the
 # AO.R.5 parity gate asserts they stay in lock-step).
-from recon_gen.common.tree.visuals import _field_label
+from recon_gen.common.tree.visuals import field_label
 
 
 # Async fetcher shape — what production callers (the App2 server)
@@ -426,7 +426,7 @@ def _table_column_meta(
 
     - ``label`` ← the dataset contract's ``ColumnSpec.human_name`` (the
       ``display_name`` override or smart-titled snake_case) for every
-      contract column — exactly what QS's ``_field_label`` resolves to.
+      contract column — exactly what QS's ``field_label`` resolves to.
     - ``format`` ← the visual's field leaves: a ``Measure`` formats as
       ``"currency"`` (when ``currency=True``) else ``"number"``; a ``Dim``
       formats as ``"currency"`` only when it carries ``currency=True``.
@@ -479,10 +479,10 @@ def _table_column_meta(
             name = _leaf_column_name(item)
             if name is None:
                 continue
-            # Authoritative header — the same _field_label QS emits as the
+            # Authoritative header — the same field_label QS emits as the
             # column's CustomLabel (overrides the contract entry for calc
             # fields, which aren't in the contract).
-            labels[name] = _field_label(item)
+            labels[name] = field_label(item)
             if isinstance(item, Measure):
                 formats[name] = "currency" if getattr(item, "currency", False) else "number"
             elif getattr(item, "currency", False):
@@ -517,7 +517,7 @@ def _chart_meta(visual: Any) -> _ChartMeta | None:  # typing-smell: ignore[expli
     - ``series_column_name`` ← the BarChart's first ``colors`` dim (the
       stacked/grouped series); ``None`` when there's no series dim.
     - ``x_label`` / ``y_label`` ← the author's ``category_label`` /
-      ``value_label`` override, else ``_field_label`` of the first
+      ``value_label`` override, else ``field_label`` of the first
       category / value leaf (the same human label QS axis-labels with).
     - ``value_format`` ← ``"currency"`` when the first value measure is
       ``currency=True``, else ``"number"``.
@@ -532,8 +532,8 @@ def _chart_meta(visual: Any) -> _ChartMeta | None:  # typing-smell: ignore[expli
         return None
     colors = getattr(visual, "colors", []) or []
     series_name = _leaf_column_name(colors[0]) if colors else None
-    x_label = getattr(visual, "category_label", None) or _field_label(cats[0])
-    y_label = getattr(visual, "value_label", None) or _field_label(vals[0])
+    x_label = getattr(visual, "category_label", None) or field_label(cats[0])
+    y_label = getattr(visual, "value_label", None) or field_label(vals[0])
     value_format = "currency" if getattr(vals[0], "currency", False) else "number"
     stacked = getattr(visual, "bars_arrangement", None) in (
         "STACKED", "STACKED_PERCENT",
@@ -542,7 +542,7 @@ def _chart_meta(visual: Any) -> _ChartMeta | None:  # typing-smell: ignore[expli
     # Phase DB.1.1 — orientation + color_label parity with QS.
     # ``orientation`` only meaningful on BarChart; LineChart leaves the
     # default "VERTICAL" (no horizontal-line idiom). ``color_label``
-    # falls back to the colors-dim's _field_label when the author
+    # falls back to the colors-dim's field_label when the author
     # didn't override — same fallback chain as x_label / y_label so
     # multi-series charts always show a legend header.
     orientation = getattr(visual, "orientation", None) or "VERTICAL"
@@ -551,7 +551,7 @@ def _chart_meta(visual: Any) -> _ChartMeta | None:  # typing-smell: ignore[expli
     if author_color_label is not None:
         color_label = author_color_label
     elif colors:
-        color_label = _field_label(colors[0])
+        color_label = field_label(colors[0])
     # DB.1.4 — LineChart Type. Default "LINE" for BarChart + un-typed
     # LineChart; visual.chart_type is None when the author didn't
     # override (LineChart's default).
@@ -1053,16 +1053,15 @@ def get_picker_matview_hint(
 
 # DM.2 — App2-side cascade narrowing for the options-search fetcher.
 #
-# The QS-side cascade (``CascadingControlConfiguration``) can't be
-# emitted when the source dropdown is ``app2_only`` (DM.0.5 renderer
-# gate) — and CQ.4.a de-parameterized the picker dataset (so there's no
-# ``<<$pRole>>`` placeholder to substitute) because QS's
-# ``GetUniqueAttributeValuesSyncForAnalysis`` can't execute parameterized
-# picker datasets. App2 therefore narrows the picker's option universe
-# DYNAMICALLY in the fetcher: the dataset SQL stays unparameterized
-# (QS keeps working), and App2 wraps the same SQL with an extra
-# ``AND <match_column> IN (<source picked values>)`` predicate built from
-# the live form state at fetch time. Generic over any cascade dropdown
+# CQ.4.a de-parameterized the picker dataset (so there's no
+# ``<<$pRole>>`` placeholder to substitute) — QS's
+# ``GetUniqueAttributeValuesSyncForAnalysis`` couldn't execute
+# parameterized picker datasets, and the QS-side cascade never worked.
+# App2 narrows the picker's option universe DYNAMICALLY in the fetcher:
+# the dataset SQL stays unparameterized, and App2 wraps the same SQL
+# with an extra ``AND <match_column> IN (<source picked values>)``
+# predicate built from the live form state at fetch time. Generic over
+# any cascade dropdown
 # — driven by the tree-derived ``CascadeMap``, not hardcoded to
 # ``pL1DsRole`` / ``account_role``.
 class CascadeRule(NamedTuple):

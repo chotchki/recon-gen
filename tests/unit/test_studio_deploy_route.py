@@ -48,19 +48,12 @@ def writable_l2_yaml(tmp_path: Path) -> Iterator[Path]:
 
 
 def _duckdb_cfg(tmp_path: Path, **overrides: object) -> Config:
-    from recon_gen.common.config import App2Config, DatasourceConfig
+    from recon_gen.common.config import App2Config
     db_path = tmp_path / "demo.duckdb"
     # DE.5 step 17 — etl_hook lives on App2Config.
     etl_hook = overrides.pop("etl_hook", None)
     base = Config(
-        aws=AwsConfig(
-            account_id="111122223333", region="us-east-1",
-            deployment_name="recon-test",
-            datasource=DatasourceConfig(
-                mode="adopt",
-                arn="arn:aws:quicksight:us-east-1:111122223333:datasource/x",
-            ),
-        ),
+        aws=AwsConfig(deployment_name="recon-test"),
         db=DbConfig(table_prefix="test", url=make_demo_database_url(Dialect.DUCKDB, db_path), dialect=Dialect.DUCKDB),
         app2=App2Config(etl_hook=str(etl_hook) if etl_hook is not None else None),
     )

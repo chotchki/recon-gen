@@ -1,8 +1,9 @@
-"""Compose rich-text XML for QuickSight ``SheetTextBox.Content``.
+"""Compose rich-text XML for tree text-box content.
 
-QuickSight accepts a small XML dialect inside a single ``<text-box>`` root
-(undocumented — full set confirmed by round-tripping a UI-authored text box
-that exercised every formatting button via ``describe-analysis-definition``):
+The text box accepts a small XML dialect inside a single ``<text-box>``
+root (originally the QuickSight ``SheetTextBox.Content`` format, reverse-
+engineered by round-tripping a UI-authored text box; App2 renders the
+same dialect to Tailwind HTML — [[project_qs_text_box_rich_formatting]]):
 
 * ``<inline ...>text</inline>`` — styled run; attrs ``font-size="36px"``,
   ``color="#hex"``, ``background-color="#hex"`` (highlight), ``font-family="Name"``

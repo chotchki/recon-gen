@@ -1,12 +1,13 @@
-"""Phase DB.2 — App2-consumed-attribute registry + construction-time gate.
+"""App2 field-consumption registry + construction-time completeness gate.
 
-The DA-shape parity gap that this gate exists to catch:
+Originally a DB.2 App2-vs-QuickSight parity gate; post-DW, with the QS
+renderer gone, it's a single-renderer completeness gate. The gap it
+catches:
 
 1. An author adds a field to a Visual dataclass.
-2. The field flows into `Visual.emit()` and lands in the QS JSON.
-3. App2's `_VisualPlan` extraction and renderer never read it.
-4. QS renders the new feature; App2 silently drops it.
-5. Months later an operator dogfoods and notices the divergence.
+2. App2's `_VisualPlan` extraction and renderer never read it.
+3. The field silently does nothing — the author believes it's wired.
+4. Months later an operator dogfoods and notices the missing behavior.
 
 This gate fires at `App.resolve_auto_ids()` time. It walks every Visual
 on the analysis, lists each settable dataclass field, and looks each
@@ -15,15 +16,10 @@ one up in `APP2_ATTRIBUTE_REGISTRY`. A missing entry raises
 add the missing entry.
 
 The registry is the typed source of truth: adding a field forces the
-author to declare its parity disposition — App2 consumes it (and how),
-tree-only / construction-only (no QS render either), or operator-locked
-by-design divergence (with a `PARITY_BREAKS` cross-reference).
-
-Hardcoded-emit inventory: a separate small section captures `emit()`
-literal hardcodes that don't trace to a dataclass field but still
-affect QS rendering (e.g. `KPI.emit()` hardcodes `KPIOptions.Comparison.
-ComparisonMethod="PERCENT_DIFFERENCE"`). Operator-locked at the DB.0
-audit: capture these one-time, doesn't grow per-Visual.
+author to declare its disposition — App2 consumes it (and how), it's
+tree-only / construction-only (no rendered representation at all), or
+App2 deliberately doesn't render it yet (a known capability gap, with
+an inline reason).
 """
 
 from __future__ import annotations
@@ -46,8 +42,8 @@ class App2Consumed:
 
 @dataclass(frozen=True)
 class TreeOnly:
-    """The field affects tree construction or QS-only validation, with
-    no corresponding visual representation that App2 would render.
+    """The field affects tree construction or validation only, with no
+    corresponding visual representation that App2 would render.
     Examples: ``visual_id`` (App2 derives section ID from URL params,
     not the tree field), validation-only ``__post_init__`` flags."""
     reason: str
@@ -55,10 +51,11 @@ class TreeOnly:
 
 @dataclass(frozen=True)
 class ByDesign:
-    """Operator-locked divergence — App2 deliberately doesn't honor.
-    Cross-references the ``PARITY_BREAKS`` registry entry name so the
-    full justification lives in one place."""
-    parity_break: str
+    """App2 deliberately doesn't render this field — a known, accepted
+    capability gap (not an oversight). ``reason`` carries the inline
+    justification so the disposition is self-documenting at the wiring
+    site."""
+    reason: str
 
 
 _Entry = Union[App2Consumed, TreeOnly, ByDesign]
@@ -126,7 +123,8 @@ APP2_ATTRIBUTE_REGISTRY: Final[dict[str, dict[str, _Entry]]] = {
             consumer="_extract_table_sort_default -> URL sort_column",
         ),
         "actions": ByDesign(
-            parity_break="chart_visual_drill_clicks_unsupported_app2_only_table_drill",
+            reason="App2 renders row-level table drills only; chart-visual "
+            "drill-clicks aren't a supported affordance.",
         ),
         "log_scale": App2Consumed(consumer="_ChartMeta.log_scale (BQ.5)"),
     },
@@ -146,7 +144,8 @@ APP2_ATTRIBUTE_REGISTRY: Final[dict[str, dict[str, _Entry]]] = {
             consumer="_extract_table_sort_default -> URL sort_column",
         ),
         "actions": ByDesign(
-            parity_break="chart_visual_drill_clicks_unsupported_app2_only_table_drill",
+            reason="App2 renders row-level table drills only; chart-visual "
+            "drill-clicks aren't a supported affordance.",
         ),
     },
     "Sankey": {
@@ -160,102 +159,21 @@ APP2_ATTRIBUTE_REGISTRY: Final[dict[str, dict[str, _Entry]]] = {
             consumer="_VisualPlan.sankey_items_limit (Phase DB.1.2)",
         ),
         "actions": ByDesign(
-            parity_break="chart_visual_drill_clicks_unsupported_app2_only_table_drill",
+            reason="App2 renders row-level table drills only; chart-visual "
+            "drill-clicks aren't a supported affordance.",
         ),
     },
     "ForceGraph": {
-        # ForceGraph is App2-only by design (HARD_DIVERGENT in
-        # PARITY_BREAKS) — emit() raises so QS divergence is N/A.
+        # ForceGraph is an App2-only visual — there was never a QS
+        # equivalent; its fields are all App2-rendered or tree-only.
         "title": App2Consumed(consumer="render.py emit_html title block"),
         "subtitle": App2Consumed(consumer="render.py emit_html subtitle block"),
         "visual_id": TreeOnly(reason="section ID derives from URL routing"),
         "actions": TreeOnly(
-            reason="ForceGraph is App2-only; QS never sees the actions",
+            reason="ForceGraph carries no drill affordance in App2",
         ),
     },
 }
-
-
-@dataclass(frozen=True)
-class _HardcodedEmit:
-    """One emit() literal hardcode — operator-locked inventory of
-    JSON paths the tree fixes at emit time without an authoring
-    dataclass field. Each entry names the visual, the JSON path the
-    emit writes, the literal value, and whether App2 needs to consume
-    or stay deliberately divergent.
-    """
-    visual: str
-    emit_path: str
-    value: str
-    disposition: _Entry
-
-
-# Hardcoded-emit inventory — emit() literals captured one-time per the
-# DB.0 operator lock. NOT walked by the construction-time gate (the
-# gate covers dataclass fields). Future-proofs by giving a single
-# searchable surface for "what does QS render that we hardcode?".
-HARDCODED_EMIT_INVENTORY: Final[tuple[_HardcodedEmit, ...]] = (
-    _HardcodedEmit(
-        visual="KPI",
-        emit_path="KPIOptions.Comparison.ComparisonMethod",
-        value="PERCENT_DIFFERENCE",
-        disposition=ByDesign(
-            parity_break="kpi_no_target_no_comparison_rendered",
-        ),
-    ),
-    _HardcodedEmit(
-        visual="KPI",
-        emit_path="KPIOptions.PrimaryValueDisplayType",
-        value="ACTUAL",
-        disposition=App2Consumed(consumer="App2 always renders ACTUAL (no toggle)"),
-    ),
-    _HardcodedEmit(
-        visual="KPI",
-        emit_path="KPIOptions.Sparkline.Visibility",
-        value="HIDDEN",
-        disposition=ByDesign(
-            parity_break="kpi_sparkline_no_trend_data_source_yet",
-        ),
-    ),
-    _HardcodedEmit(
-        visual="KPI",
-        emit_path="KPIOptions.VisualLayoutOptions.StandardLayout.Type",
-        value="VERTICAL",
-        disposition=App2Consumed(consumer="App2 always renders vertical KPI"),
-    ),
-    _HardcodedEmit(
-        visual="KPI",
-        emit_path="KPIFieldWells.TargetValues",
-        value="[]",
-        disposition=ByDesign(
-            parity_break="kpi_no_target_no_comparison_rendered",
-        ),
-    ),
-    _HardcodedEmit(
-        visual="KPI",
-        emit_path="KPIFieldWells.TrendGroups",
-        value="[]",
-        disposition=ByDesign(
-            parity_break="kpi_sparkline_no_trend_data_source_yet",
-        ),
-    ),
-    _HardcodedEmit(
-        visual="Sankey",
-        emit_path="SankeyDiagramSortConfiguration.WeightSort.Direction",
-        value="DESC",
-        disposition=App2Consumed(
-            consumer="shape_sankey aggregates DESC by construction",
-        ),
-    ),
-    _HardcodedEmit(
-        visual="Sankey",
-        emit_path="SankeyDiagramSortConfiguration.*ItemsLimit.OtherCategories",
-        value="INCLUDE",
-        disposition=App2Consumed(
-            consumer="shape_sankey (others) rollup (Phase DB.1.2)",
-        ),
-    ),
-)
 
 
 # Visual kinds we expect to find on the analysis. Anything else

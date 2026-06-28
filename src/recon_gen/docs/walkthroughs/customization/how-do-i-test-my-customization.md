@@ -25,21 +25,22 @@ where do I add a test for the change I just made?"
 ## Where to look
 
 The test suite runs as a layered chain — `./run_tests.sh
-up_to=<layer>` walks `unit → db → app2 → qs_api → qs_browser` and
+up_to=<layer>` walks `unit → db → app2` and
 running layer N runs every layer before it. Three reference points
 for a customization:
 
 - **`tests/`** — the shipped pytest tree. The fast tiers (`tests/unit`,
-  `tests/data`, `tests/json`) run with no AWS and no live DB; the
-  e2e tiers under `tests/e2e/` hit containers and a real AWS account.
+  `tests/data`, `tests/json`) run with no live DB; the
+  e2e tiers under `tests/e2e/` spin up containers and serve the
+  self-hosted dashboards.
 - **`tests/json/test_dataset_contract.py`** — the contract test.
   For every dataset, asserts the SQL projection's column shape
   matches the declared `DatasetContract`. This is the test that
   catches contract drift after a SQL swap.
-- **`./run_tests.sh up_to=qs_browser`** — the full chain: it
-  regenerates JSON, deploys idempotently (the `qs_deployed` autouse
-  fixture owns the deploy) and runs the e2e tiers against AWS. Run
-  it before declaring a customization production-ready.
+- **`./run_tests.sh up_to=app2`** — the full chain: it spins the
+  container, serves the self-hosted dashboards and runs the e2e
+  tiers against them. Run it before declaring a customization
+  production-ready.
 
 ## What you'll see in the demo
 
@@ -49,7 +50,7 @@ The fast tier:
 ./run_tests.sh up_to=unit
 ```
 
-Runs the no-AWS, no-DB tiers (`tests/unit`, `tests/json`,
+Runs the no-DB tiers (`tests/unit`, `tests/json`,
 `tests/cli` and friends) — ~20s on a fresh laptop. The contract
 tests alone run in well under a second. Note it does NOT run
 `tests/data` (the demo-seed / semantic-lock tier, Classes 2 and 3
@@ -59,13 +60,12 @@ never fires.
 The full chain:
 
 ```bash
-./run_tests.sh up_to=qs_browser
+./run_tests.sh up_to=app2
 ```
 
-Regenerates JSON, deploys to the AWS account your cfg points at,
-then runs the API + browser tiers. Wall time is ~15-25 min (the
-deploy alone is several minutes; the browser tier runs under
-pytest-xdist).
+Spins the container, serves the self-hosted dashboards, then runs
+the browser tier against them (it runs under pytest-xdist and
+dominates wall time).
 
 For a single test, bare pytest is fine when you're iterating on one
 file:
@@ -79,20 +79,20 @@ first column of each contract (e.g. `account_id` for
 `OVERDRAFT_CONTRACT`). Use this to narrow to one customization at a
 time during iteration. For layered work — anything above one file —
 go through `./run_tests.sh`, not bare pytest; the runner sets up the
-container + deploy fixtures the e2e tiers depend on.
+container + server fixtures the e2e tiers depend on.
 
 ## What it means
 
 The shipped tests sort into four classes by the breakage they catch.
 Class 1 lives in the fast `unit` tier, which `up_to=unit` runs.
-Classes 2 and 3 live in `tests/data` — also no-AWS and no-DB, but the
+Classes 2 and 3 live in `tests/data` — also no-DB, but the
 `up_to=unit` command does NOT run them, so a seed edit needs them
 invoked explicitly. The fourth is the e2e end of the chain
-(`db → app2 → qs_api → qs_browser`).
+(`db → app2`).
 
 ### Class 1 — Unit tests (`tests/unit/`)
 
-Fast. No AWS. No database. Pure-Python assertions about the
+Fast. No database. Pure-Python assertions about the
 generator's output.
 
 - **`tests/json/test_dataset_contract.py`** — the SQL projection
@@ -165,29 +165,25 @@ update the matching test expectation alongside the schema change.
 
 ### Class 4 — End-to-end (`tests/e2e/`)
 
-The expensive end of the chain. Two sub-tiers:
-
-- **API tests (`@pytest.mark.api`)** — boto3 calls against the
-  deployed AWS resources. Asserts dataset row counts, dashboard
-  structure, sheet inventory and drill-action wiring. Catches "the
-  dataset deployed but returns zero rows for the customer's data" —
-  the failure mode the contract test CAN'T catch.
-- **Browser tests (`@pytest.mark.browser`)** — Playwright WebKit
-  headless. Loads the deployed dashboard, clicks through tabs and
-  asserts visual rendering + filter interactions. Catches "the
-  dashboard deployed but the visual layer is broken because of a
-  column the dataset no longer emits."
+The expensive end of the chain. The browser tier (`@pytest.mark.browser`)
+is Playwright WebKit headless: it loads the self-hosted dashboard
+server, clicks through tabs and asserts visual rendering + filter
+interactions against a real container's data. Catches the two
+failure modes the contract test CAN'T — "the dataset returns zero
+rows for the customer's data" and "the dashboard renders but the
+visual layer is broken because of a column the dataset no longer
+emits."
 
 Run the full chain once before declaring a customization
 production-ready:
 
 ```bash
-./run_tests.sh up_to=qs_browser
+./run_tests.sh up_to=app2
 ```
 
 To drive a single failing e2e test interactively (spin the
-container, deploy, drop into pdb against the live fixtures) reach for
-the triage verb instead of a hand-rolled setup:
+container, serve the dashboards, drop into pdb against the live
+fixtures) reach for the triage verb instead of a hand-rolled setup:
 
 ```bash
 ./run_tests.sh triage tests/e2e/test_l1_filters.py::test_check_type_dropdown_exposes_options
@@ -250,7 +246,7 @@ existing one to fire on a new `rail_name`), add an e2e test that
 verifies the visual layer surfaces it. e2e tests drive through a
 `DashboardDriver` (`tests/e2e/_drivers/`), never raw Playwright —
 the `l1_dashboard_driver` fixture yields `(driver, dashboard_arg)`
-parametrized over both renderers (`qs` + `app2`):
+for the self-hosted renderer:
 
 ```python
 # tests/e2e/test_repo_exception_check.py
@@ -264,8 +260,7 @@ def test_repo_transfers_appear_in_rail_filter(l1_dashboard_driver):
 ```
 
 New tests follow the existing patterns — `tests/e2e/test_l1_*.py`
-is the canonical reference for the driver verbs and the parametrized
-fixture.
+is the canonical reference for the driver verbs and the fixture.
 
 ### When to add a test vs trust the contract test
 
@@ -294,17 +289,12 @@ deploy.
 
 The shipped GitHub Actions workflow (`.github/workflows/ci.yml`)
 runs the SAME `./run_tests.sh` chain CI and local both invoke,
-including the e2e tiers, on a self-hosted runner that carries its own
-long-lived AWS credentials — there's no "passes locally, fails on
-CI" gap and no static QS-user secret. The prod-publish gate lives in
-`release.yml`. For your fork:
-
-- Point the chain at a sandbox AWS account via your cfg's `aws:`
-  block.
-- A unit-tier failure (contract drift) should block a PR; an e2e
-  failure on a sandbox account is your call — it may be infra
-  flakiness, not a code regression, but the project's own policy
-  treats a failing chain test as a merge blocker, not a deferrable.
+including the e2e tiers — there's no "passes locally, fails on CI"
+gap. The prod-publish gate lives in `release.yml`. For your fork, a
+unit-tier failure (contract drift) should block a PR; an e2e failure
+is your call — it may be container flakiness, not a code regression,
+but the project's own policy treats a failing chain test as a merge
+blocker, not a deferrable.
 
 ## Next step
 
@@ -319,21 +309,20 @@ Once you have a test plan in place:
    assertion in the demo data tests. A new metadata key gets a
    `JSON_EXISTS` assertion in the relevant dataset's column
    projection.
-3. **Run the full chain before the first production deploy.**
-   `./run_tests.sh up_to=qs_browser` against a sandbox or staging
-   AWS account. The browser tier is the catch-all for "the dashboard
-   renders" — a green run here is the last gate before a production
-   deploy.
+3. **Run the full chain before you ship the customization.**
+   `./run_tests.sh up_to=app2`. The browser tier is the catch-all
+   for "the dashboard renders" — a green run here is the last gate
+   before you put the customization in front of users.
 
 ## Related walkthroughs
 
 - [How do I swap the SQL behind a dataset?](how-do-i-swap-dataset-sql.md) —
   the contract test (Class 1) is what enforces the
   swap-without-breaking-visuals guarantee.
-- [How do I run my first deploy?](how-do-i-run-my-first-deploy.md) —
-  the deploy is part of the e2e (Class 4) loop. Re-running
-  `json apply --execute` between iterations also re-runs the
-  contract test implicitly via the build.
+- [How do I self-host the dashboards?](../../reference/self-host.md) —
+  serving the dashboards is part of the e2e (Class 4) loop; the
+  browser tier renders the same self-hosted server you'll run for
+  real.
 - [How do I extend canonical values?](how-do-i-extend-canonical-values.md) —
   paired with this walkthrough's `TestScenarioCoverage`
   recommendation. Adding a new value without a coverage assertion

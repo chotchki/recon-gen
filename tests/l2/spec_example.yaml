@@ -620,7 +620,7 @@ limit_schedules:
     cap: 3000.00
     direction: Inbound
 theme:
-  theme_name: "QuickSight Gen Theme"
+  theme_name: "Recon Gen Theme"
   version_description: "Auto-generated dashboard theme"
   analysis_name_prefix: null
   data_colors:

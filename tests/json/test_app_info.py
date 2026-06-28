@@ -144,8 +144,8 @@ def test_liveness_sql_resolves_per_dialect() -> None:
     pg = build_liveness_dataset(pg_cfg, app_segment="l1")
     oracle = build_liveness_dataset(oracle_cfg, app_segment="l1")
 
-    pg_sql = pg.PhysicalTableMap["app-info-liveness"].CustomSql.SqlQuery  # type: ignore[union-attr]: liveness physical table is always CustomSql by construction
-    oracle_sql = oracle.PhysicalTableMap["app-info-liveness"].CustomSql.SqlQuery  # type: ignore[union-attr]: liveness physical table is always CustomSql by construction
+    pg_sql = pg.sql
+    oracle_sql = oracle.sql
 
     assert "information_schema" in pg_sql
     assert "table_schema" in pg_sql
@@ -210,20 +210,18 @@ def test_app_info_deploy_stamp_reads_dialect_and_prefix_from_cfg(builder: _AppBu
         ),
     ]:
         app = builder(cfg)
-        analysis = app.emit_analysis()
-        # Find the App Info sheet ("i") and pull its deploy-stamp text box.
-        assert analysis.Definition is not None, "analysis missing Definition"
-        assert analysis.Definition.Sheets is not None, "analysis missing Sheets"
+        assert app.analysis is not None, f"{app.name} has no analysis"
+        # Pull the App Info sheet's deploy-stamp text box off the tree —
+        # the stamp content is assembled at tree-build time (app_info.py),
+        # not injected at emit, so walking the tree needs no emit round-trip.
         info_sheet = next(
-            s for s in analysis.Definition.Sheets
-            if s.Name == APP_INFO_SHEET_NAME
+            s for s in app.analysis.sheets
+            if s.name == APP_INFO_SHEET_NAME
         )
-        # The deploy stamp TextBox carries inline content with the
-        # dialect + prefix lines.
         deploy_stamp_text = None
-        for tb in info_sheet.TextBoxes or []:
-            if tb.SheetTextBoxId == "app-info-deploy-stamp":
-                deploy_stamp_text = tb.Content
+        for tb in info_sheet.text_boxes:
+            if tb.text_box_id == "app-info-deploy-stamp":
+                deploy_stamp_text = tb.content
                 break
         assert deploy_stamp_text is not None, (
             f"{builder.__name__}: App Info sheet must carry the "

@@ -285,7 +285,6 @@ def metadata_dashboard_fixture() -> Iterator[
     with isolated_dataset_registries():
         ds_with_meta = Dataset(
             identifier="cy5-with-meta",
-            arn="arn:aws:quicksight:::dataset/cy5-with-meta",
         )
         register_contract(
             ds_with_meta.identifier,
@@ -296,7 +295,6 @@ def metadata_dashboard_fixture() -> Iterator[
         )
         ds_no_meta = Dataset(
             identifier="cy5-no-meta",
-            arn="arn:aws:quicksight:::dataset/cy5-no-meta",
         )
         register_contract(
             ds_no_meta.identifier,
