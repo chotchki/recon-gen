@@ -1,19 +1,17 @@
-"""Typed identifier wrappers for QuickSight resource IDs.
+"""Typed identifier wrappers for tree resource IDs.
 
-QuickSight definitions cross-reference identifiers across many fields:
-``SheetId`` flows into ``SheetVisualScopingConfigurations.SheetId`` and
-``GridLayoutConfiguration``, ``VisualId`` flows into the same scoping
-configuration's ``VisualIds`` list, ``FilterGroupId`` is the dict key
-QuickSight uses to look up a filter, and ``ParameterName`` is the bare
-string that gets templated into a CategoryFilter.
+The tree cross-references identifiers across many nodes: ``SheetId``
+keys a sheet (and is URL-facing for App2 routing), ``VisualId`` keys a
+visual, ``FilterGroupId`` keys a filter group, and ``ParameterName`` is
+the bare string that gets templated into a categorical filter / SQL
+placeholder.
 
-All four are plain strings at the API boundary, so a typo or — more
-insidiously — a *kind* swap (passing a SheetId into a VisualIds list,
-say) does not raise; QuickSight either silently widens scope or
-silently produces zero rows. The ``NewType`` wrappers here let mypy
-catch wrong-kind-of-string at the call site, mirroring the
-``ColumnShape`` discipline ``common/drill.py`` already imposes on
-parameter wiring.
+All four are plain strings, so a typo or — more insidiously — a *kind*
+swap (passing a SheetId where a VisualId is expected) does not raise; it
+silently widens scope or produces zero rows. The ``NewType`` wrappers
+here let the type checker catch wrong-kind-of-string at the call site,
+mirroring the ``ColumnShape`` discipline ``common/drill.py`` already
+imposes on parameter wiring.
 
 The wrappers are zero-cost at runtime — ``SheetId(x)`` returns ``x``
 unchanged. They are an annotation discipline only.

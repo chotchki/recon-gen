@@ -1,7 +1,9 @@
-"""Configuration for QuickSight resource generation.
+"""Configuration loader for recon-gen.
 
-Reads from a YAML config file or environment variables. All generated
-resources reference the datasource and account specified here.
+Reads from a YAML config file or environment variables. Carries the
+demo DB URL + dialect, App2 auth (OIDC / session / TLS), and audit
+signing material. (The AWS / QuickSight fields are dead-config pending
+the config-cleanup sweep.)
 """
 
 from __future__ import annotations
