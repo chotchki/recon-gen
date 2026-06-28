@@ -56,7 +56,7 @@ class AwsConfig:
     (The account/region/datasource/partition ARN-synthesis machinery
     went with QuickSight — there are no AWS resources to name anymore.)
     """
-    deployment_name: str = ""
+    deployment_name: str = "recon-gen"
 
     def prefixed(self, name: str) -> str:
         """Return a resource ID with the configured deployment prefix.
@@ -549,15 +549,15 @@ def _build_aws_nested(raw: dict[str, Any], path: Path) -> AwsConfig:  # typing-s
         # ``deployment_name`` (the resource-ID namespace); a cfg with no
         # aws: block gets the empty default. Any leftover QS/AWS keys
         # (account_id / region / datasource / …) are ignored — they name
-        # nothing now that QuickSight is gone.
+        # nothing now that QuickSight is gone. deployment_name defaults
+        # to ``recon-gen`` (the resource-ID prefix) when unset.
         del path
         return AwsConfig()
     block = cast(dict[str, Any], block_raw)
-    if "deployment_name" not in block:
-        raise MissingFieldError(
-            f"{path}: required field 'aws.deployment_name' is absent"
-        )
-    return AwsConfig(deployment_name=str(block["deployment_name"]))
+    dn = block.get("deployment_name")
+    if dn is None:
+        return AwsConfig()
+    return AwsConfig(deployment_name=str(dn))
 
 
 def _build_db_nested(
@@ -1023,15 +1023,11 @@ class Config:
     # DE.5 step 19 — ``cfg.test`` is now a real ``TestConfig`` field.
 
     def __post_init__(self) -> None:
-        # deployment_name is the per-deployment namespace ``prefixed()``
-        # weaves into resource IDs — required, no default. (account_id /
-        # region / datasource / partition all went with QuickSight in DW;
-        # there are no AWS resources to synthesize ARNs for anymore.)
-        if not self.aws.deployment_name:
-            raise ValueError(
-                "Config requires aws=AwsConfig(deployment_name=...) — the "
-                "per-deployment resource-ID namespace."
-            )
+        # deployment_name (the ``prefixed()`` resource-ID namespace) has a
+        # default — the aws: block is fully optional post-DW. (account_id /
+        # region / datasource / partition all went with QuickSight; there
+        # are no AWS resources to synthesize ARNs for anymore.)
+        #
         # cfg.db is caller-supplied (loader or test helper); table_prefix
         # is required (loud-fail when empty).
         if not self.db.table_prefix:
