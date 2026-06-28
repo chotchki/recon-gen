@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from datetime import date
 from pathlib import Path
-from typing import IO, TYPE_CHECKING, Any, Literal, cast, get_args
+from typing import IO, Any, Literal, cast, get_args
 
 import yaml
 
@@ -29,9 +29,6 @@ from recon_gen.common.env_keys import (
     RECON_GEN_PRINCIPAL_ARNS,
 )
 from recon_gen.common.sql import Dialect
-
-if TYPE_CHECKING:
-    from recon_gen.common.models import Tag
 
 
 # ---------------------------------------------------------------------------
@@ -109,35 +106,6 @@ class AwsConfig:
         set explicitly in cfg.yaml (no default).
         """
         return f"{self.deployment_name}-{name}"
-
-    def tags(self) -> "list[Tag] | None":
-        """Return common + extra tags as the AWS Tag list format.
-
-        Two tags are always emitted (when ``tagging_enabled``):
-
-        - ``ManagedBy=recon-gen`` — gates cleanup eligibility (the
-          tool-identity signal; never varies).
-        - ``Deployment=<deployment_name>`` — per-deploy scope. ``json
-          clean`` requires both tags to match before deleting.
-
-        Returns ``None`` when ``tagging_enabled=False`` so the caller's
-        ``Tags=cfg.aws.tags()`` field assignment goes to the dataclass's
-        ``Tags: list[Tag] | None`` field as ``None`` and ``_strip_nones``
-        drops it from the emitted JSON entirely. Net effect: the
-        ``Create*`` boto3 call carries no ``Tags`` kwarg, so the IAM
-        principal doesn't need ``quicksight:TagResource`` permission.
-        """
-        if not self.tagging_enabled:
-            return None
-        from recon_gen.common.models import Tag  # noqa: PLC0415
-
-        all_tags = [
-            Tag(Key="ManagedBy", Value="recon-gen"),
-            Tag(Key="Deployment", Value=self.deployment_name),
-        ]
-        for key, value in self.extra_tags:
-            all_tags.append(Tag(Key=key, Value=value))
-        return all_tags
 
     def dataset_arn(self, dataset_id: str) -> str:
         return (

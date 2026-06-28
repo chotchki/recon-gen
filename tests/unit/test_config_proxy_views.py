@@ -5,10 +5,10 @@ Pins that ``cfg.aws.X`` / ``cfg.db.X`` / ``cfg.app2.X`` / ``cfg.audit.X``
 flat-field counterparts. Sweep commits B-E migrate callsites from
 flat to nested; this test guards the bridge.
 
-Methods on ``_AwsView`` (``partition`` / ``prefixed`` / ``tags`` /
-``dataset_arn`` / ``theme_arn``) are pinned here too — the legacy
-``Config.<method>`` shape used to live on Config; sweep moves callers
-to ``cfg.aws.<method>``.
+Methods on ``_AwsView`` (``partition`` / ``prefixed`` / ``dataset_arn``
+/ ``theme_arn``) are pinned here too — the legacy ``Config.<method>``
+shape used to live on Config; sweep moves callers to ``cfg.aws.<method>``.
+(``tags()`` died with the QuickSight emit graph in DW.8.1.c.)
 """
 
 from __future__ import annotations
@@ -25,14 +25,6 @@ from recon_gen.common.config import (
     TestGeneratorConfig,
 )
 from recon_gen.common.sql import Dialect
-
-# The QS resource-tag keys cfg.aws.tags() emits. Once lived in
-# common/cleanup.py (deleted with QuickSight, DW.7); the cfg.aws.tags()
-# surface itself is QS-dead and retires in the config cleanup that
-# follows — these locals keep the proxy-view test green until then.
-MANAGED_TAG_KEY = "ManagedBy"
-MANAGED_TAG_VALUE = "recon-gen"
-DEPLOYMENT_TAG_KEY = "Deployment"
 
 
 def _make_cfg(**overrides: object) -> Config:
@@ -148,23 +140,6 @@ def test_aws_view_prefixed_returns_deployment_prefix() -> None:
     cfg = _make_cfg(deployment_name="prod-deploy")
     assert cfg.aws.prefixed("foo") == "prod-deploy-foo"
     assert cfg.aws.prefixed("demo-datasource") == "prod-deploy-demo-datasource"
-
-
-def test_aws_view_tags_emits_managed_by_and_deployment() -> None:
-    cfg = _make_cfg(extra_tags={"Environment": "staging"})
-    tags = cfg.aws.tags()
-    assert tags is not None
-    tag_dict = {t.Key: t.Value for t in tags}
-    assert tag_dict[MANAGED_TAG_KEY] == MANAGED_TAG_VALUE
-    assert tag_dict[DEPLOYMENT_TAG_KEY] == "test-deploy"
-    assert tag_dict["Environment"] == "staging"
-
-
-def test_aws_view_tags_returns_none_when_disabled() -> None:
-    """``tagging_enabled=False`` ⇒ tags() returns None so the Create*
-    boto call carries no Tags kwarg + IAM doesn't need TagResource."""
-    cfg = _make_cfg(tagging_enabled=False)
-    assert cfg.aws.tags() is None
 
 
 def test_aws_view_dataset_arn_synthesizes_with_partition() -> None:

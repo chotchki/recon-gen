@@ -18,10 +18,7 @@ if TYPE_CHECKING:
     from recon_gen.common.html._tree_fetcher import PickerMatviewHint
 
 from recon_gen.common.config import Config
-from recon_gen.common.models import (
-    DatasetParameter,
-    ResourcePermission,
-)
+from recon_gen.common.models import DatasetParameter
 
 
 class ColumnShape(Enum):
@@ -415,29 +412,6 @@ def isolated_dataset_registries() -> Generator[None, None, None]:
         _DSP_REGISTRY.update(dsp_snapshot)
         _CONTRACT_REGISTRY.clear()
         _CONTRACT_REGISTRY.update(contract_snapshot)
-
-
-DATASET_ACTIONS = [
-    "quicksight:DescribeDataSet",
-    "quicksight:DescribeDataSetPermissions",
-    "quicksight:PassDataSet",
-    "quicksight:DescribeIngestion",
-    "quicksight:ListIngestions",
-    "quicksight:UpdateDataSet",
-    "quicksight:DeleteDataSet",
-    "quicksight:CreateIngestion",
-    "quicksight:CancelIngestion",
-    "quicksight:UpdateDataSetPermissions",
-]
-
-
-def dataset_permissions(cfg: Config) -> list[ResourcePermission] | None:
-    if not cfg.aws.principal_arns:
-        return None
-    return [
-        ResourcePermission(Principal=arn, Actions=DATASET_ACTIONS)
-        for arn in cfg.aws.principal_arns
-    ]
 
 
 def _oracle_lowercase_alias_wrapper(

@@ -249,8 +249,8 @@ P_L1_TX_TRANSFER_ID_PNAME = ParameterName(P_L1_TX_TRANSFER_ID)
 _DRILL_RESET_SENTINEL = "__ALL__"
 
 # Typed DrillParam constants — pair each ParameterName with its
-# expected ColumnShape so cross_sheet_drill() refuses shape-mismatched
-# writes at construction time (the K.2 invariant).
+# expected ColumnShape so Drill.resolve_source_shapes() refuses
+# shape-mismatched writes at validate time (the K.2 invariant).
 _DP_FILTER_ACCOUNT = DrillParam(P_L1_FILTER_ACCOUNT, ColumnShape.ACCOUNT_ID)
 # DL.3.2 — see module-level note on pL1TxTransfer → pL1TxTransferId.
 _DP_TX_TRANSFER = DrillParam(P_L1_TX_TRANSFER_ID_PNAME, ColumnShape.TRANSFER_ID)

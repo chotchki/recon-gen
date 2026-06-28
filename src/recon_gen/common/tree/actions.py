@@ -136,8 +136,8 @@ class Drill:
 
     ``writes`` is a list of ``(DrillParam, DrillSourceField | DrillResetSentinel)``
     tuples — same shape K.2 introduced. The ``DrillParam`` carries
-    its own ``ColumnShape``; ``DrillSourceField.shape`` must match
-    or ``cross_sheet_drill`` raises (call-site shape validation).
+    its own ``ColumnShape``; ``DrillSourceField.shape`` must be assignable
+    to it or ``resolve_source_shapes`` raises (validate-time shape check).
 
     ``trigger`` picks the click semantic — ``DATA_POINT_CLICK`` for
     left-click, ``DATA_POINT_MENU`` for right-click context menu.

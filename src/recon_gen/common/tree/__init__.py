@@ -42,15 +42,15 @@ Emit-time (validated by ``App.resolve_auto_ids`` + the
 - ``_validate_drill_destinations`` — every Drill action's
   ``target_sheet`` must be a registered Sheet on the analysis.
 - ``FilterGroup.emit`` — refuses an unscoped FilterGroup.
-- ``cross_sheet_drill`` (K.2) — Drill ``DrillParam`` shape must
-  match the source field's ``ColumnShape``.
+- ``Drill.resolve_source_shapes`` (K.2) — a Drill ``DrillParam``'s
+  shape must be assignable from the source field's ``ColumnShape``.
 
 Known follow-up: ``DrillParam`` (in ``common/drill.py``) takes a
 string ``ParameterName`` rather than a typed ``ParameterDeclLike``
 ref. That string isn't validated against the analysis registry —
-typos in DrillParam.name flow to deploy. Closing the gap requires
-threading a typed parameter ref through ``DrillParam`` →
-``cross_sheet_drill`` → emission.
+typos in DrillParam.name flow through unchecked. Closing the gap
+requires threading a typed parameter ref through ``DrillParam`` →
+the Drill ``writes`` → validation.
 
 **Locked decisions** (see PLAN.md Phase L):
 
