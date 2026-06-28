@@ -179,13 +179,18 @@ The DataSet-graph removal is its own focused sub-stage (call it DW.8.1.b):
 
 1. Refactor `build_dataset` to keep the registry side-effects (`register_sql` /
    `register_dataset_params` / `register_contract` / picker hint) and STOP
-   building/returning the `DataSet` — return the `dataset_id` (str) instead.
-   The SQL is already the App2 source of truth via `register_sql`/`get_sql`.
-2. Update the return-type chain: every app `build_*_dataset()` (`-> DataSet`
-   → `-> str`), each app's `build_all_*` (`list[DataSet]` → `list[str]`), and
-   the `{vid: Dataset(identifier=vid, arn=cfg.aws.dataset_arn(aws.DataSetId))}`
-   dict-builders (`aws.DataSetId` → the returned id) in all 4 apps + app_info +
-   picker_datasets.
+   building/returning the `DataSet` — return a tiny **`BuiltDataset`** struct
+   (frozen dataclass / NamedTuple) carrying `.DataSetId` (the dataset_id), with
+   room to grow if a builder later needs another field. The SQL is already the
+   App2 source of truth via `register_sql`/`get_sql`. (Operator decision
+   2026-06-27: the struct over a bare `str` — keeps the `aws.DataSetId` read
+   sites unchanged, far fewer call-site edits.)
+2. Update the return-type chain to `BuiltDataset`: every app `build_*_dataset()`
+   (`-> DataSet` → `-> BuiltDataset`), each app's `build_all_*`
+   (`list[DataSet]` → `list[BuiltDataset]`). The
+   `{vid: Dataset(identifier=vid, arn=cfg.aws.dataset_arn(aws.DataSetId))}`
+   dict-builders in all 4 apps + app_info + picker_datasets stay AS-IS
+   (`aws.DataSetId` still resolves — that's the point of the struct).
 3. Migrate the dataset-SQL test surface (`tests/json/test_dataset_sql_contract_projection`,
    `test_executives`, `test_investigation`, `test_l2_flow_tracing`, `test_app_info`,
    `test_dataset_parameters`, `tests/e2e/db/test_dataset_sql_smoke`) off
