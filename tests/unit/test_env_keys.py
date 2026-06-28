@@ -12,8 +12,6 @@ from recon_gen.common.env_keys import (
     EnvVar,
     EnvVarInvalid,
     EnvVarRequired,
-    RECON_E2E_IDENTITY_REGION,
-    RECON_E2E_USER_ARN,
     RECON_GEN_CONFIG,
     RECON_GEN_DEMO_DATABASE_URL,
     RECON_GEN_FUZZ_SEED,
@@ -254,19 +252,16 @@ def test_canonical_specs_are_present() -> None:
         "RECON_GEN_RUNNER_YES",
         "RECON_GEN_CONFIG",
         "RECON_GEN_TEST_L2_INSTANCE",
-        "RECON_E2E_USER_ARN",
         "RECON_E2E_PAGE_TIMEOUT",
         "RECON_E2E_VISUAL_TIMEOUT",
-        "RECON_E2E_IDENTITY_REGION",
     }
     actual_specs = [
         RECON_GEN_RUN_DIR, RECON_GEN_DEMO_DATABASE_URL,
         RECON_GEN_TRACE_ALL, RECON_GEN_FUZZ_SEED, RECON_GEN_RUNNER_YES,
         RECON_GEN_CONFIG, RECON_GEN_TEST_L2_INSTANCE,
-        RECON_E2E_USER_ARN, RECON_E2E_IDENTITY_REGION,
     ]
     actual_names = {s.name for s in actual_specs}
-    # Subset because we don't import all 13 here (LAYER + the two
+    # Subset because we don't import all of them here (LAYER + the two
     # E2E timeouts intentionally omitted from the smoke check).
     missing = (expected_names - {
         "RECON_GEN_LAYER",
@@ -291,63 +286,6 @@ def test_path_specs_have_validators() -> None:
             f"{spec.name} is Path-shaped but has no validator — "
             "wire must_exist / must_be_file / must_be_dir"
         )
-
-
-def test_user_arn_validator_rejects_non_arn(monkeypatch: Any) -> None:
-    """The IAM ARN regex catches 'looks-like-an-arn-but-isn't'."""
-    monkeypatch.setenv(RECON_E2E_USER_ARN.name, "not-an-arn")
-    with pytest.raises(EnvVarInvalid, match="does not match"):
-        RECON_E2E_USER_ARN.require()
-
-
-def test_user_arn_validator_accepts_real_arn(monkeypatch: Any) -> None:
-    monkeypatch.setenv(
-        RECON_E2E_USER_ARN.name,
-        "arn:aws:quicksight:us-east-1:470656905821:user/default/test-user",
-    )
-    assert "test-user" in RECON_E2E_USER_ARN.require()
-
-
-def test_user_arn_validator_accepts_govcloud_arn(monkeypatch: Any) -> None:
-    """GovCloud ARNs (partition ``aws-us-gov``) must validate — financial
-    institution deploys against GovCloud are a real target shape."""
-    monkeypatch.setenv(
-        RECON_E2E_USER_ARN.name,
-        "arn:aws-us-gov:quicksight:us-gov-east-1:470656905821:user/default/test-user",
-    )
-    assert "test-user" in RECON_E2E_USER_ARN.require()
-
-
-def test_user_arn_validator_accepts_china_arn(monkeypatch: Any) -> None:
-    """China partition ARNs (``aws-cn``) validate; pre-DE.1 sub-B the
-    regex was commercial-only + would reject these."""
-    monkeypatch.setenv(
-        RECON_E2E_USER_ARN.name,
-        "arn:aws-cn:quicksight:cn-north-1:470656905821:user/default/test-user",
-    )
-    assert "test-user" in RECON_E2E_USER_ARN.require()
-
-
-def test_user_arn_validator_rejects_unknown_partition(monkeypatch: Any) -> None:
-    """Unknown partition strings (``aws-iso`` / etc.) still reject —
-    only commercial / govcloud / china are real."""
-    monkeypatch.setenv(
-        RECON_E2E_USER_ARN.name,
-        "arn:aws-iso:quicksight:us-iso-east-1:470656905821:user/default/test-user",
-    )
-    with pytest.raises(EnvVarInvalid, match="does not match"):
-        RECON_E2E_USER_ARN.require()
-
-
-def test_identity_region_rejects_non_region(monkeypatch: Any) -> None:
-    monkeypatch.setenv(RECON_E2E_IDENTITY_REGION.name, "USEAST1")
-    with pytest.raises(EnvVarInvalid, match="does not match"):
-        RECON_E2E_IDENTITY_REGION.get_or_none()
-
-
-def test_identity_region_accepts_real_region(monkeypatch: Any) -> None:
-    monkeypatch.setenv(RECON_E2E_IDENTITY_REGION.name, "us-east-1")
-    assert RECON_E2E_IDENTITY_REGION.get_or_none() == "us-east-1"
 
 
 def test_fuzz_seed_rejects_negative(monkeypatch: Any) -> None:
