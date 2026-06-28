@@ -188,9 +188,7 @@ class Sheet:
     # CN.5 — optional pointer at the handbook page that explains what
     # this sheet teaches. Renderer emits a `?` button in the sheet
     # chrome when set, opening the linked page in the App2 side panel
-    # via `GET /handbook/<handbook_path>`. None = no `?` button. App2-
-    # only feature; QS embeds carry the sheet description text alone
-    # (registered as `handbook_help_panel` in common/parity/breaks.py).
+    # via `GET /handbook/<handbook_path>`. None = no `?` button.
     # Convention: ``<app>/<sheet>`` without ``.md`` — the route
     # appends the extension when resolving.
     handbook_path: HandbookPath | None = None
