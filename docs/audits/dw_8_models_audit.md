@@ -200,3 +200,90 @@ The DataSet-graph removal is its own focused sub-stage (call it DW.8.1.b):
    + the DataSource graph (test-only now) from models.py, and strip `to_aws_json`
    from the kept `DatasetParameter` family.
 5. Final: `grep to_aws_json src/` → 0 + full suite green.
+
+### DW.8.1.b EXECUTION — DONE (2026-06-28), + a SECOND scope correction
+
+DW.8.1.b shipped in two green commits:
+
+- **1/2 `0242e3f4`** — `build_dataset` returns a frozen `BuiltDataset`
+  (`DataSetId` + `visual_identifier` + a SNAPSHOT of this build's `sql` /
+  `contract` / `dataset_params`) instead of the AWS `DataSet`. Registry
+  side-effects unchanged (App2 runtime still resolves by `visual_identifier`).
+  **Fields, not read-through-registry properties** — the registry is
+  last-write-wins by key, so the app_info per-dialect liveness probe (builds
+  PG + Oracle under the same `visual_identifier` in one test) would read both
+  handles as the LAST build's SQL. The old `DataSet` object held its own
+  `CustomSql` the same way; a property version shipped + the app_info test
+  caught it red, hence the switch to snapshot fields. ~70 `-> DataSet`
+  annotations flipped; ~19 test files migrated (`.CustomSql.SqlQuery`->`.sql`,
+  `.DatasetParameters`->`.dataset_params`, `.Columns`/`col.Name`->`.contract.
+  columns`/`col.name`). Two tautology traps avoided (DW.1 playbook): l2ft +
+  inv "emitted cols == contract cols" checks would become `expected ==
+  expected` once `.contract` IS the registered contract — l2ft pair (on the
+  legacy `build_chains`/`build_exc_*` builders, NOT in any `build_all`)
+  retargeted to the projection check; inv triple deleted as redundant with
+  `test_dataset_sql_contract_projection`.
+- **2/2 `9cf971fa`** — deleted the DataSet graph (DataSet/CustomSql/
+  PhysicalTable/LogicalTable/LogicalTableSource/InputColumn/
+  DataSetUsageConfiguration) + the DataSource graph (DataSource + 6 helpers)
+  + `to_input_column`/`to_input_columns` + the InputColumn-wire-shape test.
+  pyright src+tests = 0 dangling refs.
+
+**SECOND scope correction — the recipe's step 4 mis-grouped Tag/permissions.**
+Step 4 listed `Tag` + `config.tags()` + `dataset_permissions` +
+`ResourcePermission` as part of the DataSet-graph "clean delete". They are
+NOT independently deletable: `Tag` and `ResourcePermission` are field types
+on **Theme / Analysis / Dashboard** (`Tags:` / `Permissions:` fields), which
+DW.8.1.b leaves alive. They're coupled to the emit-graph gut (below), and
+moved there. DataSource was a leaf referencer of both, so it deleted fine in
+2/2. (Same lesson as the FIRST correction: "clean delete" claims that hinge
+on a type's field-references need the reference graph checked, not just the
+constructor call sites.)
+
+### REMAINING DW.8.1 (NOT .b) — the emit-graph gut (verified cascade map)
+
+`to_aws_json -> 0` (step 5 above) is the gate for ALL of DW.8.1, not just
+.b — it needs Theme/Analysis/Dashboard gone, which cascades to the whole
+Visual/Filter/Control/Layout/FieldWell/ParameterDeclaration/SheetDefinition
+graph (~120 models.py classes). After DW.8.1.b the 3 surviving `to_aws_json`
+defs are exactly Theme / Analysis / Dashboard. Verified dead-producer map
+(delete these FIRST, then the model classes fall unreferenced — type oracle):
+
+- **`common/aging.py` + `tests/unit/test_aging.py`** — `aging_bar_visual`
+  builds a `models.Visual(BarChartVisual=...)` graph for the DELETED AR/PR
+  apps (M.4.3/M.4.4). Zero src callers (only its own test). DELETE both →
+  frees BarChart*/Axis*/Dimension/Measure/ColumnIdentifier/Visual classes.
+- **`common/tree/_helpers.py::title_label` / `subtitle_label`** — build
+  `VisualTitle/SubtitleLabelOptions`. Zero Python callers (the helpers.py
+  "title_label" greps are all JS `analysis_visual_title_label` selector
+  strings). DELETE → frees those two option classes.
+- **`common/drill.py::cross_sheet_drill` / `set_drill_parameters`** —
+  build `models.VisualCustomAction`. Zero SRC callers; consumed only by
+  `tests/json/test_drill.py` (K.2 drill-param shape-validation — a DOMAIN
+  invariant, [[project_drill_param_shape_typing]]). **DELICATE**: the live
+  App2 path keeps `DrillStaticDateTime`/`DrillParam`/`DrillSourceField`/
+  `DrillResetSentinel`/`field_source` (render.py + actions.py consume them);
+  deleting the two QS-emit fns requires re-pointing test_drill's shape-check
+  coverage at the live `field_source` / `Drill.resolve_source_shapes` path
+  so the K.2 invariant stays gated. NOT a mechanical delete — same
+  emit-vs-embedded-invariant shape as stages 1-5's leaf `.emit()`.
+- **`config.py::tags()` + `Tag`** and **`dataset_contract.py::
+  dataset_permissions` + `ResourcePermission`** — die WITH Theme/Analysis/
+  Dashboard (their only field-type users). Test consumers to retire:
+  `test_config_proxy_views` (`cfg.aws.tags()`), `test_models` already-trim
+  (docstring only). `dataset_permissions` has no caller post-DW.8.1.b.
+- **models.py mass-delete** — after the above, delete Theme + the Theme
+  config graph (DataColorPalette/UIColorPalette/Tile*/SheetStyle/Typography/
+  FontFamily/ThemeConfiguration) + Analysis + Dashboard + AnalysisDefinition
+  + SheetDefinition + Layout* + every Visual subtype + FieldWell/Configuration
+  + Filter/Control + ParameterDeclaration family + VisualCustomAction family
+  + Tag + ResourcePermission. KEEP: the DatasetParameter family (9) +
+  `DateTimeDefaultValues` + `_check_static_values_cap`/`_strip_nones`. Run
+  pyright as the per-delete oracle; expect test_tree/test_models emit-shape
+  test consumers to need retiring (dead QS-wire-shape).
+- **Final**: `grep to_aws_json src/` -> 0, rewrite the models.py module
+  docstring (drops "Theme/DataSet/Analysis ... to_aws_json"), full suite green.
+
+This remainder carries the drill K.2-invariant delicacy + a broad test-file
+retirement surface — fits the DW.8 box's recommended "fresh context +
+workflow + adversarial review" treatment.
