@@ -28,15 +28,6 @@ class TestDatasetContract:
         ])
         assert c.column_names == ["a", "b"]
 
-    def test_to_input_columns_types(self) -> None:
-        c = DatasetContract(columns=[
-            ColumnSpec("x", "INTEGER"),
-        ])
-        cols = c.to_input_columns()
-        assert len(cols) == 1
-        assert cols[0].Name == "x"
-        assert cols[0].Type == "INTEGER"
-
 
 # ---------------------------------------------------------------------------
 # Q.1.a.8 — Oracle case-fold wrapper

@@ -20,7 +20,6 @@ if TYPE_CHECKING:
 from recon_gen.common.config import Config
 from recon_gen.common.models import (
     DatasetParameter,
-    InputColumn,
     ResourcePermission,
 )
 
@@ -202,9 +201,6 @@ class ColumnSpec:
             return self.display_name
         return _smart_title(self.name)
 
-    def to_input_column(self) -> InputColumn:
-        return InputColumn(Name=self.name, Type=self.type)
-
 
 # Initialisms that should stay uppercase in the auto-derived label.
 # These are the snake_case word forms (lowercase, no separators) we'll
@@ -235,9 +231,6 @@ def _smart_title(snake: str) -> str:
 @dataclass
 class DatasetContract:
     columns: list[ColumnSpec]
-
-    def to_input_columns(self) -> list[InputColumn]:
-        return [c.to_input_column() for c in self.columns]
 
     @property
     def column_names(self) -> list[str]:

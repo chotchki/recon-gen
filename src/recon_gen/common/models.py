@@ -293,123 +293,13 @@ class Theme:
 
 
 # ---------------------------------------------------------------------------
-# DataSource models
+# Dataset parameter models
 # ---------------------------------------------------------------------------
-
-@dataclass
-class PostgreSqlParameters:
-    Host: str
-    Port: int
-    Database: str
-
-
-@dataclass
-class OracleParameters:
-    """QuickSight OracleParameters shape (boto3 quicksight create-data-source).
-
-    Per the AWS QuickSight API:
-    - ``Host`` — RDS Oracle endpoint hostname.
-    - ``Port`` — listener port (defaults 1521).
-    - ``Database`` — SID or service name (e.g. ``ORCL``).
-    - ``UseServiceName`` — when True, ``Database`` is treated as a
-      service name; when False (AWS default), as a SID.
-
-    ``UseServiceName`` defaults True on this dataclass because RDS
-    Oracle endpoints (and Aurora Oracle) connect via service name —
-    the SID-style interpretation only matches older self-managed
-    Oracle installs. Override at construction if needed.
-    """
-
-    Host: str
-    Port: int
-    Database: str
-    UseServiceName: bool = True
-
-
-@dataclass
-class DataSourceParameters:
-    PostgreSqlParameters: PostgreSqlParameters | None = None
-    OracleParameters: OracleParameters | None = None
-
-
-@dataclass
-class CredentialPair:
-    Username: str
-    Password: str
-
-
-@dataclass
-class DataSourceCredentials:
-    CredentialPair: CredentialPair | None = None
-
-
-@dataclass
-class SslProperties:
-    DisableSsl: bool = False
-
-
-@dataclass
-class DataSource:
-    AwsAccountId: str
-    DataSourceId: str
-    Name: str
-    Type: str  # POSTGRESQL, MYSQL, etc.
-    DataSourceParameters: DataSourceParameters
-    Credentials: DataSourceCredentials | None = None
-    SslProperties: SslProperties | None = None
-    Permissions: list[ResourcePermission] | None = None
-    Tags: list[Tag] | None = None
-
-    def to_aws_json(self) -> dict[str, Any]:
-        return _strip_nones(asdict(self))
-
-    def to_json_string(self, indent: int = 2) -> str:
-        return json.dumps(self.to_aws_json(), indent=indent)
-
-
-# ---------------------------------------------------------------------------
-# DataSet models
-# ---------------------------------------------------------------------------
-
-@dataclass
-class InputColumn:
-    Name: str
-    Type: str  # STRING|INTEGER|DECIMAL|DATETIME|BIT
-    SubType: str | None = None
-
-
-@dataclass
-class CustomSql:
-    Name: str
-    DataSourceArn: str
-    SqlQuery: str
-    Columns: list[InputColumn]
-
-
-@dataclass
-class PhysicalTable:
-    """Union type — set exactly one."""
-    CustomSql: CustomSql | None = None
-
-
-@dataclass
-class LogicalTableSource:
-    PhysicalTableId: str | None = None
-    DataSetArn: str | None = None
-
-
-@dataclass
-class LogicalTable:
-    Alias: str
-    Source: LogicalTableSource
-    DataTransforms: list[dict[str, Any]] | None = None
-
-
-@dataclass
-class DataSetUsageConfiguration:
-    DisableUseAsDirectQuerySource: bool = False
-    DisableUseAsImportedSource: bool = False
-
+# App2's _sql_executor reads these to resolve a `<<$paramName>>`
+# placeholder's default when a URL omits that param; build_dataset
+# registers them per visual_identifier. (The DataSet / DataSource model
+# graphs that used to live above them retired with the QS emitter —
+# DW.8.1.b.)
 
 # AWS QuickSight `create-data-set` rejects a dataset parameter whose
 # `DefaultValues.StaticValues` list has > 32 elements ("member must have
@@ -513,28 +403,6 @@ class DatasetParameter:
     DecimalDatasetParameter: DecimalDatasetParameter | None = None
     DateTimeDatasetParameter: DateTimeDatasetParameter | None = None
 
-
-@dataclass
-class DataSet:
-    AwsAccountId: str
-    DataSetId: str
-    Name: str
-    PhysicalTableMap: dict[str, PhysicalTable]
-    ImportMode: str = "DIRECT_QUERY"  # DIRECT_QUERY|SPICE
-    LogicalTableMap: dict[str, LogicalTable] | None = None
-    DataSetUsageConfiguration: DataSetUsageConfiguration | None = None
-    Permissions: list[ResourcePermission] | None = None
-    Tags: list[Tag] | None = None
-    # Dataset-level parameters substituted into CustomSql via the
-    # ``<<$paramName>>`` syntax. Bridge analysis params via
-    # ``MappedDataSetParameters`` on each ParameterDeclaration variant.
-    DatasetParameters: list[DatasetParameter] | None = None
-
-    def to_aws_json(self) -> dict[str, Any]:
-        return _strip_nones(asdict(self))
-
-    def to_json_string(self, indent: int = 2) -> str:
-        return json.dumps(self.to_aws_json(), indent=indent)
 
 
 # ---------------------------------------------------------------------------
