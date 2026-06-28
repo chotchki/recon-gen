@@ -41,11 +41,11 @@ from recon_gen.common.dataset_contract import (
     ColumnShape,
     ColumnSpec,
     DatasetContract,
+    BuiltDataset,
     build_dataset,
     register_contract,
 )
 from recon_gen.common.models import (
-    DataSet,
     DatasetParameter,
     IntegerDatasetParameter,
     IntegerDatasetParameterDefaultValues,
@@ -335,7 +335,7 @@ _DEFAULT_FANOUT_THRESHOLD_DSP = 5
 # dataset-resource-internal Id is assigned by build_dataset.
 
 
-def build_recipient_fanout_dataset(cfg: Config) -> DataSet:
+def build_recipient_fanout_dataset(cfg: Config) -> BuiltDataset:
     """Recipient × sender × transfer rows, one per (recipient leg, sender leg).
 
     Filters to leaf-internal recipients (``account_scope='internal'``
@@ -474,7 +474,7 @@ _DEFAULT_VOLUME_ANOMALIES_SIGMA = 2
 # the dataset-resource-internal Id is assigned by build_dataset.
 
 
-def build_volume_anomalies_dataset(cfg: Config) -> DataSet:
+def build_volume_anomalies_dataset(cfg: Config) -> BuiltDataset:
     """Pair-grain rolling-window anomalies — σ-filtered at the DB.
 
     Y.1.b — the σ-threshold parameter is pushed into the dataset SQL
@@ -538,7 +538,7 @@ def build_volume_anomalies_dataset(cfg: Config) -> DataSet:
     )
 
 
-def build_volume_anomalies_distribution_dataset(cfg: Config) -> DataSet:
+def build_volume_anomalies_distribution_dataset(cfg: Config) -> BuiltDataset:
     """Same matview as ``build_volume_anomalies_dataset`` — no σ filter.
 
     Y.1.b.companion — the SELECTED_VISUALS-scope workaround for SQL
@@ -611,7 +611,7 @@ _DEFAULT_MONEY_TRAIL_MIN_AMOUNT = 0
 _MONEY_TRAIL_ROOT_SENTINEL = "__no_chain_selected__"
 
 
-def build_money_trail_dataset(cfg: Config) -> DataSet:
+def build_money_trail_dataset(cfg: Config) -> BuiltDataset:
     """Per-edge money trail rows — Y.2.a SQL pushdown.
 
     Three analysis-level parameters bridge into dataset-level
@@ -684,7 +684,7 @@ def build_money_trail_dataset(cfg: Config) -> DataSet:
     )
 
 
-def build_money_trail_roots_dataset(cfg: Config) -> DataSet:
+def build_money_trail_roots_dataset(cfg: Config) -> BuiltDataset:
     """Companion to ``build_money_trail_dataset`` — distinct chain roots.
 
     Y.2.a — the parameter-bearing money-trail dataset filters rows by
@@ -847,7 +847,7 @@ def _account_network_dataset_parameters() -> list[DatasetParameter]:
     ]
 
 
-def build_account_network_dataset(cfg: Config) -> DataSet:
+def build_account_network_dataset(cfg: Config) -> BuiltDataset:
     """Per-edge account-network rows — Y.2.b SQL pushdown.
 
     Same matview as money trail (``inv_money_trail_edges``) but with
@@ -891,7 +891,7 @@ def build_account_network_dataset(cfg: Config) -> DataSet:
     )
 
 
-def build_account_network_inbound_dataset(cfg: Config) -> DataSet:
+def build_account_network_inbound_dataset(cfg: Config) -> BuiltDataset:
     """BO.2 directional dataset — rows where ``target_display = anchor``.
 
     Feeds the Inbound Sankey only. Same anchor + min-amount pushdown
@@ -910,7 +910,7 @@ def build_account_network_inbound_dataset(cfg: Config) -> DataSet:
     )
 
 
-def build_account_network_outbound_dataset(cfg: Config) -> DataSet:
+def build_account_network_outbound_dataset(cfg: Config) -> BuiltDataset:
     """BO.2 directional dataset — rows where ``source_display = anchor``.
 
     Feeds the Outbound Sankey only. Same anchor + min-amount pushdown
@@ -929,7 +929,7 @@ def build_account_network_outbound_dataset(cfg: Config) -> DataSet:
     )
 
 
-def build_account_network_accounts_dataset(cfg: Config) -> DataSet:
+def build_account_network_accounts_dataset(cfg: Config) -> BuiltDataset:
     """Narrow accounts dataset feeding the K.4.8 anchor dropdown only.
 
     Single column ``source_display`` distinct'd over the matview so
@@ -965,7 +965,7 @@ def build_account_network_accounts_dataset(cfg: Config) -> DataSet:
 
 def build_all_datasets(
     cfg: Config, l2_instance: L2Instance,
-) -> list[DataSet]:
+) -> list[BuiltDataset]:
     """Return every dataset Investigation's sheets reference.
 
     Z.C: ``l2_instance`` is no longer load-bearing for the prefix —

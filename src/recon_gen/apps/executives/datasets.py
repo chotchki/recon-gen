@@ -33,11 +33,11 @@ from recon_gen.common.dataset_contract import (
     ColumnShape,
     ColumnSpec,
     DatasetContract,
+    BuiltDataset,
     build_dataset,
     register_contract,
 )
 from recon_gen.common.models import (
-    DataSet,
     DatasetParameter,
     DateTimeDatasetParameter,
 )
@@ -202,7 +202,7 @@ EXEC_PROGRAM_HEALTH_CONTRACT = DatasetContract(columns=[
 # Builders
 # ---------------------------------------------------------------------------
 
-def build_transaction_summary_dataset(cfg: Config) -> DataSet:
+def build_transaction_summary_dataset(cfg: Config) -> BuiltDataset:
     """Per-(date, rail_name) aggregates: transfer count, gross + net dollars.
 
     Aggregates per ``transfer_id`` first so multi-leg transfers are
@@ -297,7 +297,7 @@ GROUP BY pt.posted_date, CASE WHEN rr.rail_rank <= 20 THEN pt.rail_name ELSE 'Ot
     )
 
 
-def build_transaction_daily_dataset(cfg: Config) -> DataSet:
+def build_transaction_daily_dataset(cfg: Config) -> BuiltDataset:
     """Per-(posted_date) rollup of `exec-transaction-summary`.
 
     AO.5 fix: the "Average Daily Volume" KPI in the Volume sheet used
@@ -397,7 +397,7 @@ LEFT JOIN activity act ON act.account_id = a.account_id
 {{active_only}}"""
 
 
-def build_account_summary_dataset(cfg: Config) -> DataSet:
+def build_account_summary_dataset(cfg: Config) -> BuiltDataset:
     """One row per account that has ever appeared in ``daily_balances``.
 
     Y.2.h — pure date-independent snapshot. Used by visuals whose
@@ -431,7 +431,7 @@ def build_account_summary_dataset(cfg: Config) -> DataSet:
     )
 
 
-def build_account_summary_active_dataset(cfg: Config) -> DataSet:
+def build_account_summary_active_dataset(cfg: Config) -> BuiltDataset:
     """Y.2.h — same shape as ``exec-account-summary-ds`` but narrowed
     to accounts with at least one Posted transaction in the date
     window (``WHERE COALESCE(act.activity_count, 0) > 0`` baked into
@@ -471,7 +471,7 @@ EXEC_TRANSACTION_LEGS_CONTRACT = DatasetContract(columns=[
 ])
 
 
-def build_transaction_legs_dataset(cfg: Config) -> DataSet:
+def build_transaction_legs_dataset(cfg: Config) -> BuiltDataset:
     """BH.8 follow-up (2026-05-26) — single-row dataset returning the
     per-leg / all-status row count of `<prefix>_transactions`. Used by
     the Transaction Volume sheet's sibling "Transfer Legs (all statuses)"
@@ -500,7 +500,7 @@ def build_transaction_legs_dataset(cfg: Config) -> DataSet:
     )
 
 
-def build_program_health_dataset(cfg: Config) -> DataSet:
+def build_program_health_dataset(cfg: Config) -> BuiltDataset:
     """CF.2 — single-row program-health rollup feeding the Exec
     "Program Health" sheet's KPI tile + threshold-banded indicator.
 
@@ -556,7 +556,7 @@ WHERE {date_clause}
     )
 
 
-def build_all_datasets(cfg: Config) -> list[DataSet]:
+def build_all_datasets(cfg: Config) -> list[BuiltDataset]:
     """Return every dataset used by the Executives app."""
     return [
         build_transaction_summary_dataset(cfg),

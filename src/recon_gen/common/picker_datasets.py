@@ -37,10 +37,10 @@ from recon_gen.common.config import Config
 from recon_gen.common.dataset_contract import (
     ColumnSpec,
     DatasetContract,
+    BuiltDataset,
     build_dataset,
 )
 from recon_gen.common.html._tree_fetcher import PickerMatviewHint
-from recon_gen.common.models import DataSet
 
 
 # Visual identifiers — stable, app-agnostic. App trees reference these
@@ -71,7 +71,7 @@ _CHAIN_PARENTS_CONTRACT = DatasetContract(columns=[
 ])
 
 
-def _build_rails_dataset(cfg: Config) -> DataSet:
+def _build_rails_dataset(cfg: Config) -> BuiltDataset:
     """``DS_RAILS`` — declared Rail names (one column: ``name``).
 
     Source: ``<prefix>_v_config_rails.name``. Drives the L1 Rail
@@ -101,7 +101,7 @@ def _build_rails_dataset(cfg: Config) -> DataSet:
     )
 
 
-def _build_templates_dataset(cfg: Config) -> DataSet:
+def _build_templates_dataset(cfg: Config) -> BuiltDataset:
     """``DS_TEMPLATES`` — declared TransferTemplate names.
 
     Source: ``<prefix>_v_config_transfer_templates.name``. Drives the
@@ -121,7 +121,7 @@ def _build_templates_dataset(cfg: Config) -> DataSet:
     )
 
 
-def _build_account_roles_dataset(cfg: Config) -> DataSet:
+def _build_account_roles_dataset(cfg: Config) -> BuiltDataset:
     """``DS_ACCOUNT_ROLES`` — DISTINCT account roles across L2's
     accounts + account_templates.
 
@@ -143,7 +143,7 @@ def _build_account_roles_dataset(cfg: Config) -> DataSet:
     )
 
 
-def _build_metadata_keys_dataset(cfg: Config) -> DataSet:
+def _build_metadata_keys_dataset(cfg: Config) -> BuiltDataset:
     """``DS_METADATA_KEYS`` — DISTINCT metadata keys declared on rails.
 
     Source: ``SELECT DISTINCT metadata_key FROM <prefix>_v_config_
@@ -172,7 +172,7 @@ def _build_metadata_keys_dataset(cfg: Config) -> DataSet:
     )
 
 
-def _build_chain_parents_dataset(cfg: Config) -> DataSet:
+def _build_chain_parents_dataset(cfg: Config) -> BuiltDataset:
     """``DS_CHAIN_PARENTS`` — DISTINCT chain parent names declared in L2.
 
     Source: ``SELECT DISTINCT parent_name FROM
@@ -204,27 +204,27 @@ def _build_chain_parents_dataset(cfg: Config) -> DataSet:
 # bind Templates. Each app now imports + emits the specific shared
 # datasets it actually uses; AWS DataSetId de-dup still applies when
 # two apps emit the same dataset.
-def build_picker_rails_dataset(cfg: Config) -> DataSet:
+def build_picker_rails_dataset(cfg: Config) -> BuiltDataset:
     return _build_rails_dataset(cfg)
 
 
-def build_picker_templates_dataset(cfg: Config) -> DataSet:
+def build_picker_templates_dataset(cfg: Config) -> BuiltDataset:
     return _build_templates_dataset(cfg)
 
 
-def build_picker_account_roles_dataset(cfg: Config) -> DataSet:
+def build_picker_account_roles_dataset(cfg: Config) -> BuiltDataset:
     return _build_account_roles_dataset(cfg)
 
 
-def build_picker_metadata_keys_dataset(cfg: Config) -> DataSet:
+def build_picker_metadata_keys_dataset(cfg: Config) -> BuiltDataset:
     return _build_metadata_keys_dataset(cfg)
 
 
-def build_picker_chain_parents_dataset(cfg: Config) -> DataSet:
+def build_picker_chain_parents_dataset(cfg: Config) -> BuiltDataset:
     return _build_chain_parents_dataset(cfg)
 
 
-def build_shared_picker_datasets(cfg: Config) -> list[DataSet]:
+def build_shared_picker_datasets(cfg: Config) -> list[BuiltDataset]:
     """Build all 5 shared picker-source datasets.
 
     Apps that use ALL shared pickers (currently L2FT — uses every one)

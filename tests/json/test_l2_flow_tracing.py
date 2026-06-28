@@ -32,6 +32,7 @@ Tests here cover:
 from __future__ import annotations
 
 import inspect
+import re
 from pathlib import Path
 from typing import Any
 
@@ -56,8 +57,8 @@ from recon_gen.apps.l2_flow_tracing.datasets import (
     DS_UNIFIED_L2_EXCEPTIONS,
 )
 from recon_gen.cli._helpers import APPS
+from recon_gen.common.dataset_contract import BuiltDataset
 from recon_gen.common.l2 import load_instance
-from recon_gen.common.models import DataSet
 from recon_gen.common.sheets.app_info import (
     APP_INFO_SHEET_NAME,
     app_info_latest_balance_day_id,
@@ -112,22 +113,11 @@ def _string_ds_params(params: list[Any]) -> dict[str, Any]:
     return out
 
 
-def _ds_sql(aws_ds: DataSet) -> str:
-    """Pull the CustomSql.SqlQuery off the first PhysicalTableMap entry
-    of a built dataset, with the None-narrow built in. Every dataset we
-    build here is CustomSql-shaped (``build_dataset`` always sets it),
-    so the assert is a defensive type-narrow, not a behavioral guard."""
-    cs = list(aws_ds.PhysicalTableMap.values())[0].CustomSql
-    assert cs is not None
-    return cs.SqlQuery
-
-
-def _ds_columns(aws_ds: DataSet) -> list[Any]:
-    """Pull the CustomSql.Columns off the first PhysicalTableMap entry —
-    same None-narrow shape as ``_ds_sql``."""
-    cs = list(aws_ds.PhysicalTableMap.values())[0].CustomSql
-    assert cs is not None
-    return list(cs.Columns)
+def _ds_sql(aws_ds: BuiltDataset) -> str:
+    """Pull the registered SQL off a built dataset. ``build_dataset``
+    registers it under the dataset's visual_identifier, resolved by
+    ``BuiltDataset.sql``."""
+    return aws_ds.sql
 
 
 def _sheet_by_name(app: App, name: str) -> Sheet:
@@ -447,10 +437,7 @@ def _chains_dataset_sql_against(yaml_path: Path) -> str:
     from dataclasses import replace
     inst = load_instance(yaml_path)
     cfg = replace(_CFG, db=replace(_CFG.db, table_prefix=yaml_path.stem))
-    aws_ds = build_chains_dataset(cfg, inst)
-    table = list(aws_ds.PhysicalTableMap.values())[0]
-    assert table.CustomSql is not None
-    return table.CustomSql.SqlQuery
+    return build_chains_dataset(cfg, inst).sql
 
 
 def test_chains_dataset_targets_prefixed_current_transactions() -> None:
@@ -540,17 +527,20 @@ def test_chains_dataset_orphan_rate_avoids_divide_by_zero() -> None:
 
 
 def test_chains_dataset_contract_columns_match_builder() -> None:
-    """Contract columns and SQL projection match — visual ds["col"]
-    references resolve cleanly."""
+    """Every contract column appears in the built SQL — visual ds["col"]
+    references resolve cleanly. (``build_chains_dataset`` is a legacy
+    builder not wired into ``build_all_l2_flow_tracing_datasets``, so it
+    isn't swept by ``test_dataset_sql_contract_projection``; this is its
+    only column-projection coverage.)"""
     from recon_gen.apps.l2_flow_tracing.datasets import (
         CHAINS_CONTRACT, build_chains_dataset,
     )
-    aws_ds = build_chains_dataset(_CFG, default_l2_instance())
-    cols = {
-        c.Name for c in _ds_columns(aws_ds)
-    }
-    expected = {c.name for c in CHAINS_CONTRACT.columns}
-    assert cols == expected
+    sql = build_chains_dataset(_CFG, default_l2_instance()).sql
+    missing = [
+        c.name for c in CHAINS_CONTRACT.columns
+        if not re.search(rf"\b{re.escape(c.name)}\b", sql)
+    ]
+    assert not missing, f"contract columns absent from SQL: {missing}"
 
 
 def test_chains_dataset_emits_same_sql_regardless_of_l2_chain_count() -> None:
@@ -692,10 +682,10 @@ def test_chain_instances_dataset_declares_cascade_and_pushdown_parameters() -> N
         P_L2FT_CHAINS_DATE_START,
     )
 
-    params = build_chain_instances_dataset(_CFG, inst).DatasetParameters
+    params = build_chain_instances_dataset(_CFG, inst).dataset_params
     # Phase BM — 4 pre-BM (pKey/pValues + pL2ftChainsChain/Completion)
     # + 2 BM date params (pL2ftChainsDateStart/End) = 6.
-    assert params is not None and len(params) == 6
+    assert len(params) == 6
     by_name = _string_ds_params(params)
     assert by_name["pKey"].ValueType == "SINGLE_VALUED"
     assert by_name["pValues"].ValueType == "SINGLE_VALUED"
@@ -716,8 +706,7 @@ def test_chain_instances_dataset_declares_cascade_and_pushdown_parameters() -> N
     from dataclasses import replace
     no_chains = replace(load_instance(SASQUATCH_PR_YAML), chains=())
     assert not declared_chain_parents(no_chains)
-    nc_params = build_chain_instances_dataset(_CFG, no_chains).DatasetParameters
-    assert nc_params is not None
+    nc_params = build_chain_instances_dataset(_CFG, no_chains).dataset_params
     nc_by_name = _string_ds_params(nc_params)
     assert nc_by_name["pL2ftChainsChain"].DefaultValues.StaticValues == [
         L2FT_ALL_SENTINEL,
@@ -832,10 +821,10 @@ def test_tt_datasets_declare_cascade_and_pushdown_parameters() -> None:
     )
     inst = load_instance(SASQUATCH_PR_YAML)
     for build in (build_tt_instances_dataset, build_tt_legs_dataset):
-        params = build(_CFG, inst).DatasetParameters
+        params = build(_CFG, inst).dataset_params
         # Phase BM — 4 pre-BM (pKey/pValues + Template/Completion) + 2
         # BM date params (pL2ftTtDateStart/End) = 6.
-        assert params is not None and len(params) == 6, build.__name__
+        assert len(params) == 6, build.__name__
         by_name = _string_ds_params(params)
         assert by_name["pKey"].ValueType == "SINGLE_VALUED"
         assert by_name["pValues"].ValueType == "SINGLE_VALUED"
@@ -857,8 +846,7 @@ def test_tt_datasets_declare_cascade_and_pushdown_parameters() -> None:
     from dataclasses import replace
     no_tt = replace(inst, transfer_templates=[])
     assert not declared_template_names(no_tt)
-    params = build_tt_instances_dataset(_CFG, no_tt).DatasetParameters
-    assert params is not None
+    params = build_tt_instances_dataset(_CFG, no_tt).dataset_params
     by_name = _string_ds_params(params)
     assert by_name["pL2ftTtTemplate"].DefaultValues.StaticValues == [
         L2FT_ALL_SENTINEL,
@@ -938,7 +926,7 @@ def _exc_dataset_sql(builder_name: str, yaml_path: Path) -> str:
     inst = load_instance(yaml_path)
     cfg = replace(_CFG, db=replace(_CFG.db, table_prefix=yaml_path.stem))
     builder = getattr(ds_mod, builder_name)
-    aws_ds: DataSet = builder(cfg, inst)
+    aws_ds: BuiltDataset = builder(cfg, inst)
     return _ds_sql(aws_ds)
 
 
@@ -1067,8 +1055,13 @@ def test_exc_dead_limit_schedules_filters_outbound_debit() -> None:
 def test_exc_dataset_contract_columns_match_builder(
     ds_id: str, builder_name: str,
 ) -> None:
-    """Every exception dataset's contract columns match its SQL
-    projection — visual ds["col"] references resolve cleanly."""
+    """Every exception dataset's contract columns appear in its SQL —
+    visual ds["col"] references resolve cleanly. (These ``build_exc_*``
+    builders are legacy, not wired into
+    ``build_all_l2_flow_tracing_datasets`` — replaced by the unified
+    UNION-ALL dataset — so they aren't swept by
+    ``test_dataset_sql_contract_projection``; this is their only
+    column-projection coverage.)"""
     import recon_gen.apps.l2_flow_tracing.datasets as ds_mod
     contract_name_map = {
         "l2ft-exc-chain-orphans-ds": "EXC_CHAIN_ORPHANS_CONTRACT",
@@ -1083,12 +1076,12 @@ def test_exc_dataset_contract_columns_match_builder(
     }
     contract = getattr(ds_mod, contract_name_map[ds_id])
     builder = getattr(ds_mod, builder_name)
-    aws_ds = builder(_CFG, load_instance(SASQUATCH_PR_YAML))
-    cols = {
-        c.Name for c in _ds_columns(aws_ds)
-    }
-    expected = {c.name for c in contract.columns}
-    assert cols == expected
+    sql = builder(_CFG, load_instance(SASQUATCH_PR_YAML)).sql
+    missing = [
+        c.name for c in contract.columns
+        if not re.search(rf"\b{re.escape(c.name)}\b", sql)
+    ]
+    assert not missing, f"contract columns absent from SQL: {missing}"
 
 
 def test_exceptions_sheet_unified_shape() -> None:
@@ -1321,10 +1314,10 @@ def test_postings_dataset_declares_cascade_and_pushdown_parameters() -> None:
     )
     inst = load_instance(SASQUATCH_PR_YAML)
     aws_ds = build_postings_dataset(_CFG, inst)
-    params = aws_ds.DatasetParameters
+    params = aws_ds.dataset_params
     # Phase BM — 5 pre-BM (pKey/pValues + Rail/Status/Bundle) + 2 BM
     # date params (pL2ftDateStart/End) = 7.
-    assert params is not None and len(params) == 7
+    assert len(params) == 7
     date_param_names = {
         p.DateTimeDatasetParameter.Name
         for p in params if p.DateTimeDatasetParameter is not None
@@ -1415,7 +1408,7 @@ def test_meta_values_dataset_is_long_form_with_metadata_key_column() -> None:
     assert "AS metadata_key" in sql
     assert "AS metadata_value" in sql
     # No dataset parameters — cascade is column-match driven.
-    assert aws_ds.DatasetParameters is None or aws_ds.DatasetParameters == []
+    assert not aws_ds.dataset_params
 
 
 def test_meta_key_param_maps_to_postings_only() -> None:

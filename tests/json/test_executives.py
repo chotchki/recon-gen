@@ -237,7 +237,7 @@ def test_transaction_summary_sql_aggregates_per_transfer():
     CTE stays in the SQL."""
     datasets = build_all_datasets(_TEST_CFG)
     txn_ds = datasets[0]
-    sql = next(iter(txn_ds.PhysicalTableMap.values())).CustomSql.SqlQuery
+    sql = txn_ds.sql
     assert "WITH per_transfer AS" in sql, (
         "exec_transaction_summary must aggregate per transfer_id first"
     )
@@ -258,7 +258,7 @@ def test_account_summary_sql_left_joins_activity():
     # BH.8 follow-up shifted account_summary to index 3 (after the
     # transaction-legs dataset at index 2; transaction-daily is index 1).
     acct_ds = datasets[3]
-    sql = next(iter(acct_ds.PhysicalTableMap.values())).CustomSql.SqlQuery
+    sql = acct_ds.sql
     assert "LEFT JOIN activity" in sql
 
 
@@ -288,7 +288,7 @@ def test_both_content_datasets_filter_to_status_posted():
     for ds in build_all_datasets(_TEST_CFG):
         if ds.DataSetId in skip_ids:
             continue
-        sql = next(iter(ds.PhysicalTableMap.values())).CustomSql.SqlQuery
+        sql = ds.sql
         assert "status = 'Posted'" in sql, (
             f"{ds.DataSetId} must filter status='Posted'"
         )

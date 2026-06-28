@@ -6,10 +6,10 @@ resolves the same placeholder's default from the dataset-parameter
 registry (``get_dataset_params``, keyed by ``visual_identifier``). These
 tests pin the renderer-agnostic half of that mechanism:
 
-- ``build_dataset(dataset_parameters=[...])`` lands the params on the
-  returned dataset's ``DatasetParameters`` field AND registers them for
-  App2 default substitution; a dataset built without params carries none,
-  so the existing 50+ datasets stay param-free.
+- ``build_dataset(dataset_parameters=[...])`` registers the params for
+  App2 default substitution, resolvable via ``BuiltDataset.dataset_params``
+  (the registry-backed read-through); a dataset built without params
+  carries none, so the existing 50+ datasets stay param-free.
 - AK.1 — each ``DataSetParameter.Id`` is a deterministic, dataset-scoped
   UUIDv5 derived from ``(dataset_id, name)`` by ``_assign_dataset_param_ids``,
   so two datasets sharing a param name (``pKey`` across several L2FT
@@ -51,9 +51,9 @@ _CFG = make_test_config()
 
 
 def test_dataset_parameter_omitted_when_not_provided() -> None:
-    """A DataSet built without ``dataset_parameters`` carries none — the
-    ``DatasetParameters`` field stays ``None`` and the App2 registry
-    resolves to ``[]`` — so the existing 50+ datasets stay param-free."""
+    """A dataset built without ``dataset_parameters`` carries none — both
+    ``BuiltDataset.dataset_params`` and the App2 registry resolve to
+    ``[]`` — so the existing 50+ datasets stay param-free."""
     from recon_gen.common.dataset_contract import get_dataset_params
 
     contract = DatasetContract(columns=[ColumnSpec("col", "STRING")])
@@ -62,13 +62,13 @@ def test_dataset_parameter_omitted_when_not_provided() -> None:
         "SELECT 1 AS col", contract,
         visual_identifier="noop-ds",
     )
-    assert ds.DatasetParameters is None
+    assert ds.dataset_params == []
     assert get_dataset_params("noop-ds") == []
 
 
 def test_build_dataset_propagates_dataset_parameters() -> None:
-    """``build_dataset(..., dataset_parameters=[...])`` lands the params
-    on the returned dataset's ``DatasetParameters`` field."""
+    """``build_dataset(..., dataset_parameters=[...])`` makes the params
+    resolvable via ``BuiltDataset.dataset_params``."""
     contract = DatasetContract(columns=[ColumnSpec("col", "STRING")])
     params = [
         DatasetParameter(StringDatasetParameter=StringDatasetParameter(
@@ -85,8 +85,7 @@ def test_build_dataset_propagates_dataset_parameters() -> None:
         visual_identifier="with-params-ds",
         dataset_parameters=params,
     )
-    assert ds.DatasetParameters is not None
-    sp = ds.DatasetParameters[0].StringDatasetParameter
+    sp = ds.dataset_params[0].StringDatasetParameter
     assert sp is not None
     assert sp.Name == "pKey"
 
@@ -174,8 +173,7 @@ def test_cascade_build_assigns_deterministic_param_ids() -> None:
             )),
         ],
     )
-    params = ds_aws.DatasetParameters
-    assert params is not None
+    params = ds_aws.dataset_params
     pkey, pvalues = (p.StringDatasetParameter for p in params)
     assert pkey is not None and pvalues is not None
 
@@ -223,7 +221,7 @@ def test_dataset_param_ids_are_valid_unique_uuids_across_all_apps() -> None:
 
     seen: dict[str, tuple[str, str]] = {}
     for ds in datasets:
-        for p in (ds.DatasetParameters or []):
+        for p in ds.dataset_params:
             variant = (
                 p.StringDatasetParameter
                 or p.IntegerDatasetParameter

@@ -72,11 +72,10 @@ from recon_gen.apps.investigation.datasets import (
 )
 from recon_gen.common.config import Config
 from recon_gen.common.spine._emit_helpers import DEFAULT_PREFIX
+from recon_gen.common.dataset_contract import BuiltDataset
 from recon_gen.common.models import (
-    DataSet,
     IntegerDatasetParameter,
     IntegerDatasetParameterDefaultValues,
-    PhysicalTable,
     StringDatasetParameter,
 )
 from recon_gen.common.tree import (
@@ -193,18 +192,15 @@ def _parameter_controls(
     return _sheet_by_id(sheet_id, cfg).parameter_controls
 
 
-def _custom_sql(ds: DataSet, key: str | None = None) -> str:
-    """Optional-cascade strip: pull the CustomSql.SqlQuery from a dataset.
+def _custom_sql(ds: BuiltDataset) -> str:
+    """Pull the registered SQL from a built dataset.
 
-    All Investigation datasets are CustomSql-backed by construction, so
-    the ``CustomSql is not None`` assertion can never fail in practice.
+    ``build_dataset`` registers each dataset's SQL under its
+    visual_identifier; ``BuiltDataset.sql`` resolves it. Every dataset
+    builds exactly one physical table, so there's a single SQL per
+    dataset (the pre-DW.8.1.b per-table-key lookup was redundant).
     """
-    table: PhysicalTable = (
-        ds.PhysicalTableMap[key] if key is not None
-        else next(iter(ds.PhysicalTableMap.values()))
-    )
-    assert table.CustomSql is not None, "Dataset must be CustomSql-backed"
-    return table.CustomSql.SqlQuery
+    return ds.sql
 
 
 def _visual_kinds(sheet: Sheet) -> list[str]:
@@ -645,9 +641,8 @@ def test_sigma_pushdown_dataset_carries_integer_dataset_parameter():
         build_volume_anomalies_dataset,
     )
     ds = build_volume_anomalies_dataset(_TEST_CFG)
-    assert ds.DatasetParameters is not None
-    assert len(ds.DatasetParameters) == 1
-    integer_param = ds.DatasetParameters[0].IntegerDatasetParameter
+    assert len(ds.dataset_params) == 1
+    integer_param = ds.dataset_params[0].IntegerDatasetParameter
     assert integer_param is not None
     assert integer_param.Name == "pInvAnomaliesSigma"
     assert integer_param.ValueType == "SINGLE_VALUED"
@@ -664,7 +659,7 @@ def test_sigma_pushdown_sql_contains_qs_placeholder():
         build_volume_anomalies_dataset,
     )
     ds = build_volume_anomalies_dataset(_TEST_CFG)
-    sql = _custom_sql(ds, "inv-volume-anomalies")
+    sql = _custom_sql(ds)
     assert "<<$pInvAnomaliesSigma>>" in sql
     assert "z_score >=" in sql
 
@@ -835,7 +830,7 @@ def test_money_trail_dataset_declares_three_pushdown_parameters():
     ``apps/investigation/app.py``."""
     datasets = build_all_datasets(_TEST_CFG, _TEST_L2)
     money_trail = datasets[3]
-    params = money_trail.DatasetParameters or []
+    params = money_trail.dataset_params
     by_name: dict[str, StringDatasetParameter | IntegerDatasetParameter] = {}
     for dp in params:
         if dp.StringDatasetParameter is not None:
@@ -925,7 +920,7 @@ def test_money_trail_roots_companion_dataset_is_unfiltered():
     # Critical: NO pushdown parameters here — the dropdown's option
     # fetch must see every chain.
     assert "<<$" not in sql
-    assert not (roots.DatasetParameters or [])
+    assert not (roots.dataset_params)
 
 
 def test_money_trail_roots_contract_is_single_column():
@@ -1106,7 +1101,7 @@ def test_account_network_dataset_declares_two_pushdown_parameters():
     its analysis-level twin via MappedDataSetParameters declared in
     ``apps/investigation/app.py``."""
     ds = build_all_datasets(_TEST_CFG, _TEST_L2)[5]
-    params = ds.DatasetParameters or []
+    params = ds.dataset_params
     by_name: dict[str, StringDatasetParameter | IntegerDatasetParameter] = {}
     for dp in params:
         if dp.StringDatasetParameter is not None:

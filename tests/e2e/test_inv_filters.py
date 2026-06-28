@@ -57,14 +57,7 @@ def _sql_and_params_for(
     builder: "Callable[..., Any]", *args: Any,
 ) -> tuple[str, list["DatasetParameter"]]:
     ds = builder(*args)
-    physical = next(iter(ds.PhysicalTableMap.values()))
-    assert physical.CustomSql is not None, "Dataset missing CustomSql"
-    sql = physical.CustomSql.SqlQuery
-    # DataSet.DatasetParameters is `None` when the dataset declares no
-    # `<<$pName>>` parameters (e.g. the volume-anomalies distribution
-    # dataset, which reads a single matview with no param-bind columns).
-    # `list(None)` would TypeError — fall back to an empty list.
-    return sql, list(ds.DatasetParameters or ())
+    return ds.sql, list(ds.dataset_params)
 
 
 def test_min_sigma_slider_shrinks_anomalies_kpi(inv_dashboard_driver: tuple["DashboardDriver", str]) -> None:

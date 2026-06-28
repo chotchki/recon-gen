@@ -54,7 +54,7 @@ from recon_gen.apps.l1_dashboard.app import (
     _UNBUNDLED_AGING_TITLE,
     build_l1_dashboard_app,
 )
-from recon_gen.common.models import DataSet
+from recon_gen.common.dataset_contract import BuiltDataset
 from recon_gen.common.sheets.app_info import APP_INFO_SHEET_NAME
 from recon_gen.common.tree import App, Sheet, TextBox, VisualLike
 from recon_gen.common.tree.controls import (
@@ -295,10 +295,8 @@ def test_drift_dataset_sql_targets_prefixed_l1_views() -> None:
     drift_ds = build_drift_dataset(_CFG, instance)
     ledger_ds = build_ledger_drift_dataset(_CFG, instance)
 
-    drift_sql = next(iter(drift_ds.PhysicalTableMap.values())).CustomSql
-    ledger_sql = next(iter(ledger_ds.PhysicalTableMap.values())).CustomSql
-    assert drift_sql is not None
-    assert ledger_sql is not None
+    drift_sql = drift_ds.sql
+    ledger_sql = ledger_ds.sql
     # Y.2.g — SQL now also carries the per-sheet pushdown WHERE
     # (account_id sentinel-OR + account_role IN (...)).
     # AO.1.impl — SELECT * was expanded to an explicit column list so
@@ -309,12 +307,12 @@ def test_drift_dataset_sql_targets_prefixed_l1_views() -> None:
     # (UNION ALL'd matview over drift + ledger_drift), narrowed by
     # ``account_class = 'leaf'`` / ``account_class = 'parent'``. The
     # FROM-clause assertion follows the actual source.
-    assert drift_sql.SqlQuery.startswith("SELECT account_id")
-    assert f"FROM {prefix}_drift_summary" in drift_sql.SqlQuery
-    assert "account_class = 'leaf'" in drift_sql.SqlQuery
-    assert ledger_sql.SqlQuery.startswith("SELECT account_id")
-    assert f"FROM {prefix}_drift_summary" in ledger_sql.SqlQuery
-    assert "account_class = 'parent'" in ledger_sql.SqlQuery
+    assert drift_sql.startswith("SELECT account_id")
+    assert f"FROM {prefix}_drift_summary" in drift_sql
+    assert "account_class = 'leaf'" in drift_sql
+    assert ledger_sql.startswith("SELECT account_id")
+    assert f"FROM {prefix}_drift_summary" in ledger_sql
+    assert "account_class = 'parent'" in ledger_sql
 
 
 def test_bo_4_drift_kpis_use_abs_drift_to_match_timelines_sign_convention() -> None:
@@ -384,16 +382,10 @@ def test_bo_4_drift_kpis_use_abs_drift_to_match_timelines_sign_convention() -> N
     # an abs_drift column — without this the KPI binding above would
     # fail at deploy / fetch time.
     instance = default_l2_instance()
-    drift_sql = next(iter(
-        build_drift_dataset(_CFG, instance).PhysicalTableMap.values(),
-    )).CustomSql
-    ledger_sql = next(iter(
-        build_ledger_drift_dataset(_CFG, instance).PhysicalTableMap.values(),
-    )).CustomSql
-    assert drift_sql is not None
-    assert ledger_sql is not None
-    assert " AS abs_drift" in drift_sql.SqlQuery
-    assert " AS abs_drift" in ledger_sql.SqlQuery
+    drift_sql = build_drift_dataset(_CFG, instance).sql
+    ledger_sql = build_ledger_drift_dataset(_CFG, instance).sql
+    assert " AS abs_drift" in drift_sql
+    assert " AS abs_drift" in ledger_sql
 
 
 # -- Drift Timelines sheet (M.2b.6) ------------------------------------------
@@ -464,21 +456,17 @@ def test_drift_timeline_datasets_registered_and_aggregate_in_sql() -> None:
 
     drift_tl_ds = build_drift_timeline_dataset(_CFG, instance)
     ledger_tl_ds = build_ledger_drift_timeline_dataset(_CFG, instance)
-    drift_sql = next(iter(drift_tl_ds.PhysicalTableMap.values())).CustomSql
-    ledger_sql = next(
-        iter(ledger_tl_ds.PhysicalTableMap.values())
-    ).CustomSql
-    assert drift_sql is not None
-    assert ledger_sql is not None
+    drift_sql = drift_tl_ds.sql
+    ledger_sql = ledger_tl_ds.sql
     # SQL must aggregate ABS(drift) by (day, role) on the prefixed
     # invariant matview — that's the L1-invariant promise + the
     # per-render-not-per-row efficiency win.
-    assert f"FROM {prefix}_drift" in drift_sql.SqlQuery
-    assert "SUM(ABS(drift))" in drift_sql.SqlQuery
-    assert "GROUP BY business_day_end, account_role" in drift_sql.SqlQuery
-    assert f"FROM {prefix}_ledger_drift" in ledger_sql.SqlQuery
-    assert "SUM(ABS(drift))" in ledger_sql.SqlQuery
-    assert "GROUP BY business_day_end, account_role" in ledger_sql.SqlQuery
+    assert f"FROM {prefix}_drift" in drift_sql
+    assert "SUM(ABS(drift))" in drift_sql
+    assert "GROUP BY business_day_end, account_role" in drift_sql
+    assert f"FROM {prefix}_ledger_drift" in ledger_sql
+    assert "SUM(ABS(drift))" in ledger_sql
+    assert "GROUP BY business_day_end, account_role" in ledger_sql
 
 
 # -- Overdraft sheet (M.2a.4) ------------------------------------------------
@@ -519,12 +507,11 @@ def test_overdraft_dataset_registered_and_targets_l1_view() -> None:
 
     instance = default_l2_instance()
     overdraft_ds = build_overdraft_dataset(_CFG, instance)
-    sql = next(iter(overdraft_ds.PhysicalTableMap.values())).CustomSql
-    assert sql is not None
+    sql = overdraft_ds.sql
     # Y.2.g — SQL also carries the Account / Account-Role pushdown WHERE.
     # AO.1.impl — SELECT * expanded to wrap stored_balance cents → dollars.
-    assert sql.SqlQuery.startswith("SELECT account_id")
-    assert f"FROM {_CFG.db.table_prefix}_overdraft" in sql.SqlQuery
+    assert sql.startswith("SELECT account_id")
+    assert f"FROM {_CFG.db.table_prefix}_overdraft" in sql
 
 
 # -- Limit Breach sheet (M.2a.5) ---------------------------------------------
@@ -564,11 +551,10 @@ def test_limit_breach_dataset_registered_and_targets_l1_view() -> None:
 
     instance = default_l2_instance()
     lb_ds = build_limit_breach_dataset(_CFG, instance)
-    sql = next(iter(lb_ds.PhysicalTableMap.values())).CustomSql
-    assert sql is not None
+    sql = lb_ds.sql
     # AO.1.impl — SELECT * expanded to wrap outbound_total + cap cents → dollars.
-    assert sql.SqlQuery.startswith("SELECT account_id")
-    assert f"FROM {_CFG.db.table_prefix}_limit_breach" in sql.SqlQuery
+    assert sql.startswith("SELECT account_id")
+    assert f"FROM {_CFG.db.table_prefix}_limit_breach" in sql
 
 
 # -- L1 Exceptions sheet (M.2a.6) ---------------------------------------
@@ -612,9 +598,7 @@ def test_l1_exceptions_dataset_reads_matview() -> None:
 
     instance = default_l2_instance()
     te_ds = build_l1_exceptions_dataset(_CFG, instance)
-    sql_obj = next(iter(te_ds.PhysicalTableMap.values())).CustomSql
-    assert sql_obj is not None
-    sql = sql_obj.SqlQuery
+    sql = te_ds.sql
     # SQL wraps the prefixed matview. AO.1.impl — SELECT * expanded to
     # wrap the ``magnitude`` column cents → dollars.
     assert sql.startswith("SELECT check_type")
@@ -655,11 +639,10 @@ def test_transactions_dataset_registered_and_targets_matview() -> None:
 
     instance = default_l2_instance()
     tx_ds = build_transactions_dataset(_CFG, instance)
-    sql_obj = next(iter(tx_ds.PhysicalTableMap.values())).CustomSql
-    assert sql_obj is not None
+    sql = tx_ds.sql
     assert (
         f"FROM {_CFG.db.table_prefix}_current_transactions"
-        in sql_obj.SqlQuery
+        in sql
     )
 
 
@@ -757,7 +740,7 @@ def test_daily_statement_date_pushes_down_not_filter_group() -> None:
         ds = build(_CFG, inst)
         date_params = {
             p.DateTimeDatasetParameter.Name
-            for p in (ds.DatasetParameters or [])
+            for p in ds.dataset_params
             if p.DateTimeDatasetParameter is not None
         }
         assert P_L1_DS_BALANCE_DATE_DSP in date_params
@@ -783,11 +766,8 @@ def test_daily_statement_datasets_registered() -> None:
     summary_ds = build_daily_statement_summary_dataset(_CFG, instance)
     txn_ds = build_daily_statement_transactions_dataset(_CFG, instance)
 
-    summary_sql = next(
-        iter(summary_ds.PhysicalTableMap.values())
-    ).CustomSql
-    txn_sql = next(iter(txn_ds.PhysicalTableMap.values())).CustomSql
-    assert summary_sql is not None and txn_sql is not None
+    summary_sql = summary_ds.sql
+    txn_sql = txn_ds.sql
     # M.1a.9: summary reads from the daily_statement_summary matview
     # (the multi-CTE moved into the L1 schema). Transactions still
     # projects per-leg from current_transactions (which IS itself a
@@ -796,12 +776,12 @@ def test_daily_statement_datasets_registered() -> None:
     # (opening_balance / total_debits / total_credits / net_flow /
     # closing_balance_stored / closing_balance_recomputed / drift)
     # wrap cents → dollars at the dataset boundary.
-    assert summary_sql.SqlQuery.startswith("SELECT account_id")
+    assert summary_sql.startswith("SELECT account_id")
     assert (
         f"FROM {_CFG.db.table_prefix}_daily_statement_summary"
-        in summary_sql.SqlQuery
+        in summary_sql
     )
-    assert f"FROM {_CFG.db.table_prefix}_current_transactions" in txn_sql.SqlQuery
+    assert f"FROM {_CFG.db.table_prefix}_current_transactions" in txn_sql
 
 
 def test_daily_statement_transactions_business_day_is_dialect_aware() -> None:
@@ -820,17 +800,8 @@ def test_daily_statement_transactions_business_day_is_dialect_aware() -> None:
     cfg_pg = replace(_CFG, db=replace(_CFG.db, dialect=Dialect.POSTGRES))
     cfg_or = replace(_CFG, db=replace(_CFG.db, dialect=Dialect.ORACLE))
 
-    pg_cs = next(iter(
-        build_daily_statement_transactions_dataset(cfg_pg, instance)
-        .PhysicalTableMap.values()
-    )).CustomSql
-    or_cs = next(iter(
-        build_daily_statement_transactions_dataset(cfg_or, instance)
-        .PhysicalTableMap.values()
-    )).CustomSql
-    assert pg_cs is not None and or_cs is not None
-    sql_pg = pg_cs.SqlQuery
-    sql_or = or_cs.SqlQuery
+    sql_pg = build_daily_statement_transactions_dataset(cfg_pg, instance).sql
+    sql_or = build_daily_statement_transactions_dataset(cfg_or, instance).sql
 
     assert "DATE_TRUNC('day', tx.posting) AS business_day" in sql_pg
     assert "CAST(TRUNC(tx.posting) AS TIMESTAMP) AS business_day" in sql_or
@@ -889,12 +860,8 @@ def test_daily_statement_transactions_projects_running_balance() -> None:
     # from the OVER (PARTITION BY ...) shape.
     for dialect in (Dialect.POSTGRES, Dialect.ORACLE, Dialect.DUCKDB):
         cfg = replace(_CFG, db=replace(_CFG.db, dialect=dialect))
-        cs = next(iter(
-            build_daily_statement_transactions_dataset(cfg, instance)
-            .PhysicalTableMap.values()
-        )).CustomSql
-        assert cs is not None
-        sql = cs.SqlQuery
+        ds = build_daily_statement_transactions_dataset(cfg, instance)
+        sql = ds.sql
 
         # The running-balance projection (dialect-invariant fragments).
         assert "SUM(tx.amount_money) OVER (" in sql, (
@@ -947,8 +914,7 @@ def test_daily_statement_transactions_projects_running_balance() -> None:
         # The InputColumn list (driven from the contract) carries the
         # new column on every dialect — QS-side declared column shape
         # matches the projected SQL.
-        cols = cs.Columns or []
-        col_names = [c.Name for c in cols]
+        col_names = [c.name for c in ds.contract.columns]
         assert "running_balance" in col_names, (
             f"{dialect.name}: dataset InputColumns must declare "
             f"running_balance; got {col_names!r}"
@@ -997,11 +963,7 @@ def test_daily_statement_balance_date_narrow_renders_a_portable_day_string() -> 
             build_daily_statement_summary_dataset,
             build_daily_statement_transactions_dataset,
         ):
-            cs = next(iter(
-                build(cfg, instance).PhysicalTableMap.values()
-            )).CustomSql
-            assert cs is not None
-            sql = cs.SqlQuery
+            sql = build(cfg, instance).sql
             # The bug shape — the param fed into a day-trunc.
             assert f"TRUNC({param}" not in sql
             # The bug shape we hit at AR.2 — SUBSTR on a timestamp param.
@@ -1508,12 +1470,7 @@ def test_pending_aging_buckets_computed_in_dataset_sql() -> None:
         build_stuck_pending_dataset,
     )
 
-    cs = next(iter(
-        build_stuck_pending_dataset(_CFG, default_l2_instance())
-        .PhysicalTableMap.values()
-    )).CustomSql
-    assert cs is not None
-    sql = cs.SqlQuery
+    sql = build_stuck_pending_dataset(_CFG, default_l2_instance()).sql
     assert "CASE" in sql and "age_seconds" in sql
     assert "AS stuck_pending_aging_bucket" in sql
     for label in ("'1: 0-6h'", "'2: 6-24h'", "'3: 1-3d'",
@@ -1560,14 +1517,12 @@ def test_pending_aging_dataset_registered() -> None:
 
     instance = default_l2_instance()
     sp_ds = build_stuck_pending_dataset(_CFG, instance)
-    sql_obj = next(iter(sp_ds.PhysicalTableMap.values())).CustomSql
-    assert sql_obj is not None
-    sql = sql_obj.SqlQuery
+    sql = sp_ds.sql
     # AO.1.impl — SELECT t.* expanded to wrap amount_money cents → dollars.
     assert sql.startswith("SELECT t.transaction_id")
     assert f"FROM {_CFG.db.table_prefix}_stuck_pending t" in sql
     assert "<<$pL1PendingType>>" in sql and "<<$pL1PendingRail>>" in sql
-    assert sp_ds.DatasetParameters  # the pushdown dataset params are wired
+    assert sp_ds.dataset_params  # the pushdown dataset params are wired
 
 
 # -- Unbundled Aging sheet (M.2b.11) -----------------------------------------
@@ -1614,12 +1569,7 @@ def test_unbundled_aging_uses_4_buckets() -> None:
         build_stuck_unbundled_dataset,
     )
 
-    cs = next(iter(
-        build_stuck_unbundled_dataset(_CFG, default_l2_instance())
-        .PhysicalTableMap.values()
-    )).CustomSql
-    assert cs is not None
-    sql = cs.SqlQuery
+    sql = build_stuck_unbundled_dataset(_CFG, default_l2_instance()).sql
     assert "CASE" in sql and "age_seconds" in sql
     assert "AS stuck_unbundled_aging_bucket" in sql
     for label in ("'1: <1d'", "'2: 1-2d'", "'3: 2-7d'", "'4: >7d'"):
@@ -1658,14 +1608,12 @@ def test_unbundled_aging_dataset_registered() -> None:
 
     instance = default_l2_instance()
     su_ds = build_stuck_unbundled_dataset(_CFG, instance)
-    sql_obj = next(iter(su_ds.PhysicalTableMap.values())).CustomSql
-    assert sql_obj is not None
-    sql = sql_obj.SqlQuery
+    sql = su_ds.sql
     # AO.1.impl — SELECT t.* expanded to wrap amount_money cents → dollars.
     assert sql.startswith("SELECT t.transaction_id")
     assert f"FROM {_CFG.db.table_prefix}_stuck_unbundled t" in sql
     assert "<<$pL1UnbundledType>>" in sql and "<<$pL1UnbundledRail>>" in sql
-    assert su_ds.DatasetParameters
+    assert su_ds.dataset_params
 
 
 # -- Supersession Audit sheet (M.2b.12) --------------------------------------
@@ -1723,39 +1671,37 @@ def test_supersession_datasets_registered_and_target_base_tables() -> None:
 
     tx_ds = build_supersession_transactions_dataset(_CFG, instance)
     db_ds = build_supersession_daily_balances_dataset(_CFG, instance)
-    tx_sql = next(iter(tx_ds.PhysicalTableMap.values())).CustomSql
-    db_sql = next(iter(db_ds.PhysicalTableMap.values())).CustomSql
-    assert tx_sql is not None
-    assert db_sql is not None
+    tx_sql = tx_ds.sql
+    db_sql = db_ds.sql
     # Both target the BASE tables (no `current_` prefix).
-    assert f" {prefix}_transactions" in tx_sql.SqlQuery
-    assert f"{prefix}_current_transactions" not in tx_sql.SqlQuery
-    assert f" {prefix}_daily_balances" in db_sql.SqlQuery
-    assert f"{prefix}_current_daily_balances" not in db_sql.SqlQuery
+    assert f" {prefix}_transactions" in tx_sql
+    assert f"{prefix}_current_transactions" not in tx_sql
+    assert f" {prefix}_daily_balances" in db_sql
+    assert f"{prefix}_current_daily_balances" not in db_sql
     # Both surface only logical keys with multiple entries via window
     # function (window form survives QS dropdown query rewriting where
     # the IN-subquery + ORDER BY combo doesn't).
     # tx uses the DR.6-shared detection constants (so the picker companion
     # can't drift from the audit); assert against them so a rename fires here.
-    assert _SUPERSESSION_ENTRY_COUNT_WINDOW in tx_sql.SqlQuery
+    assert _SUPERSESSION_ENTRY_COUNT_WINDOW in tx_sql
     assert (
         "COUNT(*) OVER (PARTITION BY account_id, business_day_start)"
-        in db_sql.SqlQuery
+        in db_sql
     )
     # DR.1.b — selection requires the (id / account-day) trail to contain a
     # real supersession; without it, densified-plant id collisions (replicas
     # reuse one id with NO supersedes) over-select (77→10 on the baseline).
-    assert _SUPERSESSION_SELECT_PREDICATE in tx_sql.SqlQuery
-    assert "entry_count > 1" in db_sql.SqlQuery
-    assert "has_supersede = 1" in db_sql.SqlQuery
-    assert _SUPERSESSION_HAS_SUPERSEDE_WINDOW in tx_sql.SqlQuery
-    assert "MAX(CASE WHEN supersedes IS NOT NULL" in db_sql.SqlQuery
+    assert _SUPERSESSION_SELECT_PREDICATE in tx_sql
+    assert "entry_count > 1" in db_sql
+    assert "has_supersede = 1" in db_sql
+    assert _SUPERSESSION_HAS_SUPERSEDE_WINDOW in tx_sql
+    assert "MAX(CASE WHEN supersedes IS NOT NULL" in db_sql
     # DR.1.a — the no-reason flag compares against the id's OWN minimum entry,
     # not `entry > 1` (entry is a global serial → `> 1` flagged every original
     # row). Guard against regression to the old form.
-    assert "MIN(entry) OVER (PARTITION BY id)" in tx_sql.SqlQuery
-    assert "entry > min_entry" in tx_sql.SqlQuery
-    assert "entry > 1 AND supersedes IS NULL" not in tx_sql.SqlQuery
+    assert "MIN(entry) OVER (PARTITION BY id)" in tx_sql
+    assert "entry > min_entry" in tx_sql
+    assert "entry > 1 AND supersedes IS NULL" not in tx_sql
 
     # DR.7.d — the DR.6 Transaction ID dropdown's option universe
     # (DS_L1_SUPERSESSION_TX_IDS) MUST project the SAME superseded-id set
@@ -1767,17 +1713,16 @@ def test_supersession_datasets_registered_and_target_base_tables() -> None:
     # before — the adversarial review flagged the missing static guard).
     assert DS_L1_SUPERSESSION_TX_IDS in registered_ids
     picker_ds = build_l1_supersession_tx_ids_dataset(_CFG, instance)
-    picker_sql = next(iter(picker_ds.PhysicalTableMap.values())).CustomSql
-    assert picker_sql is not None
+    picker_sql = picker_ds.sql
     for shared in (
         _SUPERSESSION_ENTRY_COUNT_WINDOW,
         _SUPERSESSION_HAS_SUPERSEDE_WINDOW,
         _SUPERSESSION_SELECT_PREDICATE,
     ):
-        assert shared in picker_sql.SqlQuery, (
+        assert shared in picker_sql, (
             f"DR.6 picker dataset SQL must share the audit's detection "
             f"predicate {shared!r} so their id universes can't drift; "
-            f"saw:\n{picker_sql.SqlQuery}"
+            f"saw:\n{picker_sql}"
         )
 
 
@@ -2084,10 +2029,10 @@ def test_y2g_enum_value_helpers_reflect_l2_instance() -> None:
     ]
 
 
-def _dataset_param_names(ds: DataSet) -> list[str]:
+def _dataset_param_names(ds: BuiltDataset) -> list[str]:
     """The ``Name`` of each StringDatasetParameter on a built DataSet."""
     out: list[str] = []
-    for dp in ds.DatasetParameters or []:
+    for dp in ds.dataset_params:
         sdp = dp.StringDatasetParameter
         if sdp is not None:
             out.append(sdp.Name)
@@ -2145,9 +2090,7 @@ def test_y2g_datasets_declare_pushdown_params() -> None:
         ds = builder(_CFG, inst)
         names = set(_dataset_param_names(ds))
         assert names == expected, f"{builder.__name__}: {names} != {expected}"
-        cs = next(iter(ds.PhysicalTableMap.values())).CustomSql
-        assert cs is not None
-        sql = cs.SqlQuery
+        sql = ds.sql
         for pn in expected:
             assert f"<<${pn}>>" in sql, f"{builder.__name__} SQL missing <<${pn}>>"
 
@@ -2187,10 +2130,8 @@ def test_y2g_companion_datasets_registered_and_unparameterized() -> None:
         (build_l1_tx_facets_dataset, "SELECT DISTINCT status, origin"),
     ):
         ds = builder(_CFG, inst)
-        assert not ds.DatasetParameters, f"{builder.__name__} should be unparameterized"
-        cs = next(iter(ds.PhysicalTableMap.values())).CustomSql
-        assert cs is not None
-        sql = cs.SqlQuery
+        assert not ds.dataset_params, f"{builder.__name__} should be unparameterized"
+        sql = ds.sql
         assert sql.startswith(frag)
         assert "<<$" not in sql
 
@@ -2216,9 +2157,7 @@ def test_aa_b_1_l1_accounts_dataset_is_unparameterized() -> None:
 
     inst = default_l2_instance()
     ds = build_l1_accounts_dataset(_CFG, inst)
-    cs = next(iter(ds.PhysicalTableMap.values())).CustomSql
-    assert cs is not None
-    sql = cs.SqlQuery
+    sql = ds.sql
     assert "SELECT DISTINCT account_id, account_role" in sql
     # No <<$pX>> substitutions, no WHERE on account_role.
     assert "<<$" not in sql, (
@@ -2229,9 +2168,9 @@ def test_aa_b_1_l1_accounts_dataset_is_unparameterized() -> None:
     # bare-string check covers any future re-introduction by name.
     assert "pL1DsRole" not in sql
     # No DatasetParameters declared.
-    assert not ds.DatasetParameters, (
+    assert not ds.dataset_params, (
         f"l1-accounts-ds should be unparameterized post-BR.x, but "
-        f"DatasetParameters={ds.DatasetParameters!r}"
+        f"DatasetParameters={ds.dataset_params!r}"
     )
 
 
@@ -2326,9 +2265,7 @@ def test_bo_1_daily_statement_account_picker_sources_balance_only() -> None:
 
     # Contract 1: source is balance-only.
     ds = build_l1_ds_accounts_dataset(_CFG, inst)
-    cs = next(iter(ds.PhysicalTableMap.values())).CustomSql
-    assert cs is not None
-    sql = cs.SqlQuery
+    sql = ds.sql
     assert "SELECT DISTINCT account_id, account_role" in sql
     # Must source from current_daily_balances ONLY — no UNION across
     # the wider universe.
@@ -2360,9 +2297,9 @@ def test_bo_1_daily_statement_account_picker_sources_balance_only() -> None:
         f"ForAnalysis endpoint — the 400-on-parameterized-dataset "
         f"that the cascade workaround masked). SQL is:\n{sql}"
     )
-    assert not ds.DatasetParameters, (
+    assert not ds.dataset_params, (
         f"CQ.4.a — DS_L1_DS_ACCOUNTS must declare no DatasetParameters "
-        f"(unparameterized source). Got {ds.DatasetParameters!r}"
+        f"(unparameterized source). Got {ds.dataset_params!r}"
     )
     assert "scope = 'internal'" in sql, (
         f"CQ.4.a — DS_L1_DS_ACCOUNTS must narrow to scope = 'internal' "

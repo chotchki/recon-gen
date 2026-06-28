@@ -52,18 +52,11 @@ _PREFIX = "pfx"
 
 
 def _extract_sql(cfg: "Config") -> str:
-    """Pull the rendered CustomSql query out of the L1 Exceptions
-    DataSet built against ``cfg``. The dataset's PhysicalTableMap has
-    exactly one CustomSql entry — yank ``SqlQuery`` from it.
+    """Pull the rendered SQL out of the L1 Exceptions dataset built
+    against ``cfg`` — ``build_dataset`` registers it under the dataset's
+    visual_identifier, which ``BuiltDataset.sql`` resolves.
     """
-    ds = build_l1_exceptions_dataset(cfg, default_l2_instance())
-    tables = list(ds.PhysicalTableMap.values())
-    assert len(tables) == 1, (
-        f"expected 1 PhysicalTable, got {len(tables)}"
-    )
-    cs = tables[0].CustomSql
-    assert cs is not None, "PhysicalTable.CustomSql is None"
-    return cs.SqlQuery
+    return build_l1_exceptions_dataset(cfg, default_l2_instance()).sql
 
 
 @pytest.fixture

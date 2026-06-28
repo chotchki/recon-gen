@@ -1,76 +1,19 @@
 """Tests for dataset column contracts.
 
-Validates that every dataset builder produces a DataSet whose InputColumn
-list matches its declared DatasetContract. Trimmed to Investigation-only
-after M.4.3 + M.4.4 deleted the AR + PR apps.
+Covers the ``DatasetContract`` primitives + the Oracle case-fold SQL
+wrapper. The per-builder "columns match contract" gate retired with the
+QS emitter (DW.8.1.b): build_dataset no longer emits an InputColumn list,
+and the genuine concern — every contract column appears in the dataset
+SQL — is owned by ``test_dataset_sql_contract_projection`` (which sweeps
+every builder in the apps' ``build_all_*`` sets).
 """
 
 from __future__ import annotations
-
-from typing import TYPE_CHECKING, Any, Callable
-
-import pytest
 
 from recon_gen.common.config import Config, DbConfig
 from tests._test_helpers import make_test_config
 from recon_gen.common.dataset_contract import ColumnSpec, DatasetContract
 from recon_gen.common.spine._emit_helpers import DEFAULT_PREFIX
-from recon_gen.apps.investigation import datasets as inv_datasets
-
-if TYPE_CHECKING:
-    from recon_gen.common.models import DataSet
-
-
-@pytest.fixture()
-def cfg() -> Config:
-    # N.3.f: Investigation builders require the cfg to carry a
-    # db_table_prefix matching the seeded DB. Z.C — replaces the prior
-    # auto-stamped l2_instance_prefix; pin to spec_example since the
-    # builders default to that L2 fixture.
-    return make_test_config(
-        aws_region="us-east-2",
-        db=DbConfig(table_prefix=DEFAULT_PREFIX),
-    )
-
-
-def _extract_column_names(dataset: "DataSet") -> list[str]:
-    """Pull the InputColumn names out of a built DataSet."""
-    for physical in dataset.PhysicalTableMap.values():
-        assert physical.CustomSql is not None
-        cols = physical.CustomSql.Columns or []
-        return [c.Name for c in cols]
-    raise AssertionError("No PhysicalTable found")
-
-
-# ---------------------------------------------------------------------------
-# Investigation contracts
-# ---------------------------------------------------------------------------
-
-INV_BUILDERS_AND_CONTRACTS = [
-    (inv_datasets.build_recipient_fanout_dataset,
-     inv_datasets.RECIPIENT_FANOUT_CONTRACT),
-    (inv_datasets.build_volume_anomalies_dataset,
-     inv_datasets.VOLUME_ANOMALIES_CONTRACT),
-    (inv_datasets.build_money_trail_dataset,
-     inv_datasets.MONEY_TRAIL_CONTRACT),
-]
-
-
-class TestInvContracts:
-    @pytest.mark.parametrize(
-        "builder,contract",
-        INV_BUILDERS_AND_CONTRACTS,
-        ids=[c.columns[0].name for _, c in INV_BUILDERS_AND_CONTRACTS],
-    )
-    def test_columns_match_contract(
-        self,
-        cfg: Config,
-        builder: "Callable[..., Any]",
-        contract: DatasetContract,
-    ) -> None:
-        ds = builder(cfg)
-        actual = _extract_column_names(ds)
-        assert actual == contract.column_names
 
 
 # ---------------------------------------------------------------------------
@@ -133,10 +76,7 @@ class TestOracleLowercaseAliasWrapper:
             contract=contract,
             visual_identifier=f"probe-vi-{id(contract)}",  # unique per call
         )
-        for physical in ds.PhysicalTableMap.values():
-            assert physical.CustomSql is not None
-            return physical.CustomSql.SqlQuery
-        raise AssertionError("no PhysicalTable")
+        return ds.sql
 
     def test_oracle_wraps_sql_with_lowercase_aliases(self) -> None:
         wrapped = self._build(

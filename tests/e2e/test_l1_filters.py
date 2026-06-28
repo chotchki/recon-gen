@@ -84,9 +84,7 @@ def _sql_and_params_for(
     ``_l1_default_date_binds(cfg)`` helper needed.
     """
     ds = builder(cfg, l2)
-    physical = next(iter(ds.PhysicalTableMap.values()))
-    assert physical.CustomSql is not None, "Dataset missing CustomSql"
-    return physical.CustomSql.SqlQuery, list(ds.DatasetParameters or [])
+    return ds.sql, list(ds.dataset_params)
 
 
 @pytest.mark.xfail(

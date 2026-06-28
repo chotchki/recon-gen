@@ -71,11 +71,11 @@ from recon_gen.common.config import Config
 from recon_gen.common.dataset_contract import (
     ColumnSpec,
     DatasetContract,
+    BuiltDataset,
     build_dataset,
 )
 from recon_gen.common.l2 import ThemePreset
 from recon_gen.common.l2.primitives import L2Instance, resolve_cadence
-from recon_gen.common.models import DataSet
 from recon_gen.common.sql import Dialect, dual_from
 from recon_gen.common.tree.datasets import Dataset
 from recon_gen.common.tree.structure import Sheet
@@ -236,7 +236,7 @@ def _matview_status_sql(
 
 def build_latest_balance_day_dataset(
     cfg: Config, *, app_segment: str,
-) -> DataSet:
+) -> BuiltDataset:
     """DK.5.kpi — Latest Balance Day KPI dataset.
 
     Real-query against the DK.1 singleton matview ``<prefix>_data_anchor``.
@@ -267,7 +267,7 @@ def build_latest_balance_day_dataset(
     )
 
 
-def build_liveness_dataset(cfg: Config, *, app_segment: str) -> DataSet:
+def build_liveness_dataset(cfg: Config, *, app_segment: str) -> BuiltDataset:
     """Trivial liveness query against the database catalog.
 
     Postgres queries ``information_schema.tables``; Oracle queries
@@ -299,7 +299,7 @@ def build_liveness_dataset(cfg: Config, *, app_segment: str) -> DataSet:
 
 def build_matview_status_dataset(
     cfg: Config, *, app_segment: str, view_specs: list[ViewSpec],
-) -> DataSet:
+) -> BuiltDataset:
     """Per-matview row count + most-recent date table.
 
     ``view_specs`` is a list of ``(name, date_col)`` tuples — the
