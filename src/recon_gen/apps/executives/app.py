@@ -42,8 +42,6 @@ from recon_gen.common.ids import (
     VisualId,
 )
 from recon_gen.common.l2 import L2Instance, ThemePreset
-from recon_gen.common.models import Analysis as ModelAnalysis
-from recon_gen.common.models import Dashboard as ModelDashboard
 from recon_gen.common.sheets.app_info import (
     APP_INFO_SHEET_DESCRIPTION,
     APP_INFO_SHEET_NAME,
@@ -996,29 +994,3 @@ def build_executives_app(
     )
     return app
 
-
-# ---------------------------------------------------------------------------
-# CLI / external-caller shims. Same shape as the other apps' shims.
-# Wired into the CLI in L.6.10.
-# ---------------------------------------------------------------------------
-
-def build_analysis(
-    cfg: Config, *, l2_instance: L2Instance | None = None,
-) -> ModelAnalysis:
-    """Build the complete Executives Analysis resource via the tree.
-
-    Forwards ``l2_instance`` to ``build_executives_app``; default
-    is the persona-neutral spec_example.
-    """
-    return build_executives_app(
-        cfg, l2_instance=l2_instance,
-    ).emit_analysis()
-
-
-def build_executives_dashboard(
-    cfg: Config, *, l2_instance: L2Instance | None = None,
-) -> ModelDashboard:
-    """Build the Executives Dashboard resource via the tree."""
-    return build_executives_app(
-        cfg, l2_instance=l2_instance,
-    ).emit_dashboard()

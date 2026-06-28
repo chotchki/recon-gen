@@ -78,8 +78,6 @@ _DS_APP_INFO_LIVENESS = app_info_liveness_id("inv")
 _DS_APP_INFO_MATVIEWS = app_info_matviews_id("inv")
 _DS_APP_INFO_LATEST_BALANCE_DAY = app_info_latest_balance_day_id("inv")
 from recon_gen.common.theme import resolve_l2_theme
-from recon_gen.common.models import Analysis as ModelAnalysis
-from recon_gen.common.models import Dashboard as ModelDashboard
 from recon_gen.common.tree import (
     Analysis,
     App,
@@ -1087,9 +1085,8 @@ def build_investigation_app(
 ) -> App:
     """Build the Investigation App tree (N.3.f — L2-fed).
 
-    Returns a fully-wired App ready for ``app.emit_analysis()`` /
-    ``app.emit_dashboard()``. The CLI calls this via the
-    ``build_analysis`` / ``build_investigation_dashboard`` shims below.
+    Returns a fully-wired App tree — App2 renders it, ``app.validate()``
+    checks it.
 
     Per the N.2 audit, Investigation is fed by the same institution
     YAML that drives L1 + L2FT. Z.C: the deployment + DB-table
@@ -1214,29 +1211,3 @@ def _analysis_name(cfg: Config) -> str:
     dashboard list."""
     return f"Investigation ({cfg.aws.deployment_name})"
 
-
-# ---------------------------------------------------------------------------
-# Public CLI shims — drop-in replacements for the imperative
-# ``apps.investigation.analysis.build_analysis`` /
-# ``build_investigation_dashboard``. Same signatures, byte-identical
-# JSON, just routed through the typed tree.
-# ---------------------------------------------------------------------------
-
-def build_analysis(
-    cfg: Config, *, l2_instance: L2Instance | None = None,
-) -> ModelAnalysis:
-    """Tree-backed replacement for the imperative ``build_analysis``.
-
-    Forwards ``l2_instance`` to ``build_investigation_app``; default
-    is the persona-neutral spec_example.
-    """
-    return build_investigation_app(cfg, l2_instance=l2_instance).emit_analysis()
-
-
-def build_investigation_dashboard(
-    cfg: Config, *, l2_instance: L2Instance | None = None,
-) -> ModelDashboard:
-    """Tree-backed replacement for the imperative builder."""
-    return build_investigation_app(
-        cfg, l2_instance=l2_instance,
-    ).emit_dashboard()

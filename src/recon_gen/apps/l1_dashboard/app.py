@@ -3332,33 +3332,3 @@ def build_l1_dashboard_app(
     return app
 
 
-# ---------------------------------------------------------------------------
-# CLI / external-caller shims. The CLI imports these directly and writes
-# the emit_analysis() / emit_dashboard() output to JSON files, mirroring
-# the AR / PR / Investigation / Executives shape.
-# ---------------------------------------------------------------------------
-
-
-def build_analysis(
-    cfg: Config,
-    *,
-    l2_instance: L2Instance | None = None,
-):
-    """Build the complete L1 Dashboard Analysis resource via the tree.
-
-    Forwards ``l2_instance`` to ``build_l1_dashboard_app``; default
-    behaviour (unset) auto-loads the canonical Sasquatch AR L2 fixture.
-    Return type is the AWS-shape Analysis dataclass from common.models.
-    """
-    return build_l1_dashboard_app(cfg, l2_instance=l2_instance).emit_analysis()
-
-
-def build_l1_dashboard_dashboard(
-    cfg: Config,
-    *,
-    l2_instance: L2Instance | None = None,
-):
-    """Build the L1 Dashboard Dashboard resource via the tree."""
-    return build_l1_dashboard_app(
-        cfg, l2_instance=l2_instance,
-    ).emit_dashboard()

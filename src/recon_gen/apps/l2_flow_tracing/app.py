@@ -1372,25 +1372,3 @@ def _populate_l2_exceptions_sheet(
     )
 
 
-# ---------------------------------------------------------------------------
-# CLI / external-caller shims. Mirror the L1 dashboard signature so the CLI
-# can plumb through generically.
-# ---------------------------------------------------------------------------
-
-
-def build_analysis(
-    cfg: Config,
-    *,
-    l2_instance: L2Instance | None = None,
-):
-    """Build the complete L2 Flow Tracing Analysis resource via the tree."""
-    return build_l2_flow_tracing_app(cfg, l2_instance=l2_instance).emit_analysis()
-
-
-def build_l2_flow_tracing_dashboard(
-    cfg: Config,
-    *,
-    l2_instance: L2Instance | None = None,
-):
-    """Build the L2 Flow Tracing Dashboard resource via the tree."""
-    return build_l2_flow_tracing_app(cfg, l2_instance=l2_instance).emit_dashboard()
