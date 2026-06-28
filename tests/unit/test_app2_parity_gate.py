@@ -1,10 +1,10 @@
-"""Phase DB.2 — App2 parity gate construction-time tests.
+"""App2 field-consumption gate — construction-time tests.
 
 The gate at ``App.resolve_auto_ids()`` walks every Visual on the
-analysis and asserts each dataclass field has a parity disposition
-entry in ``APP2_ATTRIBUTE_REGISTRY``. Catches the DA-shape gap class
-(tree adds a field, emit() lands it in QS JSON, App2 silently drops
-it) at the wiring site instead of months later.
+analysis and asserts each dataclass field has a disposition entry in
+``APP2_ATTRIBUTE_REGISTRY``. Catches the gap class (tree adds a field,
+App2's renderer silently drops it) at the wiring site instead of months
+later.
 """
 
 from __future__ import annotations
@@ -18,7 +18,6 @@ from recon_gen.common.ids import ParameterName, SheetId, VisualId
 from recon_gen.common.tree import AUTO, KPI, Analysis, App, Sheet
 from recon_gen.common.tree.app2_parity_registry import (
     APP2_ATTRIBUTE_REGISTRY,
-    HARDCODED_EMIT_INVENTORY,
     App2Consumed,
     App2ParityGap,
     ByDesign,
@@ -162,23 +161,6 @@ def test_registry_entries_use_only_typed_dispositions() -> None:
                 f"{type(entry).__name__}; expected App2Consumed / "
                 f"TreeOnly / ByDesign."
             )
-
-
-def test_hardcoded_emit_inventory_is_non_empty_and_well_formed() -> None:
-    """The hardcoded-emit inventory captures emit() literal hardcodes
-    that don't trace to a dataclass field. Operator-locked at DB.0 —
-    one-time enumeration, doesn't grow per-Visual."""
-    assert HARDCODED_EMIT_INVENTORY, "hardcoded-emit inventory unexpectedly empty"
-    valid = (App2Consumed, TreeOnly, ByDesign)
-    for hc in HARDCODED_EMIT_INVENTORY:
-        assert hc.visual in APP2_ATTRIBUTE_REGISTRY, (
-            f"hardcoded emit on unknown Visual kind {hc.visual!r}"
-        )
-        assert hc.emit_path, "emit_path empty"
-        assert isinstance(hc.disposition, valid), (
-            f"hardcoded {hc.visual}.{hc.emit_path} disposition is "
-            f"{type(hc.disposition).__name__}; expected typed."
-        )
 
 
 # ---------------------------------------------------------------------------
