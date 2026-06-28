@@ -1,10 +1,10 @@
 """Browser e2e: cross-sheet drill into Transactions widens the date
 range so the target transfer's row is visible.
 
-Parametrized over ``[qs, app2]`` (u.4.e.3) via ``l1_dashboard_driver``;
+Drives App2 (u.4.e.3) via ``l1_dashboard_driver``;
 the drill fires through the renderer-agnostic
-``drill_from_first_row_via_menu`` verb — QS right-clicks the row →
-context-menu item; App 2 clicks the row's "⋯" button → ``ctxmenu`` item.
+``drill_from_first_row_via_menu`` verb — App 2 clicks the row's "⋯"
+button → ``ctxmenu`` item.
 
 v8.5.7 — bug class regression (QS side). Pre-v8.5.7 a drill from a
 current-state sheet (Pending Aging — not in the universal date filter

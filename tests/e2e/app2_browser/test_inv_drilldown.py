@@ -1,9 +1,9 @@
 """Browser tests: Investigation drill-downs re-render the underlying visuals.
 
-Parametrized over ``[qs, app2]`` (u.4.e.3) via ``inv_dashboard_driver``;
+Drives App2 (u.4.e.3) via ``inv_dashboard_driver``;
 the row drill fires through ``drill_from_first_row_via_menu`` — the
 touching-edges drill is a ``DATA_POINT_MENU`` trigger, so left-click
-verbs (e.g. ``drill_from_first_row``) don't fire it on QS. The K.4.8
+verbs (e.g. ``drill_from_first_row``) don't fire it. The K.4.8
 invariant is that activating a row in the Account Network touching-edges
 table writes the row's counterparty into ``pInvANetworkAnchor`` and the
 table + Sankeys re-render around the new anchor — a same-sheet walk, so
@@ -12,7 +12,7 @@ to a new sheet".
 
 CS.2 (2026-06-09) — re-light after CR.6.a. Two prior blockers closed:
 
-1. **Anchor non-determinism (both renderers).** Handled by an explicit
+1. **Anchor non-determinism.** Handled by an explicit
    ``pick_filter("Anchor", [Juniper Ridge])`` BEFORE the baseline read,
    then an additional readback of the first row's source/target cells
    so the assertion compares row CONTENT (anchor identifier present)
@@ -80,14 +80,14 @@ def test_account_network_table_walk_rerenders_table(inv_dashboard_driver: tuple[
     loudly in that shape because every row would still carry the
     Juniper Ridge identifier.
 
-    CT.1 (2026-06-09) — the ``[app2]`` variant times out on CI's WSL2
-    runner at ``pick_filter("Anchor", [...])``: the picker writes the
-    parameter but no ``/visuals/*/data`` refetch ever fires within 30s.
+    CT.1 (2026-06-09) — App2 times out on CI's WSL2 runner at
+    ``pick_filter("Anchor", [...])``: the picker writes the parameter
+    but no ``/visuals/*/data`` refetch ever fires within 30s.
     Local-pass / CI-fail split — environment-sensitive, not a code
-    regression from CS.2's re-light. The ``[qs]`` variant covers the
-    same K.4.8 invariant against the production QuickSight renderer,
-    so the App2 leg gets a narrow skip while backlog #331
-    investigates the Anchor parameter binding's refetch wiring.
+    regression from CS.2's re-light. With QuickSight removed (Phase DW)
+    there's no second leg covering this K.4.8 walk-rerenders invariant,
+    so it currently has NO live coverage: the App2 leg skips pending
+    backlog #331's Anchor parameter refetch fix.
     """
     driver, dashboard_arg = inv_dashboard_driver
     if driver.__class__.__name__ == "App2Driver":

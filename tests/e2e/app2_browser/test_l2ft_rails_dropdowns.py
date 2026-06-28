@@ -1,11 +1,10 @@
 """Browser test: L2FT Rails sheet dropdowns narrow the Transactions table.
 
 X.1.g + Y.2.c regression guard — see ``_l2ft_dropdown_walk`` for the
-shared mechanics and the failure modes. Parametrized over ``[qs, app2]``
-(X.2.u.3) via ``l2ft_dashboard_driver``: the Rails dropdowns are
-MULTI_SELECT StaticValues, so ``make_filter_specs_for_sheet`` renders
-them in App2 too and the same ``<<$param>>`` SQL pushdown narrows both
-renderers (Y.2's QS/App2 convergence).
+shared mechanics and the failure modes. Drives App2 (X.2.u.3) via
+``l2ft_dashboard_driver``: the Rails dropdowns are MULTI_SELECT
+StaticValues, so ``make_filter_specs_for_sheet`` renders them in App2
+and the ``<<$param>>`` SQL pushdown narrows the Transactions table.
 """
 
 from __future__ import annotations

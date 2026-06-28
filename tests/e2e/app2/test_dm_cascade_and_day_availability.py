@@ -1,12 +1,11 @@
 """DM/DN — App2-only Daily Statement cascade + day-availability coverage.
 
 POLICY-2 browser coverage (CLAUDE.md build-hygiene contract) for three
-Daily Statement features that QuickSight cannot render, so these are
-App2-TARGETED tests (not ``[qs, app2]`` parametrized — the QS gap is a
-permanent renderer-capability limit documented via the structured triple:
-``NotImplementedError`` on ``QsEmbedDriver.filter_value`` /
-``QsEmbedDriver.day_availability`` + ``docs/reference/quicksight-quirks.md``
-+ ``[[project_qs_no_searchfilter_cascading]]``).
+Daily Statement features QuickSight couldn't render, so these are
+App2-TARGETED tests. The QS gap was a permanent renderer-capability limit
+(documented in ``docs/reference/quicksight-quirks.md`` +
+``[[project_qs_no_searchfilter_cascading]]``); QuickSight was removed in
+Phase DW.
 
 All three live on the L1 Dashboard ``Daily Statement`` sheet
 (``l1-sheet-daily-statement``):

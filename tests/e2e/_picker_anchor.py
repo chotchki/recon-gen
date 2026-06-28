@@ -281,7 +281,7 @@ def picker_value(
 
 def visual_column_label(spec: SheetAnchorSpec, sql_column: str) -> str:
     """Resolve a SQL column name (as declared on ``PickerSpec.column``)
-    to the display label QuickSight/App2 actually renders as the
+    to the display label App2 actually renders as the
     Table column header.
 
     Reads ``spec.contract`` (the ``DatasetContract`` carried alongside

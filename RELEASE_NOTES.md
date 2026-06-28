@@ -59,6 +59,49 @@ this release is the graceful exit.
   dropping it loses no coverage.
 - The App2 self-hosted renderer is now THE renderer, not a parity backstop for QuickSight.
 
+### Test-coverage integrity — the suite got more honest, not just smaller
+
+Pulling QuickSight lifted a rock. Collapsing the `[qs, app2]` parametrization to app2-only,
+plus an unfinished tier-migration, had left tests silently un-run — green checks that lied
+about coverage. We didn't just delete the QS legs; we audited what was actually executing
+and fixed the gaps, so v16 is tested by a suite that's MORE trustworthy than v15's, not just
+a smaller one.
+
+- A **coverage-reconciliation gate** drives the runner's real per-layer selectors through
+  `--collect-only` and asserts every `tests/e2e/` test is claimed by some layer. "A test that
+  runs nowhere" is now a test FAILURE, not a silent gap. It immediately caught 11 such tests —
+  9 driver-smoke tests plus a Studio integration test — that had been dark in the chain since
+  the CB.5 tier migration. The re-enabled tests run green.
+- An **importorskip lint** — every `pytest.importorskip()` must name a DECLARED dependency. It
+  caught a dead `aiosqlite` guard (SQLite was dropped in CB.8, the dep is in no extra) that had
+  silently skipped a whole Postgres integration test at collection, everywhere including CI, for
+  months.
+- **Finished the tier-migration** the gate exposed: the terminal browser layer now selects by
+  directory like every other layer, retiring the hand-applied `-m browser` mark that was the
+  drift's root cause. Adding a browser test is now `touch app2_browser/test_foo.py` — no mark to
+  forget.
+- Swept the stale QuickSight prose from the test drivers + docstrings — the `DashboardDriver`
+  protocol is unconditionally App2 now, and says so.
+
+### Known issues
+
+App2 is now the only renderer, and a few edge interactions carry open bugs parked behind
+`xfail` / `skip`. They're tracked for point releases — none is a blocker for "QuickSight is
+removed," and they're documented here rather than hidden:
+
+- **Investigation account-network drill** (#331) — an Anchor-parameter pick fires the control's
+  change event but the bound table doesn't reliably re-fetch within the CI timeout. The K.4.8
+  walk-rerenders invariant has no live browser coverage until this is fixed.
+- **L1 Exceptions additive pickers** — a response-listener race on that sheet (the visual's data
+  fires before the test's `expect_response` listener registers; the SQL is fast, so it's timing,
+  not perf).
+- **Executives date filter** — the date filter doesn't narrow the Active-Accounts / Net-Money-Moved
+  KPIs; either the bind isn't reaching or those matviews encode as-of-now rather than as-of-window.
+  Under triage.
+- **DuckDB agreement gate** — the terminal 3-way agreement cross-check runs on PostgreSQL / Oracle
+  (the production dialects); DuckDB, the local-iteration default, has db + app2-tier coverage but
+  not the agreement gate yet.
+
 ## v15.0.0 — QuickSight is now optional and DEPRECATED (removal is next)
 
 Major. QuickSight support is on its way OUT, and the reason is cost. AWS now charges a

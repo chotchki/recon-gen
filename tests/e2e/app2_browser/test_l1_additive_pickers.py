@@ -14,8 +14,8 @@ Catches three classes of regression in one test body:
 - Combined filters compose wrongly (AND vs OR mixup; double-quoted
   literal; etc).
 
-Parametrized over ``[qs, app2]`` via ``l1_dashboard_driver`` so a
-parity gap = a real wiring divergence.
+Drives App2 via ``l1_dashboard_driver`` so a wiring bug surfaces as
+a row-count divergence.
 
 Spike resolution (AA.A.6 PLAN entry, locked 2026-05-17): path (1) —
 DB-direct anchor query (precedent: ``_daily_statement_pick.py``). The
@@ -526,8 +526,8 @@ def test_l1_dropdown_pickers_inverse_excludes_anchor(
       instead of EXCLUDING the non-matching one; restore-after-toggle
       fails to bring the count back.
 
-    Same ``[qs, app2]`` parametrization as AA.A.6 — parity gap = real
-    wiring divergence.
+    Same App2 coverage shape as AA.A.6 — a wiring bug surfaces as a
+    row-count divergence.
 
     v1: dropdowns only. A picker whose advertised options have ≤1
     distinct value can't be inverted (no other option to pick) — those

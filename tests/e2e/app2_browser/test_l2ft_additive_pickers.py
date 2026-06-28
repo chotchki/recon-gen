@@ -42,8 +42,8 @@ L2 Exceptions sheet is out of scope: its filter set is single-column
 (only the unified-exceptions Kind dropdown), so the AA.A.6
 "additive narrowing across distinct columns" contract degenerates.
 
-Parametrized over ``[qs, app2]`` via ``l2ft_dashboard_driver`` so a
-parity gap = real wiring divergence.
+Drives App2 via ``l2ft_dashboard_driver`` so a wiring bug surfaces as
+a row-count divergence.
 """
 
 from __future__ import annotations

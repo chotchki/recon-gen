@@ -1,19 +1,15 @@
 """Browser tests: Investigation parameter sliders narrow the visuals.
 
-Parametrized over ``[qs, app2]`` (X.2.u.3) via ``inv_dashboard_driver``.
+Drives App2 (X.2.u.3) via ``inv_dashboard_driver``.
 Investigation's threshold knobs (σ / max-hops / min-amount) are
 single-value ``ParameterSlider`` controls; their narrowing is pushed
 into the dataset SQL as a scalar ``<<$param>>`` bind (Y.2.a/Y.3.c), so
-moving the slider re-fetches a narrower result on *both* renderers.
-``set_slider(label, value, None)`` drives them on both legs (X.2.u.4.e):
-
-- **app2** — ``make_filter_specs_for_sheet`` emits a ``ParameterNumberSpec``
-  per ``ParameterSlider`` → an ``<input type="number" name="param_<name>">``
-  + a one-handle noUiSlider; ``App2Driver.set_slider`` writes the input +
-  a bubbling ``change`` → the visual re-fetches with the new scalar bind.
-- **qs** — ``QsEmbedDriver.set_slider`` fills the QS ``ParameterSliderControl``
-  card's typable text box and blurs it (the value commits on focus-loss),
-  then settles on the WS-frame re-fetch.
+moving the slider re-fetches a narrower result.
+``set_slider(label, value, None)`` drives them (X.2.u.4.e):
+``make_filter_specs_for_sheet`` emits a ``ParameterNumberSpec``
+per ``ParameterSlider`` → an ``<input type="number" name="param_<name>">``
++ a one-handle noUiSlider; ``App2Driver.set_slider`` writes the input +
+a bubbling ``change`` → the visual re-fetches with the new scalar bind.
 
 The slider-narrowing *behaviour* is additionally covered renderer-free
 by the SQL-pushdown unit tests (``<<$pInvAnomaliesSigma>>`` →

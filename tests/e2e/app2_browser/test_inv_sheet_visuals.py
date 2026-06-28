@@ -1,9 +1,9 @@
-"""Browser test: walk every Investigation sheet, verify visuals render — both renderers.
+"""Browser test: walk every Investigation sheet, verify visuals render on App 2.
 
-Parametrized over ``[qs, app2]`` (X.2.u.2 — the ``inv_dashboard_driver``
-fixture yields ``(driver, dashboard_arg)``: the deployed QS dashboard,
-or a locally-spun App 2 server built from the same ``inv_app`` tree
-reading the same DB). ``TreeValidator(inv_app, driver).validate_structure()``
+Drives App2 (X.2.u.2 — the ``inv_dashboard_driver``
+fixture yields ``(driver, dashboard_arg)``: a locally-spun App 2 server
+built from the ``inv_app`` tree reading the DB).
+``TreeValidator(inv_app, driver).validate_structure()``
 walks every sheet, asserts each declared visual title + control label is
 in the DOM; failures across sheets accumulate into one AssertionError.
 

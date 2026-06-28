@@ -361,7 +361,7 @@ def _run_cross_sheet_drill_guardrail(
 
     Per-app test functions wrap this so each can declare its own
     ``<app>_dashboard_driver`` fixture directly (the
-    ``[qs, app2]``-parametrized fixture can't be resolved through
+    ``[app2]``-parametrized fixture can't be resolved through
     ``request.getfixturevalue`` — pytest needs the parametrize wired
     into the test's own fixture closure).
     """
@@ -519,7 +519,7 @@ def _run_cross_sheet_drill_guardrail(
 # shape pulled the renderer-parametrized fixture via
 # ``request.getfixturevalue``, which fails at collection ("requested
 # fixture has no parameter defined for test") because pytest can't
-# pick which ``[qs, app2]`` configuration to instantiate when the
+# pick which ``[app2]`` configuration to instantiate when the
 # fixture isn't in the test's own closure. Splitting also mirrors the
 # canonical pattern in ``test_l2ft_cross_sheet_drill.py`` /
 # ``test_l1_cross_sheet_drill_date_widening.py``.

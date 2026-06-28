@@ -1,8 +1,7 @@
 """Browser tests: L1 dashboard filter controls actually narrow the data.
 
-Parametrized over ``[qs, app2]`` (X.2.u.3) via ``l1_dashboard_driver`` —
-one body, both renderers; the `qs` leg drives the deployed dashboard,
-the `app2` leg a local server reading the same DB. Both tests stay
+Drives App2 (X.2.u.3) via ``l1_dashboard_driver`` — a local server
+reading the DB. Both tests stay
 data-agnostic per the no-hardcoded-data rule:
 
 - **Date-range narrow** is verified on a per-invariant sheet (Drift),

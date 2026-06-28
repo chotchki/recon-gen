@@ -5,11 +5,10 @@ three-way agreement assert needs the dashboard-side row count to compare
 against the PDF count + the scenario-derived expected count:
 ``expected == PDF == dashboard``.
 
-Speaks the X.2.q ``DashboardDriver`` protocol — driver verbs handle QS's
-quirks (vertical virtualization via the page-size-bump path that's
-sealed inside ``QsEmbedDriver.table_row_count``; param-write settle
-behind ``set_date_range``). This module owns the per-invariant
-sheet/visual mapping + the date-filter application.
+Speaks the X.2.q ``DashboardDriver`` protocol — App2 renders all rows
+in DOM, with param-write settle behind ``set_date_range``. This module
+owns the per-invariant sheet/visual mapping + the date-filter
+application.
 
 For time-series invariants (drift / overdraft / limit_breach) the period
 is applied via the universal date filter (``set_date_range``); matches
@@ -82,9 +81,9 @@ _DASHBOARD_LAYOUT: dict[L1Invariant, tuple[str, str, bool]] = {
 #
 # AA.A.995, 2026-05-18 — keyed by raw SQL column name, the matview /
 # scenario-plant / direct-SELECT contract. ``table_rows(columns=...)``
-# at the call site re-keys the renderer's row dicts to match (QS
-# normally stamps display labels on ``<th>``, App2 stamps raw names —
-# the param hides the difference inside the driver).
+# at the call site re-keys App2's row dicts to match (App2 stamps
+# raw names on ``<th>``; the param keys to the SQL column names
+# inside the driver).
 #
 # AA.A.996, 2026-05-18 — drift / overdraft visuals now display
 # ``business_day_start`` (matched here), one logical day per row at
@@ -117,10 +116,11 @@ def _parse_day_cell(cell: str) -> date:
 
     AA.A.996, 2026-05-18 — drift / overdraft now display
     ``business_day_start`` at SECOND granularity so per-account
-    boundary timestamps stay visible. QS renders that as the locale
-    form ``"May 13, 2026 17:00:00"``; App2 renders the raw timestamp
-    ``"2026-05-13 17:00:00"``. The natural-key comparison needs the
-    date portion only — drop the time, parse either head shape.
+    boundary timestamps stay visible. App2 renders the raw timestamp
+    ``"2026-05-13 17:00:00"`` (the locale-form fallback below,
+    ``"May 13, 2026 17:00:00"``, is a legacy QS shape — QS removed in
+    Phase DW). The natural-key comparison needs the date portion only —
+    drop the time, parse either head shape.
     """
     iso_head = cell[:10]
     try:
@@ -155,7 +155,7 @@ def _go_to_invariant_sheet(
     sheet_name, table_title, has_date_filter = _DASHBOARD_LAYOUT[invariant]
     driver.goto_sheet(sheet_name)
     if has_date_filter and period is not None:
-        # ``set_date_range`` blocks on the QS settle (per X.2.q's
+        # ``set_date_range`` blocks on the settle (per X.2.q's
         # ``_settle_after_param_change``) so the read below sees the
         # post-filter state, not the spinner gap.
         driver.set_date_range(period.start.isoformat(), period.end.isoformat())
@@ -202,12 +202,11 @@ def l1_invariant_row_keys(
     Switches to the sheet + applies the period filter (like
     ``count_l1_invariant_rows``), then reads ``driver.table_rows`` and
     extracts the ``_KEY_COLS[invariant]`` columns from each row dict. Day
-    cells (ISO strings — QS ``2026-05-07T00:00:00`` / App2
-    ``2026-05-07 00:00:00``) are parsed to a ``date`` so they compare
-    against the matview / scenario keys.
+    cells (ISO strings — App2 ``2026-05-07 00:00:00``) are parsed to a
+    ``date`` so they compare against the matview / scenario keys.
 
-    **Caller's responsibility**: ``table_rows`` returns the renderer's
-    DOM-visible window — QS virtualizes (~10 rows), App2 pages (50/page).
+    **Caller's responsibility**: ``table_rows`` returns App2's
+    DOM-visible window (App2 pages 50/page).
     For the row-identity comparison to be complete, the table must fit in
     one window; the caller asserts ``len(rows) == expected_total`` first
     so a truncated window fails loudly rather than passing a partial set.
@@ -217,13 +216,10 @@ def l1_invariant_row_keys(
     """
     table_title = _go_to_invariant_sheet(driver, invariant, period)
     # AA.A.995 — pass the SQL column names through ``columns=`` so the
-    # driver pluck-keys both renderers' row dicts to the SQL column
-    # names regardless of which header text each one stamps (App2 raw,
-    # QS display label).
-    # BO.1 fix — `table_rows_full` de-virtualizes on QS (scrolls + collects
-    # every row, not just the DOM window) so 100+ row invariants like
-    # overdraft get their full row set. App2 path delegates to table_rows
-    # since it renders all rows in DOM.
+    # driver pluck-keys App2's row dicts to the SQL column names
+    # regardless of the header text it stamps (App2 stamps raw names).
+    # BO.1 fix — `table_rows_full` collects every row (not just the DOM
+    # window); App2 renders all rows in DOM so it delegates to table_rows.
     key_cols = _KEY_COLS[invariant]
     rows = driver.table_rows_full(table_title, columns=key_cols)
     out: set[tuple[str | date, ...]] = set()
@@ -245,7 +241,7 @@ def l1_invariant_rows_seen(
 ) -> int:
     """How many rows the driver materialized for the invariant's table.
 
-    BO.1 fix: now uses `table_rows_full` (de-virtualizes on QS) so this
+    BO.1 fix: now uses `table_rows_full` so this
     matches `count_l1_invariant_rows` even on >37-row invariants like
     overdraft. The pre-fix assertion `qs_seen == qs_count` was failing
     because `table_rows` returned only the DOM window (37) vs the
