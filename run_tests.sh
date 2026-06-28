@@ -10,15 +10,15 @@
 #     and per-layer env routing (all things conftest fixtures can't
 #     do for subprocess-shelling tests like `test_audit_pdf_render_verify`).
 #   - The shell script forwards to the runner for the chained layers
-#     (db / app2 / deploy / qs_api / qs_browser) and for operational
+#     (db / app2 / app2_browser) and for operational
 #     verbs (sweep / up / down / status / pyright / dump-last-errors).
 #   - The unit layer has no orchestration needs — direct pytest.
 #
 # Usage examples:
 #   ./run_tests.sh up_to=unit                  # pytest direct (no orchestration)
 #   ./run_tests.sh up_to=db                    # runner: one pytest, with container
-#   ./run_tests.sh up_to=qs_browser            # full chain through deploy
-#   ./run_tests.sh sweep --yes                 # clean orphan AWS/Docker resources
+#   ./run_tests.sh up_to=app2_browser          # full local chain (DW.5.2: QuickSight removed)
+#   ./run_tests.sh sweep --yes                 # clean orphan Docker resources
 #   ./run_tests.sh status                      # what's currently running
 #   ./run_tests.sh pyright [<paths>...]        # fast standalone type-check
 #

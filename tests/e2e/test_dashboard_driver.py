@@ -27,8 +27,8 @@ from tests.e2e._drivers import App2Driver, DashboardDriver
 
 
 pytestmark = [
-    tier(Tier.QS_BROWSER),
-    needs(Need.AWS_QS, Need.PLAYWRIGHT),
+    tier(Tier.APP2),
+    needs(Need.PLAYWRIGHT),
 ]
 
 

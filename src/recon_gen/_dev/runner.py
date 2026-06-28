@@ -6,11 +6,11 @@ Invoked via the ``./run_tests.sh`` bash shim at repo root; the shim
 
 Verbs:
     up_to <layer>     Run the chain up to and including <layer>.
-                      Layers: unit | db | app2 | agreement | qs_api | qs_browser
+                      Layers: unit | db | app2 | agreement | app2_browser
                       (pyright folds into unit via the conftest sessionstart
-                      gate). DI phase — ``deploy`` retired as a chain
-                      layer; the session-autouse ``qs_deployed`` fixture
-                      in tests/e2e/conftest.py owns QS deploy. ``unit``
+                      gate). DW.5.2 — QuickSight removed; the ``qs_api`` +
+                      ``qs_browser`` tiers are gone and ``app2_browser`` is
+                      the terminal browser tier. ``unit``
                       is variant-independent — it runs ONCE as a prelude
                       before the matrix fans out (Y.2.gate.n), not once
                       per cell. Equivalent forms: ``up_to=<layer>`` and
@@ -82,22 +82,18 @@ LAYERS: Final[tuple[str, ...]] = (
     "db",
     "app2",
     "agreement",
-    "qs_api",
-    "qs_browser",
+    "app2_browser",
 )
-# DW.3 — ``agreement`` sits AFTER app2 and BEFORE qs_api on purpose: it
-# reads the JSON artifacts the db + app2 layers wrote (the cross-renderer
-# high-watermark validators), so it needs neither AWS nor a browser. Its
-# slot before qs_api means ``up_to=agreement`` runs unit→db→app2→agreement
-# and stops short of the AWS-touching QS tiers — the supported gate now
-# that QuickSight is being removed.
-# DI phase — ``deploy`` retired as a chain layer. QS deploy is owned
-# by the session-autouse ``qs_deployed`` fixture in
-# ``tests/e2e/conftest.py``; the qs_api + qs_browser layers' pytest
-# invocations transitively fire it at session start under FileLock
-# rendezvous. Operators wanting a one-shot deploy still use
-# ``recon-gen json apply --execute`` directly (or ``up_to=qs_api``,
-# which fires the fixture without running the full browser tier).
+# DW.5.2 — QuickSight removed: the ``qs_api`` + ``qs_browser`` tiers are
+# gone. ``app2_browser`` is the new terminal layer — Playwright/WebKit
+# against locally-spun App 2 servers (the root ``tests/e2e/test_*.py``
+# parametrized browser tests, now app2-only post-DW.6). It carries no AWS
+# dep; the whole chain is fully local.
+# DW.3 — ``agreement`` sits AFTER app2 and BEFORE app2_browser on purpose:
+# it reads the JSON artifacts the db + app2 layers wrote (the cross-renderer
+# high-watermark validators), so it needs neither a browser nor AWS. Its
+# slot keeps ``up_to=agreement`` as the fast gate that runs
+# unit→db→app2→agreement and stops short of the slower browser tier.
 # v14.0.0 fast-fail — per-layer stdout-stuck thresholds in seconds.
 # When subprocess stdout hasn't grown in N seconds, the watchdog kills
 # the layer. Calibrated against observed wall-clock times of clean runs
@@ -128,13 +124,12 @@ _HANG_THRESHOLDS: Final[dict[str, int]] = {
     "unit": 180,        # ~60s clean; faulthandler kicks at 180s
     "db": 240,          # ~40s clean; matview refresh can sprawl
     "app2": 1800,       # ~19m clean, ~30m memory-pressured 3-dialect concurrent
-    # DI phase — ``deploy`` layer retired; qs_api / qs_browser layers'
-    # session-autouse ``qs_deployed`` fixture absorbs the ~30-60s
-    # deploy wall into their own session window.
     "agreement": 240,   # ~seconds: JSON-artifact reads + set comparisons,
                         #           no DB / browser / AWS. db-like ceiling.
-    "qs_api": 180,      # ~15s clean + ~60s qs_deployed fixture
-    "qs_browser": 900,  # ~5-21m clean; QS embed loads + reruns dominate
+    # DW.5.2 — app2_browser replaces qs_browser as the terminal browser
+    # tier. Same ceiling: App 2 server spin + Playwright loads + reruns
+    # dominate (no QS embed now, but the root e2e suite is still heavy).
+    "app2_browser": 900,
 }
 # CB.11.a.3 (2026-06-02) — renamed `api` → `qs_api`, `browser` →
 # `qs_browser` to match the `Tier.QS_API` / `Tier.QS_BROWSER` marks
@@ -223,18 +218,11 @@ _LAYER_DEPS: Final[dict[str, frozenset[str]]] = {
     # app2 first, both of which need a container. Probing it here fails
     # fast on a docker-down box instead of ~2 layers deep.
     "agreement": frozenset({"docker"}),
-    # CB.11.a.1+.2 (2026-06-01) — dropped `aws_rds_running` from
-    # deploy/api/browser. Post-CB.12 the DB substrate is Docker (PG +
-    # Oracle on the self-hosted runner / dev box), not RDS Aurora —
-    # there's no remote cluster lifecycle to gate dispatch on. Docker
-    # readiness is already covered by the `docker` dep; per-dialect
-    # container-boot lands in CB.11.b.
-    # DI phase — ``deploy`` retired as a chain layer; qs_api inherits
-    # the AWS + docker dep set (the qs_deployed fixture needs AWS to
-    # delete-then-create; container needs to be up + seeded so QS
-    # validate-connect against hotchkiss.io succeeds).
-    "qs_api": frozenset({"aws", "docker"}),
-    "qs_browser": frozenset({"aws", "docker", "qs_arn"}),
+    # DW.5.2 — app2_browser drives locally-spun App 2 servers (Playwright)
+    # against the variant DB container. Needs `docker` only (no AWS) — same
+    # dep set as `app2`. TLS cert provisioning is handled separately via
+    # TLS_TOUCHING_LAYERS, not a probe dep.
+    "app2_browser": frozenset({"docker"}),
 }
 
 
@@ -750,7 +738,7 @@ def _layer_command(
     # see this env; they continue to open read-write. The audit verify
     # test subprocess inherits the env, which is correct — audit only
     # SELECTs from the seeded DB to render the PDF.
-    if layer in ("db", "app2", "qs_browser"):
+    if layer in ("db", "app2", "app2_browser"):
         ve = variant_env or {}
         url = ve.get(RECON_GEN_DEMO_DATABASE_URL.name, "")
         if url.startswith("duckdb://"):
@@ -799,7 +787,7 @@ def _layer_command(
     # bespoke staging. The runs/<id>/ tree stays focused on triage
     # artifacts (cmd.json, stdout.log, timings.json).
     _is_pytest_layer = layer in (
-        "unit", "db", "app2", "agreement", "qs_api", "qs_browser",
+        "unit", "db", "app2", "agreement", "app2_browser",
     )
     _cov_args: list[str] = (
         ["--cov=recon_gen", "--cov-report="]
@@ -928,69 +916,26 @@ def _layer_command(
         cmd += _cov_args
         cmd += ["-n", str(opts.parallel) if opts.parallel > 1 else "auto"]
         return (cmd, env_addl)
-    # DI phase — ``deploy`` retired as a chain layer. The session-autouse
-    # ``qs_deployed`` fixture in ``tests/e2e/conftest.py`` owns deploy;
-    # the qs_api + qs_browser pytest invocations fire it at session
-    # start. ``_build_deploy_command`` lives on at module level for
-    # operators who want the ergonomic one-shot ``recon-gen json apply
-    # --execute`` from the CLI.
-    if layer == "qs_api":
-        # Y.2.gate.c.5.api — boto3-only e2e tests verifying deployed QS
-        # resources via `describe_*` calls. CB.6: discover via the
-        # per-tier directory ``tests/e2e/qs_api/`` (which auto-applies
-        # ``@tier(Tier.QS_API)``) PLUS root-e2e files carrying the
-        # legacy ``pytest.mark.api`` mark (parametrized [qs, app2]
-        # tests that live at the root and partition by mark).
-        
+    if layer == "app2_browser":
+        # DW.5.2 — terminal browser tier (was ``qs_browser`` before
+        # QuickSight was removed). Playwright/WebKit against locally-spun
+        # App 2 servers: the root ``tests/e2e/test_*.py`` parametrized
+        # browser tests (pytest mark ``browser``), now app2-only post-DW.6.
         #
-        # Default `-n 4` (capped) — pre-cap (2026-05-17), this layer
-        # ran ``-n auto`` (= cpu_count, ~10-12 workers on a beefy Mac)
-        # and produced flaky ``ThrottlingException`` on
-        # ``DescribeDashboardDefinition`` because 12 workers × 4 apps
-        # × multiple describe calls each hit QuickSight's per-account
-        # API rate ceiling (~100 req/s). Same logic as the browser
-        # layer's existing -n 4 cap ("browser tier heavy enough that
-        # 8+ workers thrash QS embed limits") — boto3 fan-out hammers
-        # the same backend, just with a different protocol. Operator
-        # can still override via ``--parallel=N`` for serial debug or
-        # explicit bump.
-        cmd = [
-            str(_VENV_BIN / "pytest"),
-            "tests/e2e/qs_api/",
-            "-q",
-        ]
-        if opts.only:
-            cmd += ["-k", opts.only]
-        cmd += _cov_args
-        cmd += ["-n", str(opts.parallel) if opts.parallel > 1 else "4"]
-        # CB.7-followup (2026-06-02) — loadgroup dropped; see unit-layer note.
-        return (cmd, env_addl)
-    if layer == "qs_browser":
-        # Y.2.gate.c.5.browser — Playwright WebKit e2e against deployed QS
-        # embed URLs. Pytest mark `browser`. Default `-n 4` per existing
-        # `./run_e2e.sh` pattern (browser tier is heavy enough that 8+
-        # workers thrash QS embed limits).
-        # `RECON_E2E_USER_ARN` already in subprocess env via h.1 derivation.
-        #
-        # CB.5 stage 2 follow-up (qs-browser-skip-triage, 2026-06-11) —
-        # the prior Z.B.12 two-invocation split (a `-n N` main run + a
-        # `-n 1` ``test_audit_dashboard_agreement.py`` carve-out) is gone:
-        # both ``test_audit_dashboard_agreement.py`` and
-        # ``test_inv_dashboard_agreement.py`` were deleted (superseded by
-        # per-renderer producers + high-watermark validators under
-        # ``tests/e2e/qs_browser/``). With no schema-DROP-CREATE-racing
-        # fixture left in the browser tier, one pytest invocation suffices.
+        # Select by the ``browser`` mark, but ``--ignore`` the per-tier
+        # subdirs — ``app2/`` files own the ``app2`` layer (and six of them
+        # ALSO carry ``mark.browser``, so without the ignore they'd
+        # double-run here); ``db/`` + ``agreement/`` have their own layers.
+        # That leaves exactly the root e2e browser files.
         nworkers = str(opts.parallel) if opts.parallel > 1 else "4"
         # BR.x — Oracle cells lower the cap to 2. Oracle SE2 19c has no
         # DRCP (project_drcp_on_aws_oracle_dead_end) so every worker
         # opens a fresh session against the small connection ceiling;
         # 4 browser workers × 4 apps × concurrent picker tests
         # exhausted sessions mid-run and produced cascading
-        # "rendered: []" structure failures only on Oracle AWS cells
-        # (PG cells with the same 4-worker setting had ≤9 failures
-        # while Oracle had 71-74). The narrow 2-worker cap costs ~2×
-        # wall on Oracle browser but turns catastrophic failure into
-        # signal.
+        # "rendered: []" structure failures (Oracle had 71-74 vs ≤9 on
+        # PG at 4 workers). The narrow 2-worker cap costs ~2× wall on
+        # Oracle but turns catastrophic failure into signal.
         ve = variant_env or {}
         cfg_path_str = ve.get(RECON_GEN_CONFIG.name)
         if cfg_path_str and opts.parallel <= 1:
@@ -1006,43 +951,27 @@ def _layer_command(
         cmd = [
             str(_VENV_BIN / "pytest"), "tests/e2e/",
             "-m", "browser", "-q",
+            "--ignore=tests/e2e/app2",
+            "--ignore=tests/e2e/db",
+            "--ignore=tests/e2e/agreement",
             *only, *_cov_args,
             "-n", nworkers,
             # Y.7-followup — auto-retry a flaky browser test
-            # (``pytest-rerunfailures``, in the [dev] extra) instead of
-            # failing the whole chain on it. The browser tier walks a
-            # live QuickSight embed under ``-n 4`` worker contention;
-            # the structure tests ("every visual rendered, one snapshot
-            # budget") occasionally lose a visual from the DOM when QS
-            # is rate-limiting under the concurrent load (Oracle-`aw`
-            # worst: slower per-query latency = workers hold QS sessions
-            # longer = more concurrent pressure — the underlying queries
-            # are ~8 ms and the data returns; it's a render-timing
-            # flake, passes on re-run / in isolation). The rerun happens
-            # INSIDE this same pytest invocation (xdist re-runs on the
-            # same worker), not by restarting the chain — so a flake
-            # costs ~one test re-run, not a whole ``unit→…→browser``
-            # cycle. A test that's genuinely broken fails 3× → still
-            # halts.
-            #
-            # v14.0.0 fast-fail (2026-06-13) — operator-flagged: with
-            # ``--reruns 2 --reruns-delay 60`` a single hung test eats
-            # up to 3 minutes of wall (60s × 2 retries + initial run);
-            # multiplied across xdist workers and many flakes that adds
-            # up. Tighten to one retry + 15s delay. Real bugs surface
-            # within ~30s. The known QS-cache-warmup flake (task #466)
-            # is largely cleared post-deploy now that
-            # ``recon-gen json apply`` is idempotent (BR.x); if the
-            # cache flake re-surfaces we bump the delay back up rather
-            # than re-bloat reruns.
+            # (``pytest-rerunfailures``, [dev] extra) instead of failing
+            # the whole chain on it. The browser tier drives a live App 2
+            # server under ``-n 4`` worker contention; a render-timing
+            # flake (a visual lost from the DOM under concurrent load,
+            # passes on re-run / in isolation) costs ~one test re-run,
+            # not a whole ``unit→…→app2_browser`` cycle. A genuinely
+            # broken test fails twice → still halts. One retry + 15s delay
+            # (v14.0.0 fast-fail): real bugs surface within ~30s.
             "--reruns", "1", "--reruns-delay", "15",
             # CB.7-followup (2026-06-02) — loadgroup dropped; see unit-layer note.
         ]
-        # Bump the per-page Playwright timeout for the browser layer to 60 s
-        # (matches the CI `e2e-pg-browser` job). The default 30 s
+        # Bump the per-page Playwright timeout to 60 s. The default 30 s
         # (tests/e2e/conftest.py) is fine for a local-pg container but too
-        # tight for the `aw` target's remote Aurora / Oracle. Operator-set
-        # value wins.
+        # tight for the Oracle container's slower per-query latency.
+        # Operator-set value wins.
         browser_env = env_addl
         if RECON_E2E_PAGE_TIMEOUT.name not in os.environ:
             browser_env[RECON_E2E_PAGE_TIMEOUT.name] = "60000"
@@ -1402,15 +1331,15 @@ def dispatch_layer(
 
 
 def _is_aws_touching_layer(layer: str) -> bool:
-    """Y.2.gate.b.10 — layers ≥ qs_api touch AWS/external state. Dirty-state
-    refusal applies only to those (layers 1-3 are local + idempotent).
+    """Y.2.gate.b.10 — layers that touch AWS/external state. The
+    dirty-state refusal applies only to those.
 
-    DI phase — renamed from ``_is_deploy_or_later``: the ``deploy``
-    chain layer is retired; the qs_api layer is now the first AWS-
-    touching one (its session-autouse ``qs_deployed`` fixture fires
-    the deploy at session start).
+    DW.5.2 — QuickSight removed, so ``AWS_TOUCHING_LAYERS`` is empty and
+    this always returns False; the whole chain is local + idempotent.
+    Kept as the seam (rather than inlining ``False``) so re-adding an
+    external-state tier is a one-line change to the constant.
     """
-    return LAYERS.index(layer) >= LAYERS.index("qs_api")
+    return layer in AWS_TOUCHING_LAYERS
 
 
 # Y.2.gate.c.3 — drift threshold. ±50% triggers a ⚠ marker. Spec'd in audit
@@ -1702,30 +1631,26 @@ def is_layer_cached_green(layer: str, *, variant: str = "default") -> bool:
 # through (RECON_GEN_DEMO_DATABASE_URL etc.). Unit doesn't need it.
 # `app2` (b.3.impl.layer) reads the variant DB via the App2 fetcher
 # (`make_tree_db_fetcher`), so it lives here.
-DB_TOUCHING_LAYERS: Final = ("db", "app2", "qs_api", "qs_browser")
+DB_TOUCHING_LAYERS: Final = ("db", "app2", "app2_browser")
 
-# m.4.f — layers that need an AWS-reachable datasource. Lo-target
-# cells seed a localhost container that QuickSight in AWS can't reach;
-# running qs_api → qs_browser against a localhost-pointed datasource
-# is a guaranteed dead pointer (deploy succeeds, but every dashboard
-# render times out because QS can't query localhost). Cap lo cells at
-# `app2` (the local-Docker terminal, locked by audit §7.10).
-#
-# DI phase — ``deploy`` retired as a chain layer; qs_api inherits its
-# AWS-touching role. The session-autouse ``qs_deployed`` fixture in
-# ``tests/e2e/conftest.py`` fires at qs_api / qs_browser session start.
-AWS_TOUCHING_LAYERS: Final = ("qs_api", "qs_browser")
+# DW.5.2 — QuickSight removed, so NO layer needs an AWS-reachable
+# datasource anymore. The whole chain runs against the local Docker
+# container; ``app2_browser`` is the local-Docker browser terminal.
+# Empty by design (not deleted) — re-adding an external-state tier is a
+# one-line change here. Drives ``_is_aws_touching_layer`` (always False
+# now) + the deploy/qs_user_arn skips downstream.
+AWS_TOUCHING_LAYERS: Final[tuple[str, ...]] = ()
 
-# Phase DC.3 — layers whose subprocess serves HTTPS (App2 uvicorn) or
-# transitively depends on a TLS-served app2 (qs_api/qs_browser harness).
-# The runner auto-mints + renews certs via ``ensure_dev_env`` before
+# Phase DC.3 — layers whose subprocess serves HTTPS (App2 uvicorn). The
+# runner auto-mints + renews certs via ``ensure_dev_env`` before
 # dispatching these layers, but ONLY when ``cfg.app2.tls`` is configured.
 # Operators without the tls block see no behavior change; unit/db runs
-# never hit Cloudflare.
-TLS_TOUCHING_LAYERS: Final = ("app2", "qs_api", "qs_browser")
+# never hit Cloudflare. DW.5.2 — ``app2_browser`` (root e2e browser tier)
+# drives App 2 servers too, so it joins the TLS set.
+TLS_TOUCHING_LAYERS: Final = ("app2", "app2_browser")
 
-# Phase DD.4 — App2-only per spike lock. qs_browser tests use QS embed
-# which is auth-independent (AWS-side identity), so they don't need Dex.
+# Phase DD.4 — App2-only per spike lock. The OIDC auth tests live under
+# tests/e2e/app2/; the root browser tier (app2_browser) carries none.
 OIDC_TOUCHING_LAYERS: Final = ("app2",)
 
 # Y.2.gate.j.5 — Oracle container reuse. **Per-cell** name (not single
@@ -4022,7 +3947,7 @@ def cmd_up_to(args: argparse.Namespace) -> int:
             # ``qs_deployed`` fixture in tests/e2e/conftest.py reads
             # RECON_GEN_QS_CONFIG via env at session start.
             chain_includes_qs = any(
-                layer in AWS_TOUCHING_LAYERS
+                _is_aws_touching_layer(layer)
                 for layer in chain_through(args.layer)
             )
             if chain_includes_qs and RECON_GEN_DEMO_DATABASE_URL.name in container_env:
@@ -4764,19 +4689,16 @@ def _dump_pytest_failures(stdout: str) -> None:
 
 
 def _dump_capture_status(cell_dir: Path, layer_dir: Path, stdout: str) -> None:
-    """For a failing qs_browser layer, check whether AA.H.6 capture
+    """For a failing app2_browser layer, check whether AA.H.6 capture
     artifacts landed for each failed test. Print a warning if any
     failed test has no matching capture dir — that's an AA.H.10
     regression worth investigating."""
-    if layer_dir.name != "qs_browser":
+    if layer_dir.name != "app2_browser":
         return
     # AA.H.6 captures land at `$RECON_GEN_RUN_DIR/browser/<test_id>/`
     # (common/browser/helpers.py:185+368+432), NOT at
-    # `qs_browser/<test_id>/`. Pre-fix the runner walked the layer dir
-    # (`qs_browser/`) and found nothing — silently dropping the "missing
-    # capture" warning even when captures existed. (cell_dir == run_dir
-    # in the thin path post the failure-summary fix, so this resolves to
-    # `runs/<id>/browser/`.)
+    # `app2_browser/<test_id>/`. The runner walks `runs/<id>/browser/`
+    # (cell_dir == run_dir in the thin path), not the layer dir.
     browser_capture_root = cell_dir / "browser"
     failed = list(_FAILED_LINE_RE.finditer(stdout))
     if not failed:
@@ -4999,12 +4921,13 @@ _ROOT_E2E_PARAMETRIZED_PREFIXES: Final[tuple[str, ...]] = (
     "test_l2ft_",
     "test_inv_",
     "test_exec_",
-    "test_audit_",
     "test_dashboard_driver",
     "test_cq_picker_",
     "test_studio_",
     "test_parameter_anchored_sheets",
-    "test_db3_parity_snaps",
+    # DW.5.2 — dropped ``test_audit_`` (no root audit files; they live in
+    # the db/ + app2/ tier dirs) and ``test_db3_parity_snaps`` (the
+    # QS-vs-App2 parity capture, deleted with QuickSight).
 )
 
 # Unit-layer prefixes (no DB / no AWS). Audit + data dirs are routed here as
@@ -5034,15 +4957,17 @@ def _infer_layer_from_nodeid(nodeid: str) -> str | None:
     would hide operator typos.
 
     Order of rules (first match wins) matches the design lock:
-      1. tests/e2e/qs_browser/ → qs_browser
-      2. tests/e2e/agreement/  → agreement
-      3. tests/e2e/qs_api/     → qs_api
-      4. tests/e2e/app2/       → app2
-      5. tests/e2e/db/         → db
-      6. tests/e2e/<root parametrized file> → qs_browser
-      7. tests/{unit,json,cli,docs,schema,l2}/ → unit
-      8. tests/{audit,data}/   → unit (safe-floor fallback)
-      9. otherwise → None
+      1. tests/e2e/agreement/  → agreement
+      2. tests/e2e/app2/       → app2
+      3. tests/e2e/db/         → db
+      4. tests/e2e/<root parametrized file> → app2_browser
+      5. tests/{unit,json,cli,docs,schema,l2}/ → unit
+      6. tests/{audit,data}/   → unit (safe-floor fallback)
+      7. otherwise → None
+
+    DW.5.2 — the ``qs_browser`` + ``qs_api`` subdir rules retired with
+    QuickSight; the root parametrized e2e files (now app2-only) infer to
+    the ``app2_browser`` terminal tier.
     """
     if not nodeid:
         return None
@@ -5054,27 +4979,23 @@ def _infer_layer_from_nodeid(nodeid: str) -> str | None:
     # Absolute paths are operator error — reject by returning None.
     if file_path.startswith("/"):
         return None
-    # Rules 1-5: per-tier subdirs.
-    if file_path.startswith("tests/e2e/qs_browser/"):
-        return "qs_browser"
+    # Rules 1-3: per-tier subdirs.
     if file_path.startswith("tests/e2e/agreement/"):
         return "agreement"
-    if file_path.startswith("tests/e2e/qs_api/"):
-        return "qs_api"
     if file_path.startswith("tests/e2e/app2/"):
         return "app2"
     if file_path.startswith("tests/e2e/db/"):
         return "db"
-    # Rule 5: root parametrized files.
+    # Rule 4: root parametrized files → the app2_browser terminal tier.
     if file_path.startswith("tests/e2e/"):
         filename = file_path[len("tests/e2e/"):].split("/", 1)[0]
         # Strip .py for prefix-match against the parametrized-file list.
         stem = filename[:-3] if filename.endswith(".py") else filename
         for prefix in _ROOT_E2E_PARAMETRIZED_PREFIXES:
             if stem.startswith(prefix) or stem == prefix:
-                return "qs_browser"
+                return "app2_browser"
         return None
-    # Rules 6-7: pytest-only trees.
+    # Rules 5-6: pytest-only trees.
     for prefix in _UNIT_LAYER_PREFIXES:
         if file_path.startswith(prefix):
             return "unit"
@@ -5203,11 +5124,14 @@ def _setup_thin_chain_environment(
                 )
         if peek_cfg.auth.aws.profile is not None:
             runner_variant_env["AWS_PROFILE"] = peek_cfg.auth.aws.profile
-        # Default: only derive the QS user ARN when the entry layer
-        # itself needs it (qs_browser) — cmd_triage's scope. cmd_up_to
-        # passes always_derive_qs_user_arn=True because the chain may
-        # transit through qs_browser even when the entry layer is unit.
-        should_derive = always_derive_qs_user_arn or layer in AWS_TOUCHING_LAYERS
+        # DW.5.2 — QuickSight removed: no layer needs a QS user ARN, so
+        # derivation never fires (``AWS_TOUCHING_LAYERS`` is empty). The
+        # ``always_derive_qs_user_arn`` knob + ``_resolve_qs_user_arn``
+        # subsystem are now dead QS plumbing slated for the DW.7 source
+        # sweep; gating on the empty AWS set keeps local runs from poking
+        # STS / ListUsers on a torn-down QS account.
+        _ = always_derive_qs_user_arn  # dead post-QS; see DW.7
+        should_derive = _is_aws_touching_layer(layer)
         if should_derive and RECON_E2E_USER_ARN.name not in runner_variant_env:
             arn = _resolve_qs_user_arn(peek_cfg)
             if arn is not None:
@@ -5253,7 +5177,7 @@ def cmd_triage(args: argparse.Namespace) -> int:
         )
         print(
             "runner: nodeids must be repo-relative (e.g. "
-            "tests/e2e/qs_browser/test_foo.py::test_bar)",
+            "tests/e2e/test_l1_filters.py::test_bar)",
             file=sys.stderr,
         )
         return EXIT_CONFIG_ERROR
@@ -5266,12 +5190,12 @@ def cmd_triage(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         print(
-            "runner: known prefixes: tests/e2e/{qs_browser,qs_api,app2,db}/ ;"
+            "runner: known prefixes: tests/e2e/{agreement,app2,db}/ ;"
             " tests/{unit,json,cli,docs,schema,l2,audit,data}/",
             file=sys.stderr,
         )
         print(
-            "runner: pass --layer=<unit|db|app2|qs_api|qs_browser> "
+            "runner: pass --layer=<unit|db|app2|agreement|app2_browser> "
             "to override",
             file=sys.stderr,
         )
@@ -5825,9 +5749,10 @@ Auth (Y.2.gate.h+i):
       docs/audits/_iam/recon-gen-local-policy.json
 
 Layer chain (Y.2.gate.b/c/n):
-  unit -> db -> app2 -> qs_api -> qs_browser
-  (DI phase: ``deploy`` retired; the session-autouse ``qs_deployed``
-  fixture in tests/e2e/conftest.py owns QS deploy.)
+  unit -> db -> app2 -> agreement -> app2_browser
+  (DW.5.2: QuickSight removed; the chain is fully local — no AWS tier.
+  ``app2_browser`` is the terminal Playwright tier driving local App 2
+  servers.)
   ./run_tests.sh up_to=<layer>  runs the chain through that layer.
   Post-CB.17.d the runner uses a single-pytest-per-layer "thin path":
   each layer runs ONE pytest subprocess (no cell loop, no prelude
@@ -5866,7 +5791,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_up_to.add_argument(
         "--allow-dirty-deploy", action="store_true",
-        help="bypass the tracked-changes refusal on AWS-touching layers (qs_api / qs_browser).",
+        help="(DW.5.2: no-op — no AWS-touching layers remain after QuickSight removal; kept for CLI compat.)",
     )
     p_up_to.add_argument(
         "--coverage", action="store_true",
@@ -5904,9 +5829,9 @@ def _build_parser() -> argparse.ArgumentParser:
         "nodeid",
         metavar="<test_nodeid>",
         help=(
-            "Pytest nodeid (e.g. tests/e2e/qs_browser/test_inv_anomaly_qs.py::"
-            "test_renders_with_filter[anomaly_high]). Layer is inferred from "
-            "the path prefix; see --help for the rules."
+            "Pytest nodeid (e.g. tests/e2e/test_inv_filters.py::"
+            "test_min_sigma_slider_shrinks_anomalies_kpi[app2]). Layer is "
+            "inferred from the path prefix; see --help for the rules."
         ),
     )
     p_triage.add_argument(
@@ -5923,9 +5848,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "--allow-dirty-deploy",
         action="store_true",
         help=(
-            "Bypass the tracked-changes refusal for AWS-touching layers "
-            "(qs_api / qs_browser). Matches up_to's gate; required for "
-            "triaging a code change you haven't yet committed."
+            "(DW.5.2: no-op — no AWS-touching layers remain after "
+            "QuickSight removal; kept for CLI compat with up_to's gate.)"
         ),
     )
     p_triage.add_argument(

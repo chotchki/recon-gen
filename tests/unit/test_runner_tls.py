@@ -77,11 +77,12 @@ def test_fires_on_app2_layer_with_tls_block(tmp_path: Path) -> None:
     assert kwargs["account_email"] == "ops@example.com"
 
 
-def test_fires_on_qs_browser_layer(tmp_path: Path) -> None:
-    """qs_browser layer is TLS-touching."""
+def test_fires_on_app2_browser_layer(tmp_path: Path) -> None:
+    """DW.5.2 — the app2_browser layer (terminal browser tier, drives
+    local App 2 servers over HTTPS) is TLS-touching."""
     cfg_path = _write_cfg(tmp_path, _CFG_WITH_TLS)
     with patch("recon_gen._dev.tls.ensure_dev_env") as ensure:
-        rc = _ensure_tls_if_configured(cfg_path, layer="qs_browser")
+        rc = _ensure_tls_if_configured(cfg_path, layer="app2_browser")
     assert rc == 0
     ensure.assert_called_once()
 

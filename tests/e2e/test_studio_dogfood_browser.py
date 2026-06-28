@@ -75,8 +75,8 @@ from tests.e2e._drivers.studio_browser_editor import (
 
 
 pytestmark = [
-    tier(Tier.QS_BROWSER),
-    needs(Need.AWS_QS, Need.PLAYWRIGHT),
+    tier(Tier.APP2),
+    needs(Need.PLAYWRIGHT),
 ]
 
 

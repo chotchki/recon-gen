@@ -50,7 +50,7 @@ permissions:
 
 jobs:
   test-everything:
-    name: Layered runner (unit → qs_browser)
+    name: Layered runner (unit → app2_browser)
     # v12.0.0 followup, preserved: skip the push-CI when this is a
     # Release commit. The Release workflow (release.yml) fires on the
     # tag push and runs its own pipeline; the parallel push-CI burns
@@ -431,10 +431,12 @@ jobs:
               env: "ci"
           EOF
 
-      - name: Run the full layered chain (unit → qs_browser)
-        # ./run_tests.sh up_to=qs_browser invokes the chain
-        # unit → db → app2 → deploy → qs_api → qs_browser, ONE pytest
-        # invocation per layer (post CB.17.d cell removal).
+      - name: Run the full layered chain (unit → app2_browser)
+        # DW.5.2 — QuickSight removed: ./run_tests.sh up_to=app2_browser
+        # invokes the chain unit → db → app2 → agreement → app2_browser,
+        # ONE pytest invocation per layer, fully local (no AWS tier).
+        # (The AWS-OIDC / QS-subscription setup steps above are now
+        # vestigial — DW.7 strips them with the QS source.)
         # `--coverage` writes `.coverage.<run-id>.<layer>` files into
         # runs/<id>/.
         #
@@ -503,7 +505,7 @@ jobs:
         run: |
           mkdir -p runs
           /usr/bin/time -v -o runs/peak-rss-time.log \
-            ./run_tests.sh up_to=qs_browser --coverage
+            ./run_tests.sh up_to=app2_browser --coverage
           echo "--- /usr/bin/time -v summary ---"
           cat runs/peak-rss-time.log
           echo "--- peak RSS ---"

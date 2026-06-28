@@ -38,36 +38,22 @@ from recon_gen._dev import runner as r
 # ---------------------------------------------------------------------------
 
 
-def test_infer_layer_qs_browser_subdir() -> None:
-    """Rule 1: nodeids under tests/e2e/qs_browser/ -> qs_browser."""
-    assert r._infer_layer_from_nodeid(
-        "tests/e2e/qs_browser/test_inv_anomaly_qs.py::test_x"
-    ) == "qs_browser"
-
-
 def test_infer_layer_agreement_subdir() -> None:
-    """Rule 2 (DW.3): nodeids under tests/e2e/agreement/ -> agreement."""
+    """Rule 1 (DW.3): nodeids under tests/e2e/agreement/ -> agreement."""
     assert r._infer_layer_from_nodeid(
         "tests/e2e/agreement/test_inv_anomaly_agreement.py::test_anomaly_agreement"
     ) == "agreement"
 
 
-def test_infer_layer_qs_api_subdir() -> None:
-    """Rule 3: nodeids under tests/e2e/qs_api/ -> qs_api."""
-    assert r._infer_layer_from_nodeid(
-        "tests/e2e/qs_api/test_describe_foo.py::test_y"
-    ) == "qs_api"
-
-
 def test_infer_layer_app2_subdir() -> None:
-    """Rule 4: nodeids under tests/e2e/app2/ -> app2."""
+    """Rule 2: nodeids under tests/e2e/app2/ -> app2."""
     assert r._infer_layer_from_nodeid(
         "tests/e2e/app2/test_bv33_trainer.py::test_x"
     ) == "app2"
 
 
 def test_infer_layer_db_subdir() -> None:
-    """Rule 5: nodeids under tests/e2e/db/ -> db."""
+    """Rule 3: nodeids under tests/e2e/db/ -> db."""
     assert r._infer_layer_from_nodeid(
         "tests/e2e/db/test_dataset_sql_smoke.py::test_one"
     ) == "db"
@@ -84,25 +70,24 @@ def test_infer_layer_db_subdir() -> None:
         "test_cq_picker_search_and_find.py",
         "test_studio_deploy_browser.py",
         "test_parameter_anchored_sheets.py",
-        "test_db3_parity_snaps.py",
     ],
 )
 def test_infer_layer_root_e2e_parametrized(filename: str) -> None:
-    """Rule 5: tests/e2e/<root parametrized file> → qs_browser.
+    """Rule 4 (DW.5.2): tests/e2e/<root parametrized file> → app2_browser.
 
-    qs_browser is a strict superset of app2's prereqs, so default to
-    the higher layer; operator can downshift via ``--layer=app2``.
-    """
-    nodeid = f"tests/e2e/{filename}::test_renders[qs]"
-    assert r._infer_layer_from_nodeid(nodeid) == "qs_browser"
+    The root e2e browser files are app2-only post-DW.6; the terminal
+    ``app2_browser`` tier runs them (QuickSight's qs_browser tier is
+    gone)."""
+    nodeid = f"tests/e2e/{filename}::test_renders[app2]"
+    assert r._infer_layer_from_nodeid(nodeid) == "app2_browser"
 
 
-def test_infer_layer_root_e2e_parametrized_app2_param_still_qs_browser() -> None:
-    """Even the [app2] callspec of a root-e2e parametrized test
-    defaults to qs_browser (operator downshifts via --layer)."""
+def test_infer_layer_root_e2e_parametrized_app2_param() -> None:
+    """The [app2] callspec of a root-e2e parametrized test infers to the
+    app2_browser terminal tier."""
     assert r._infer_layer_from_nodeid(
         "tests/e2e/test_l1_filters.py::test_x[app2]"
-    ) == "qs_browser"
+    ) == "app2_browser"
 
 
 @pytest.mark.parametrize(
@@ -117,20 +102,20 @@ def test_infer_layer_root_e2e_parametrized_app2_param_still_qs_browser() -> None
     ],
 )
 def test_infer_layer_unit_prefixes(prefix: str) -> None:
-    """Rule 6: pytest-only trees -> unit."""
+    """Rule 5: pytest-only trees -> unit."""
     nodeid = f"{prefix}test_foo.py::test_bar"
     assert r._infer_layer_from_nodeid(nodeid) == "unit"
 
 
 @pytest.mark.parametrize("prefix", ["tests/audit/", "tests/data/"])
 def test_infer_layer_audit_data_fallback(prefix: str) -> None:
-    """Rule 7: gap-handling — audit/data return unit (safe floor)."""
+    """Rule 6: gap-handling — audit/data return unit (safe floor)."""
     nodeid = f"{prefix}test_foo.py::test_bar"
     assert r._infer_layer_from_nodeid(nodeid) == "unit"
 
 
 def test_infer_layer_unknown_returns_none() -> None:
-    """Rule 8: unknown prefix returns None."""
+    """Rule 7: unknown prefix returns None."""
     assert r._infer_layer_from_nodeid("tests/foo/test_bar.py::baz") is None
 
 
@@ -184,13 +169,13 @@ def test_argparse_triage_parses_nodeid_and_flags() -> None:
     parser = r._build_parser()
     ns = parser.parse_args([
         "triage",
-        "tests/e2e/qs_browser/test_x.py::test_y",
-        "--layer", "qs_browser",
+        "tests/e2e/test_l1_filters.py::test_y",
+        "--layer", "app2_browser",
         "--allow-dirty-deploy",
         "--force",
     ])
-    assert ns.nodeid == "tests/e2e/qs_browser/test_x.py::test_y"
-    assert ns.layer == "qs_browser"
+    assert ns.nodeid == "tests/e2e/test_l1_filters.py::test_y"
+    assert ns.layer == "app2_browser"
     assert ns.allow_dirty_deploy is True
     assert ns.force is True
 
@@ -324,8 +309,8 @@ def test_triage_state_write_read_roundtrip(triage_state_tmp: Path) -> None:
     state: dict[str, Any] = {
         "run_id": "20260614T120000Z-deadbee",
         "run_dir": "/runs/x",
-        "nodeid": "tests/e2e/qs_browser/test_foo.py::test_bar",
-        "layer": "qs_browser",
+        "nodeid": "tests/e2e/test_l1_filters.py::test_bar",
+        "layer": "app2_browser",
         "screen_name": "recon-gen-triage",
         "cfg_path": "/run/config.yaml",
         "deployed": True,
@@ -365,7 +350,7 @@ def test_triage_state_non_object_raises(triage_state_tmp: Path) -> None:
 
 
 def _mk_triage_args(
-    nodeid: str = "tests/e2e/qs_browser/test_x.py::test_y",
+    nodeid: str = "tests/e2e/test_l1_filters.py::test_y",
     *,
     layer: str | None = None,
     allow_dirty_deploy: bool = False,
@@ -526,8 +511,8 @@ def test_cmd_triage_down_keep_qs_skips_sweep(
     state: dict[str, Any] = {
         "run_id": "20260614T120000Z-deadbee",
         "run_dir": "/runs/x",
-        "nodeid": "tests/e2e/qs_browser/test_foo.py::test_bar",
-        "layer": "qs_browser",
+        "nodeid": "tests/e2e/test_l1_filters.py::test_bar",
+        "layer": "app2_browser",
         "screen_name": "recon-gen-triage",
         "cfg_path": "/run/config.yaml",
         "deployed": True,
@@ -612,33 +597,27 @@ def test_build_deploy_command_prefers_qs_cfg_over_local_cfg(
 
 
 def test_deploy_retired_from_layers_tuple() -> None:
-    """DI phase: ``deploy`` is gone from the LAYERS chain.
-
-    The session-autouse ``qs_deployed`` fixture in
-    tests/e2e/conftest.py owns QS deploy; qs_api inherits as the
-    first AWS-touching chain layer. Locks the design lock here so
-    a future re-introduction of the deploy chain layer trips this
-    test instead of silently splitting the deploy code path.
+    """DW.5.2: the QS tiers (``qs_api`` / ``qs_browser``) are gone from
+    the LAYERS chain along with ``deploy``; ``app2_browser`` is the new
+    terminal tier. Locks the design lock here so a future
+    re-introduction of any of them trips this test.
     """
     assert "deploy" not in r.LAYERS
+    assert "qs_api" not in r.LAYERS
+    assert "qs_browser" not in r.LAYERS
     assert r.LAYERS == (
-        "unit", "db", "app2", "agreement", "qs_api", "qs_browser",
+        "unit", "db", "app2", "agreement", "app2_browser",
     )
 
 
-def test_aws_touching_layers_starts_at_qs_api() -> None:
-    """DI phase: AWS_TOUCHING_LAYERS = (qs_api, qs_browser).
-
-    The qs_deployed fixture fires when a session's collected tests
-    pull in AWS-dependent fixtures (qs_client / qs_driver / etc.) —
-    which only the qs_api + qs_browser tiers do. Db + app2 tiers — and
-    the DW.3 ``agreement`` tier, a pure artifact reader — inherit
-    tests/e2e/conftest.py but their fixture closures don't touch AWS,
-    so qs_deployed bails via _session_needs_aws.
+def test_aws_touching_layers_is_empty_post_quicksight() -> None:
+    """DW.5.2: AWS_TOUCHING_LAYERS is empty — QuickSight removed, the
+    whole chain is local. No layer deploys, derives a QS user ARN, or
+    trips the dirty-tree refusal.
     """
-    assert r.AWS_TOUCHING_LAYERS == ("qs_api", "qs_browser")
-    assert "deploy" not in r.AWS_TOUCHING_LAYERS
+    assert r.AWS_TOUCHING_LAYERS == ()
     assert "agreement" not in r.AWS_TOUCHING_LAYERS
+    assert "app2_browser" not in r.AWS_TOUCHING_LAYERS
 
 
 def test_layer_command_deploy_arm_removed(tmp_path: Path) -> None:
@@ -655,47 +634,34 @@ def test_layer_command_deploy_arm_removed(tmp_path: Path) -> None:
     ) is None
 
 
-def test_is_aws_touching_layer_qs_api_and_later() -> None:
-    """DI phase: dirty-tree refusal triggers on qs_api and qs_browser
-    (not earlier). Renamed from _is_deploy_or_later.
-    """
-    assert r._is_aws_touching_layer("qs_api") is True
-    assert r._is_aws_touching_layer("qs_browser") is True
+def test_is_aws_touching_layer_always_false_post_quicksight() -> None:
+    """DW.5.2: no layer is AWS-touching anymore (QuickSight removed),
+    so the dirty-tree refusal never triggers."""
+    assert r._is_aws_touching_layer("app2_browser") is False
+    assert r._is_aws_touching_layer("agreement") is False
     assert r._is_aws_touching_layer("app2") is False
     assert r._is_aws_touching_layer("db") is False
     assert r._is_aws_touching_layer("unit") is False
 
 
-def test_chain_through_qs_browser_skips_deploy() -> None:
-    """``chain_through("qs_browser")`` no longer transits ``deploy``.
-
-    Concrete proof that ``up_to=qs_browser`` is a 6-layer chain
-    post-DW.3 (the ``agreement`` tier slotted in before qs_api). The
-    qs_deployed fixture absorbs the deploy work into the qs_api /
-    qs_browser session at start.
-    """
-    chain = r.chain_through("qs_browser")
+def test_chain_through_app2_browser_is_full_chain() -> None:
+    """``up_to=app2_browser`` runs the full 5-layer chain — the terminal
+    browser tier post-DW.5.2 (no ``deploy`` / ``qs_api`` / ``qs_browser``)."""
+    chain = r.chain_through("app2_browser")
     assert chain == [
-        "unit", "db", "app2", "agreement", "qs_api", "qs_browser",
+        "unit", "db", "app2", "agreement", "app2_browser",
     ]
     assert "deploy" not in chain
-
-
-def test_chain_through_qs_api_is_5_layers() -> None:
-    """``up_to=qs_api`` runs the full chain through qs_api — 5 layers
-    post-DW.3 (``agreement`` precedes qs_api)."""
-    chain = r.chain_through("qs_api")
-    assert chain == ["unit", "db", "app2", "agreement", "qs_api"]
-    assert "deploy" not in chain
+    assert "qs_api" not in chain
+    assert "qs_browser" not in chain
 
 
 def test_chain_through_agreement_is_aws_free() -> None:
-    """``up_to=agreement`` stops short of the AWS-touching QS tiers —
-    the DW.3 design intent (the supported gate post-QuickSight)."""
+    """``up_to=agreement`` stops short of the terminal browser tier —
+    the DW.3 design intent (the supported fast gate)."""
     chain = r.chain_through("agreement")
     assert chain == ["unit", "db", "app2", "agreement"]
-    assert "qs_api" not in chain
-    assert "qs_browser" not in chain
+    assert "app2_browser" not in chain
     assert not any(layer in r.AWS_TOUCHING_LAYERS for layer in chain)
 
 
@@ -735,19 +701,18 @@ def test_cmd_triage_state_file_omits_run_id_layer_as_of_anchor(
 
 
 def test_cmd_triage_body_drops_inline_deploy_block() -> None:
-    """DI phase: cmd_triage no longer calls ``_build_deploy_command``
-    or ``_spawn_with_tee`` from inside its body. Deploy is owned by
-    the session-autouse qs_deployed fixture in tests/e2e/conftest.py;
-    cmd_triage's body purely sets up env + spawns the screen session
-    that fires pytest (which fires the fixture).
+    """cmd_triage doesn't call ``_build_deploy_command`` or
+    ``_spawn_with_tee`` from inside its body — its body purely sets up
+    env + spawns the screen session that fires pytest. (DW.5.2: with
+    QuickSight removed there is no deploy at all; this lock survives as
+    a guard against a future inline-deploy callsite creeping back in.)
     """
     import inspect
     cmd_triage_source = inspect.getsource(r.cmd_triage)
     # The old block called these helpers directly from cmd_triage's
     # body; deploy retirement removed those callsites.
     assert "_build_deploy_command(" not in cmd_triage_source, (
-        "cmd_triage should not call _build_deploy_command — deploy "
-        "is owned by tests/e2e/conftest.py::qs_deployed."
+        "cmd_triage should not call _build_deploy_command inline."
     )
     # _spawn_with_tee survives elsewhere in cmd_triage's flow (for
     # things like sweep / seed); the assertion that proves deploy is
@@ -755,10 +720,9 @@ def test_cmd_triage_body_drops_inline_deploy_block() -> None:
 
 
 def test_cmd_triage_no_inline_deploy_step_log_string() -> None:
-    """DI phase: the operator-facing deploy-step banner
+    """The operator-facing deploy-step banner
     (``runner: deploying QS resources``) is gone from cmd_triage.
-    The qs_deployed fixture prints its own banner from inside the
-    pytest session.
+    (DW.5.2: QuickSight removed — there is no deploy step.)
     """
     import inspect
     cmd_triage_source = inspect.getsource(r.cmd_triage)
