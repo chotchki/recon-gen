@@ -1,13 +1,13 @@
-"""AO.R.5 — App2 table column parity gate.
+"""AO.R.5 — App2 table column contract-consumption gate.
 
 The smell this guards (operator-named 2026-05-21): a presentation field
 declared once on the shared contract (``ColumnSpec.human_name`` header,
-``currency`` measure format) used to land in QuickSight *only* — App2's
-``shape_table`` emitted bare ``[{"name"}]`` and the d3 renderer fell back
-to the raw snake_case SQL column name. AO.R.1 threads the same per-column
-label + format QS derives through the App2 fetcher → ``shape_table``.
+``currency`` measure format) was dropped by App2's ``shape_table``, which
+emitted bare ``[{"name"}]`` so the d3 renderer fell back to the raw
+snake_case SQL column name. AO.R.1 threads each per-column label + format
+from the contract through the App2 fetcher → ``shape_table``.
 
-This test pins that parity end-to-end for every Table visual in all four
+This test pins that end-to-end for every Table visual in all four
 bundled apps: it runs the real fetcher-side derivation (``_table_column_meta``)
 through ``shape_table`` and asserts each emitted column carries
 
@@ -17,8 +17,8 @@ through ``shape_table`` and asserts each emitted column carries
 - ``format`` == ``"currency"`` for every column bound to a ``currency=True``
   measure/dim.
 
-A QS-only contract field (header / currency) that App2 drops can no longer
-ship silently.
+A contract field (header / currency) that App2 drops can no longer ship
+silently.
 """
 
 from __future__ import annotations
@@ -138,13 +138,13 @@ def test_app2_table_columns_carry_contract_header_and_currency(app_name: str) ->
                     f"label — it would render as the raw SQL name."
                 )
                 # ... and when the column is on the contract, that label
-                # must equal the contract's human_name — the exact value
-                # QS stamps as the column CustomLabel.
+                # must equal the contract's human_name — the single source
+                # of truth for the column header.
                 if contract is not None and name in contract.column_names:
                     assert col["label"] == contract.column(name).human_name, (
                         f"{app_name}: Table column {name!r} App2 label "
                         f"{col['label']!r} != contract human_name "
-                        f"{contract.column(name).human_name!r} (QS header)."
+                        f"{contract.column(name).human_name!r} (contract header)."
                     )
                 # Currency parity: a currency-flagged measure/dim formats
                 # as currency on both renderers.
@@ -168,11 +168,10 @@ def test_app2_table_columns_carry_contract_header_and_currency(app_name: str) ->
 def test_table_column_meta_returns_decoration_map_for_drillable() -> None:
     """Phase DA — `_table_column_meta` returns a per-column decoration
     map keyed by `Drillable.on.column`. The visual kind ("accent" vs
-    "accent-menu") is resolved by the same Drillable.visual_kind code
-    path the QS-side `Drillable.emit` uses, so App2 ≡ QS by
-    construction: a column with any DATA_POINT_MENU drill writing from
-    it resolves to "accent-menu"; a column with only DATA_POINT_CLICK
-    drill(s) resolves to "accent".
+    "accent-menu") is resolved by the `Drillable.visual_kind` code path
+    the App2 decoration map reads: a column with any DATA_POINT_MENU
+    drill writing from it resolves to "accent-menu"; a column with only
+    DATA_POINT_CLICK drill(s) resolves to "accent".
 
     Standalone Table fixture (not an app build) so the test names the
     expected decoration for each shape rather than discovering it from
