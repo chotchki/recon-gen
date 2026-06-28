@@ -55,7 +55,7 @@ _WARNING_AMBER = "#E65100"
 _DANGER_RED = "#C62828"
 
 DEFAULT_PRESET = ThemePreset(
-    theme_name="QuickSight Gen Theme",
+    theme_name="Recon Gen Theme",
     version_description="Auto-generated dashboard theme",
     analysis_name_prefix=None,
     data_colors=[

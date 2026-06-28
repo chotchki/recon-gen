@@ -15,7 +15,7 @@ from recon_gen.common.theme import DEFAULT_PRESET, _DARK_BLUE
 
 class TestDefaultPreset:
     def test_name(self):
-        assert DEFAULT_PRESET.theme_name == "QuickSight Gen Theme"
+        assert DEFAULT_PRESET.theme_name == "Recon Gen Theme"
 
     def test_no_analysis_prefix(self):
         assert DEFAULT_PRESET.analysis_name_prefix is None
