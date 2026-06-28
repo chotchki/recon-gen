@@ -14,10 +14,9 @@ Coverage:
 5. The `_CB_MARK_DOCS` registration prevents `PytestUnknownMarkWarning`
    from firing (no warnings on a marked test).
 
-The composition-rule violations (unit + dialects → ERROR, qs_* without
-aws_qs → ERROR) are validated separately via a fixture-based pytester
-spike — they call `pytest.exit` which can't be exercised from inside
-the same session.
+The composition-rule violations (e.g. unit + dialects → ERROR) are
+validated separately via a fixture-based pytester spike — they call
+`pytest.exit` which can't be exercised from inside the same session.
 """
 
 from __future__ import annotations

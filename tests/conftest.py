@@ -427,7 +427,7 @@ def pytest_addoption(parser: Any) -> None:  # typing-smell: ignore[explicit-any]
     group.addoption(
         "--tier", default=None,
         help="Run tests marked @tier(Tier.X) where X matches. "
-             "Choices: unit | db | app2 | agreement | qs_api | qs_browser.",
+             "Choices: unit | db | app2 | agreement.",
     )
     group.addoption(
         "--dialect", default=None,
@@ -451,10 +451,10 @@ def pytest_addoption(parser: Any) -> None:  # typing-smell: ignore[explicit-any]
 # the `PytestUnknownMarkWarning` that fires for custom marks. Listing them
 # here keeps the marker authority in one place.
 _CB_MARK_DOCS = {
-    "tier": "Test tier (one of unit | db | app2 | agreement | qs_api | qs_browser). Required on every test.",
+    "tier": "Test tier (one of unit | db | app2 | agreement). Required on every test.",
     "dialects": "DB dialects this test exercises (zero or more of pg | or | du).",
     "l2": "L2 forms this test exercises (zero or more of spec_example | sasquatch_pr | fuzz).",
-    "needs": "Runtime deps (docker | playwright | aws_qs | oracledb_client).",
+    "needs": "Runtime deps (docker | playwright | oracledb_client).",
     "writes": "Test mutates DB state — opt in to per-worker isolation.",
     "inputs": "Cross-test artifact dependencies (pytest nodeids of tests whose artifacts this test reads). Collection-time-validated.",
     "serial": "Test must run with `-n 1` (no parallel workers). Carry a reason argument explaining why — usually surfaces a `@writes()`-without-isolation debt entry.",
@@ -472,8 +472,6 @@ def pytest_collection_modifyitems(config: Any, items: list[Any]) -> None:  # typ
     - No `@tier` mark on a test → ERROR (source of truth; can't
       dispatch).
     - `tier(unit)` + `dialects(...)` → ERROR.
-    - `tier(qs_*)` without `aws_qs` in `needs` → ERROR.
-    - `tier(qs_browser)` without `playwright` in `needs` → ERROR.
 
     Errors are surfaced as collected pytest errors — pytest's
     standard machinery puts them in the report.
@@ -545,14 +543,14 @@ def pytest_collection_modifyitems(config: Any, items: list[Any]) -> None:  # typ
                 "moved, or deleted. Update the @inputs(...) on the "
                 "validator (or restore the input). If the input lives "
                 "in a tier that's not currently being collected (e.g. "
-                "running `--tier=qs_browser` standalone), chain via "
+                "running `--tier=agreement` standalone), chain via "
                 "`./run_tests.sh up_to=<higher-watermark-layer>` "
                 "instead."
             )
     # CB.6 — auto-apply `@tier(Tier.UNIT)` to any test that doesn't carry
     # an explicit tier AND isn't under a tier-dir (tests/e2e/{db,app2,
-    # qs_api,qs_browser}/) whose own conftest auto-applies the matching
-    # tier. The four tier-dirs each have a conftest that adds their tier
+    # agreement}/) whose own conftest auto-applies the matching
+    # tier. The tier-dirs each have a conftest that adds their tier
     # mark before this hook runs (pytest collection-modifyitems hooks
     # chain in conftest discovery order, deepest-first), so by the time
     # we get here every collected item under a tier-dir already has its
@@ -578,9 +576,9 @@ def pytest_collection_modifyitems(config: Any, items: list[Any]) -> None:  # typ
         if tier_marker is None:
             errors.append(
                 f"{item.nodeid}: missing `@tier(...)` mark. Apply one of "
-                f"`@tier(Tier.UNIT | DB | APP2 | QS_API | QS_BROWSER)` "
+                f"`@tier(Tier.UNIT | DB | APP2 | AGREEMENT)` "
                 f"at the module/test level. Tests in tier-dirs "
-                f"(tests/e2e/{{db,app2,qs_api,qs_browser}}/) get the "
+                f"(tests/e2e/{{db,app2,agreement}}/) get the "
                 f"tier auto-applied by the dir's conftest — moving the "
                 f"file there is the cleanest fix."
             )
@@ -595,23 +593,6 @@ def pytest_collection_modifyitems(config: Any, items: list[Any]) -> None:  # typ
                 f"emit + assert SQL strings don't carry a dialects "
                 f"mark — they're cross-dialect by construction)."
             )
-        if tier_value in ("qs_api", "qs_browser"):
-            needs_marker = next(item.iter_markers("needs"), None)
-            needs_values: set[str] = (
-                set(needs_marker.args) if needs_marker is not None else set()
-            )
-            if "aws_qs" not in needs_values:
-                errors.append(
-                    f"{item.nodeid}: `tier({tier_value!r})` requires "
-                    f"`needs(Need.AWS_QS)` so the runner can skip "
-                    f"when AWS is paused."
-                )
-            if tier_value == "qs_browser" and "playwright" not in needs_values:
-                errors.append(
-                    f"{item.nodeid}: `tier(Tier.QS_BROWSER)` requires "
-                    f"`needs(Need.PLAYWRIGHT)` (QS embed renders in a "
-                    f"browser)."
-                )
         # CB.7 (refactored 2026-06-02) — the previous "@writes() requires
         # db_cfg" rule was a workaround for the wrong abstraction.
         # Provider-marked isolation (writer fixtures request
