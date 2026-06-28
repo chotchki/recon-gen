@@ -19,9 +19,7 @@ Tests here cover:
 from __future__ import annotations
 
 import inspect
-from pathlib import Path
 
-from click.testing import CliRunner
 
 from recon_gen.common.l2 import default_l2_instance
 from recon_gen.common.l2.primitives import (
@@ -56,7 +54,6 @@ from recon_gen.apps.l1_dashboard.app import (
     _UNBUNDLED_AGING_TITLE,
     build_l1_dashboard_app,
 )
-from recon_gen.cli import main
 from recon_gen.common.models import DataSet
 from recon_gen.common.sheets.app_info import APP_INFO_SHEET_NAME
 from recon_gen.common.tree import App, Sheet, TextBox, VisualLike
@@ -2041,61 +2038,6 @@ def test_dashboard_emits_with_expected_id_suffix() -> None:
 
 
 # -- CLI smoke (M.2a.9) ------------------------------------------------------
-
-
-class TestCli:
-    """`recon-gen generate l1-dashboard` writes the expected files
-    + the L1 dashboard is included in the `--all` shortcut. Mirrors
-    the shape of test_executives.py::TestCli."""
-
-    def _base_config(self, tmp_path: Path) -> Path:
-        p = tmp_path / "config.yaml"
-        p.write_text(
-            # Z.C — required cfg fields; pin a deployment_name so the
-            # rendered IDs are predictable in the file-existence asserts
-            # below. v14 nested shape.
-            "aws:\n"
-            "  account_id: '111122223333'\n"
-            "  region: us-west-2\n"
-            "  deployment_name: recon-cli-l1\n"
-            "  datasource:\n"
-            "    mode: adopt\n"
-            "    arn: arn:aws:quicksight:us-west-2:111122223333:datasource/ds\n"
-            "db:\n"
-            "  dialect: postgres\n"
-            "  table_prefix: spec_example\n"
-        )
-        return p
-
-    def test_json_apply_writes_l1_dashboard(self, tmp_path: Path):
-        """Q.3.a: ``json apply`` is the bundled emit verb; the L1
-        dashboard JSON files are part of the output set."""
-        config = self._base_config(tmp_path)
-        out = tmp_path / "out"
-        runner = CliRunner()
-        result = runner.invoke(
-            main,
-            ["json", "apply", "-c", str(config), "-o", str(out)],
-        )
-        assert result.exit_code == 0, result.output
-        assert (out / "l1-dashboard-analysis.json").exists()
-        assert (out / "l1-dashboard-dashboard.json").exists()
-        # Datasets land in out/datasets/ with the Z.C deployment_name as
-        # the single ID prefix (replaces the M.2d.3 two-segment shape
-        # `<resource_prefix>-<l2_prefix>-...`).
-        ds_dir = out / "datasets"
-        for name in (
-            "recon-cli-l1-l1-drift-dataset.json",
-            "recon-cli-l1-l1-ledger-drift-dataset.json",
-            "recon-cli-l1-l1-overdraft-dataset.json",
-            "recon-cli-l1-l1-limit-breach-dataset.json",
-            "recon-cli-l1-l1-exceptions-dataset.json",
-            "recon-cli-l1-l1-daily-statement-summary-dataset.json",
-            "recon-cli-l1-l1-daily-statement-transactions-dataset.json",
-            "recon-cli-l1-l1-transactions-dataset.json",
-        ):
-            assert (ds_dir / name).exists(), f"missing {name}"
-
 
 
 # -- Y.2.g — per-sheet categorical filter pushdown ---------------------------

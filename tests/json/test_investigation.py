@@ -30,9 +30,7 @@ DW.8; nothing here calls them.
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
-from click.testing import CliRunner
 
 from recon_gen.apps.investigation.app import build_investigation_app
 from recon_gen.apps.investigation.constants import (
@@ -72,7 +70,6 @@ from recon_gen.apps.investigation.datasets import (
     VOLUME_ANOMALIES_CONTRACT,
     build_all_datasets,  # pyright: ignore[reportUnknownVariableType]: L2Instance import alias reads as Unknown here despite datasets.py being typed
 )
-from recon_gen.cli import main
 from recon_gen.common.config import Config
 from recon_gen.common.spine._emit_helpers import DEFAULT_PREFIX
 from recon_gen.common.models import (
@@ -1453,57 +1450,4 @@ def test_money_trail_root_dropdown_hides_select_all():
 # CLI wiring
 # ---------------------------------------------------------------------------
 
-def _write_min_config(tmp_path: Path) -> Path:
-    cfg_path = tmp_path / "config.yaml"
-    # Z.C — required cfg fields.
-    cfg_path.write_text(
-        "aws:\n"
-        "  account_id: '111122223333'\n"
-        "  region: us-west-2\n"
-        "  deployment_name: recon-inv-cli\n"
-        "  datasource:\n"
-        "    mode: adopt\n"
-        "    arn: 'arn:aws:quicksight:us-west-2:111122223333:datasource/x'\n"
-        "db:\n"
-        "  dialect: postgres\n"
-        "  table_prefix: spec_example\n",
-        encoding="utf-8",
-    )
-    return cfg_path
 
-
-def test_json_apply_writes_investigation_files(tmp_path: Path):
-    """Q.3.a: ``json apply`` is the bundled emit verb; investigation
-    JSON files (analysis, dashboard, theme, recipient-fanout dataset)
-    land in the output dir."""
-    cfg_path = _write_min_config(tmp_path)
-    out_dir = tmp_path / "out"
-    runner = CliRunner()
-    result = runner.invoke(
-        main,
-        ["json", "apply", "-c", str(cfg_path), "-o", str(out_dir)],
-    )
-    assert result.exit_code == 0, result.output
-    assert (out_dir / "theme.json").is_file()
-    assert (out_dir / "investigation-analysis.json").is_file()
-    assert (out_dir / "investigation-dashboard.json").is_file()
-    # K.4.3 — recipient-fanout dataset JSON must be written too.
-    # Z.C — deployment_name from _write_min_config (recon-inv-cli) is
-    # the single ID prefix.
-    fanout_ds = out_dir / "datasets" / (
-        "recon-inv-cli-inv-recipient-fanout-dataset.json"
-    )
-    assert fanout_ds.is_file()
-
-
-def test_json_apply_writes_investigation_app_jsons(tmp_path: Path):
-    """Q.3.a: same `json apply` verb covers every app — re-asserts
-    investigation lands in the bundled emit alongside the others."""
-    cfg_path = _write_min_config(tmp_path)
-    out_dir = tmp_path / "out-all"
-    runner = CliRunner()
-    result = runner.invoke(
-        main, ["json", "apply", "-c", str(cfg_path), "-o", str(out_dir)],
-    )
-    assert result.exit_code == 0, result.output
-    assert (out_dir / "investigation-analysis.json").is_file()

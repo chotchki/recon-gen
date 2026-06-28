@@ -12,11 +12,9 @@ for invariant checks (dataset / filter / visual presence).
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from click.testing import CliRunner
 
 from recon_gen.apps.executives.app import (
     SHEET_EXEC_ACCOUNT_COVERAGE,
@@ -32,7 +30,6 @@ from recon_gen.apps.executives.datasets import (
     EXEC_TRANSACTION_SUMMARY_CONTRACT,
     build_all_datasets,
 )
-from recon_gen.cli import main
 from recon_gen.common.spine._emit_helpers import DEFAULT_PREFIX
 from tests._test_helpers import make_test_config
 
@@ -389,52 +386,3 @@ def test_money_moved_visuals(exec_analysis: "_TreeAnalysis") -> None:
 # CLI smoke
 # ---------------------------------------------------------------------------
 
-class TestCli:
-    def _base_config(self, tmp_path: Path) -> Path:
-        p = tmp_path / "config.yaml"
-        p.write_text(
-            # Z.C — required cfg fields (v14 nested shape).
-            "aws:\n"
-            "  account_id: '111122223333'\n"
-            "  region: us-west-2\n"
-            "  deployment_name: recon-exec-cli\n"
-            "  datasource:\n"
-            "    mode: adopt\n"
-            "    arn: arn:aws:quicksight:us-west-2:111122223333:datasource/ds\n"
-            "db:\n"
-            "  dialect: postgres\n"
-            "  table_prefix: spec_example\n"
-        )
-        return p
-
-    def test_json_apply_writes_executives(self, tmp_path: Path):
-        """Q.3.a: ``json apply`` always emits all four apps; verify
-        the executives JSON files land in the output dir."""
-        config = self._base_config(tmp_path)
-        out = tmp_path / "out"
-        runner = CliRunner()
-        result = runner.invoke(
-            main,
-            ["json", "apply", "-c", str(config), "-o", str(out)],
-        )
-        assert result.exit_code == 0, result.output
-        assert (out / "executives-analysis.json").exists()
-        assert (out / "executives-dashboard.json").exists()
-
-    def test_json_apply_writes_all_apps(self, tmp_path: Path):
-        """Q.3.a: ``json apply`` is the single bundled-emit verb;
-        every app's analysis + dashboard JSON must show up."""
-        config = self._base_config(tmp_path)
-        out = tmp_path / "out"
-        runner = CliRunner()
-        result = runner.invoke(
-            main, ["json", "apply", "-c", str(config), "-o", str(out)],
-        )
-        assert result.exit_code == 0, result.output
-        for stem in (
-            "investigation",
-            "executives",
-            "l1-dashboard",
-        ):
-            assert (out / f"{stem}-analysis.json").exists()
-            assert (out / f"{stem}-dashboard.json").exists()

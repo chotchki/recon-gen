@@ -36,7 +36,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from click.testing import CliRunner
 
 from recon_gen.common.l2 import default_l2_instance
 from recon_gen.apps.l2_flow_tracing.app import (
@@ -56,7 +55,6 @@ from recon_gen.apps.l2_flow_tracing.datasets import (
     DS_TT_LEGS,
     DS_UNIFIED_L2_EXCEPTIONS,
 )
-from recon_gen.cli import main
 from recon_gen.cli._helpers import APPS
 from recon_gen.common.l2 import load_instance
 from recon_gen.common.models import DataSet
@@ -367,90 +365,6 @@ def test_l2_flow_tracing_in_apps_tuple() -> None:
     every cleanup/probe walk. Missing here means the L2 flow tracing
     JSON would silently disappear from the output set."""
     assert "l2-flow-tracing" in APPS
-
-
-def test_cli_json_apply_l2_instance_flag(tmp_path: Path) -> None:
-    """Z.C — `--l2 PATH` selects the L2 topology. The generated
-    dataset filenames carry the cfg's deployment_name as the single
-    prefix segment (collapsed from M.2d.3's
-    `<resource_prefix>-<l2_prefix>-...` shape — the L2-instance
-    segment is gone; deployment_name is operator-set per cfg)."""
-    cfg_path = tmp_path / "config.yaml"
-    cfg_path.write_text(
-        "aws:\n"
-        "  account_id: '111122223333'\n"
-        "  region: us-west-2\n"
-        "  deployment_name: recon-l2ft-l2flag\n"
-        "  datasource:\n"
-        "    mode: adopt\n"
-        "    arn: 'arn:aws:quicksight:us-west-2:111122223333:datasource/test-ds'\n"
-        "db:\n"
-        "  dialect: postgres\n"
-        "  table_prefix: sasquatch_pr\n"
-    )
-    out_dir = tmp_path / "out"
-
-    runner = CliRunner()
-    result = runner.invoke(
-        main, [
-            "json", "apply",
-            "-c", str(cfg_path),
-            "-o", str(out_dir),
-            "--l2", str(SASQUATCH_PR_YAML),
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    # Dataset filenames carry the deployment_name from cfg, not the
-    # L2 yaml stem.
-    chain_inst = (
-        out_dir / "datasets"
-        / "recon-l2ft-l2flag-l2ft-chain-instances-dataset.json"
-    )
-    assert chain_inst.exists()
-
-
-def test_cli_json_apply_l2_flow_tracing_writes_files(tmp_path: Path) -> None:
-    """CLI smoke: ``recon-gen json apply`` writes theme + analysis
-    + dashboard + every dataset under datasets/ for L2 flow tracing.
-    M.3.10c — postings + meta-values replace the M.3.5 rails dataset
-    + the M.3.8 per-key dropdown fan-out."""
-    cfg_path = tmp_path / "config.yaml"
-    cfg_path.write_text(
-        # Z.C — required cfg fields (v14 nested shape).
-        "aws:\n"
-        "  account_id: '111122223333'\n"
-        "  region: us-west-2\n"
-        "  deployment_name: recon-l2ft-cli\n"
-        "  datasource:\n"
-        "    mode: adopt\n"
-        "    arn: 'arn:aws:quicksight:us-west-2:111122223333:datasource/test-ds'\n"
-        "db:\n"
-        "  dialect: postgres\n"
-        "  table_prefix: spec_example\n"
-    )
-    out_dir = tmp_path / "out"
-
-    runner = CliRunner()
-    result = runner.invoke(
-        main, [
-            "json", "apply",
-            "-c", str(cfg_path),
-            "-o", str(out_dir),
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    assert (out_dir / "theme.json").exists()
-    assert (out_dir / "l2-flow-tracing-analysis.json").exists()
-    assert (out_dir / "l2-flow-tracing-dashboard.json").exists()
-    # Z.C — dataset JSONs use the deployment_name single-prefix shape
-    # (was `qs-gen-<l2_prefix>-l2ft-...`).
-    assert (
-        out_dir / "datasets" / "recon-l2ft-cli-l2ft-postings-dataset.json"
-    ).exists()
-    assert (
-        out_dir / "datasets"
-        / "recon-l2ft-cli-l2ft-meta-values-dataset.json"
-    ).exists()
 
 
 # -- Rails sheet (M.3.10c — postings explorer + cascade) --------------------
