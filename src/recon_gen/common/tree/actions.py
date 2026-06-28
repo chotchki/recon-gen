@@ -42,7 +42,7 @@ from recon_gen.common.tree.fields import Dim, Measure
 # uses for the FilterGroup → Sheet ref. Avoids circular import.
 from typing import TYPE_CHECKING, Union
 if TYPE_CHECKING:
-    from recon_gen.common.ids import SheetId
+    from recon_gen.common.ids import ParameterName, SheetId
     from recon_gen.common.tree.structure import Sheet
 
 
@@ -159,19 +159,59 @@ class Drill:
     _AUTO_KIND: ClassVar[str] = "drill"
 
     def resolve_source_shapes(self) -> None:
-        """Resolve every write source's K.2 shape (field_id + ColumnShape),
-        raising if a calc-field source lacks a ``shape`` tag or a real
-        column's shape can't be derived from the contract. Pure
-        validation — the resolved values are discarded.
+        """Resolve every write source's K.2 shape and enforce the
+        drill-param wiring invariants. Raises on:
 
-        ``App.validate()`` calls this so the drill-source-shape invariant
-        holds on EVERY renderer. It used to live only inside ``emit()``
-        (the QS path); post-DW the emitter is gone, so the check moved to
-        the validation walk where App2 picks it up too. Requires
+        - **empty writes** — a drill that sets no parameters is almost
+          certainly a wiring bug (use a navigation-only action if that's
+          the intent);
+        - **duplicate parameter** — a parameter written more than once in
+          one action;
+        - **unresolvable source shape** — a calc-field source with no
+          ``shape`` tag, or a real column whose shape can't be derived
+          from the contract (via ``_resolve_drill_source``);
+        - **shape mismatch** — a source whose resolved ``ColumnShape``
+          isn't assignable to the destination ``DrillParam``'s shape.
+          THE K.2 bug class: a DATETIME column silently coerced into an
+          ACCOUNT_ID string param matched zero rows and read as missing
+          data, not broken wiring. ``DrillResetSentinel`` /
+          ``DrillStaticDateTime`` writes skip the shape comparison — they
+          carry their own literal value, not a column ref.
+
+        ``App.validate()`` calls this so the invariant holds on EVERY
+        renderer. It used to live in ``set_drill_parameters`` (the QS-emit
+        helper); post-DW that helper is gone, so the check moved to the
+        validation walk where App2 picks it up too. Requires
         ``resolve_auto_ids()`` to have run first (the source leaf's
         field_id must be assigned)."""
-        for _param, source in self.writes:
-            _resolve_drill_source(source)
+        if not self.writes:
+            raise ValueError(
+                f"Drill {self.name!r} has no parameter writes — a drill "
+                f"that sets no parameters is almost certainly a wiring "
+                f"bug. Use a navigation-only action if that's the intent."
+            )
+        seen: set[ParameterName] = set()
+        for param, source in self.writes:
+            if param.name in seen:
+                raise ValueError(
+                    f"Duplicate drill parameter {param.name!r} in drill "
+                    f"{self.name!r} — each parameter can be written at "
+                    f"most once per action."
+                )
+            seen.add(param.name)
+            resolved = _resolve_drill_source(source)
+            if isinstance(resolved, DrillSourceField):
+                if not resolved.shape.can_assign_to(param.shape):
+                    raise TypeError(
+                        f"Drill source shape mismatch: writing field "
+                        f"{resolved.field_id!r} ({resolved.shape.name}) "
+                        f"into parameter {param.name!r} (expects "
+                        f"{param.shape.name}) in drill {self.name!r}. This "
+                        f"is the K.2 bug class — pick a source column whose "
+                        f"contract shape is assignable to the parameter, or "
+                        f"widen the parameter's shape if both subtypes are "
+                        f"valid."
+                    )
 
 @dataclass(eq=False)
 class CrossAppDrill:
