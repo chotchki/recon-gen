@@ -11,7 +11,7 @@ The dependency graph drives:
 - Matview REFRESH ordering (REFRESH only the matviews backing
   Datasets that an updated deploy surface depends on).
 
-Construction-time check (in App.emit_analysis): every Dataset
+Construction-time check (in App.validate): every Dataset
 referenced from the tree must be registered on the App via
 ``app.add_dataset()``. Catches "visual references undeclared dataset"
 at emit time, where the existing string-keyed pattern lets the

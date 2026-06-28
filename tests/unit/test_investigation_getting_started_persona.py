@@ -31,8 +31,7 @@ def _analysis_blob(l2_name: str) -> str:
     Post-DW the AWS-JSON emit is gone; the prose is read straight from
     the tree's ``sheet.text_boxes`` content (the renderer-agnostic
     source App2 reads too). ``validate()`` resolves auto-IDs + runs the
-    structural checks the old ``emit_analysis()`` ran, so a malformed
-    tree still surfaces here.
+    structural checks, so a malformed tree still surfaces here.
     """
     inst = load_instance(_FIXTURES / l2_name)
     cfg = make_test_config(db_table_prefix="t")

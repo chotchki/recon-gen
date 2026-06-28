@@ -81,7 +81,7 @@ def l1_app() -> "App":
 def sheet_visual_titles(l1_app: "App") -> dict[str, set[str]]:
     """Map sheet name → set of visual titles on that sheet."""
     out: dict[str, set[str]] = {}
-    # `l1_app` fixture above calls `emit_analysis()`, which sets the
+    # `l1_app` fixture above calls `resolve_auto_ids()`, which sets the
     # analysis attribute — never None here. Asserting narrows for
     # pyright (App.analysis is declared Optional).
     assert l1_app.analysis is not None

@@ -6517,12 +6517,10 @@ def make_studio_routes(
             status = 503 if summary.halted else 200
             return JSONResponse(summary.to_json(), status_code=status)
 
-        # CU.3 — /deploy always mounted. Demo installs configure dummy
-        # AWS creds so the pipeline fails noisily at the
-        # boto3-orchestration step; the local DB rebuild step succeeds
-        # before that and is the visible visitor effect. The
-        # sandbox-exec profile's network restrictions are the actual
-        # safety layer.
+        # CU.3 — /deploy always mounted. Post-DW it runs the local DB
+        # rebuild (schema → data → matview refresh) against the demo DB;
+        # there's no cloud-deploy step anymore. The sandbox-exec profile's
+        # network restrictions are the actual safety layer.
         routes.append(Route("/deploy", deploy, methods=["POST"]))
 
     return routes

@@ -1108,15 +1108,10 @@ class Config:
     # Aurora when they've seeded a different L2 (e.g., sasquatch_pr).
     # Relative paths resolve from the repo root.
     # DE.5 step 15 — moved to db.default_l2_instance.
-    # v8.6.11 — When True (default), every Create* boto3 call passes
-    # ``Tags=[ManagedBy, ResourcePrefix, L2Instance, *extra_tags]`` so
-    # ``json clean`` can fail-CLOSED scope deletion to ourselves. Set
-    # False ONLY when the IAM principal lacks ``quicksight:TagResource``
-    # / ``UntagResource`` permissions (e.g. an enterprise environment
-    # where another system applies governance tags). With tagging off
-    # ``json clean`` falls back to ID-prefix matching against
-    # ``resource_prefix`` — significantly weaker isolation. See the
-    # docs reference for the loss-of-safety details before opting in.
+    # tagging_enabled gated whether created AWS resources carried the
+    # ManagedBy/Deployment tags that the cleanup verb scoped deletion to.
+    # Dead-config post-DW (no AWS resources to tag); slated for the
+    # config-cleanup sweep.
     # DE.5 step 9 — moved to aws.tagging_enabled.
     # DE.5 step 20 — studio_enabled flat field dropped.
     # The CLI mounts Studio unconditionally — production deployments use
@@ -1449,30 +1444,4 @@ def load_config(path: str | Path | None = None) -> Config:
     if not p.exists():
         raise CfgError(f"cfg path does not exist: {p}")
     cfg = _load_nested_config(p)
-    _apply_cfg_aws_profile_to_env(cfg)
     return cfg
-
-
-def _apply_cfg_aws_profile_to_env(cfg: "Config") -> None:
-    """Wire ``cfg.auth.aws.profile`` to ``AWS_PROFILE`` so downstream
-    ``boto3.client(...)`` calls pick up the long-lived IAM-user credentials
-    out of ``~/.aws/credentials`` instead of falling through to the
-    ambient SSO-cached default (which expires + raises
-    ``LoginRefreshRequired`` mid-deploy).
-
-    Operator's explicitly-set ``AWS_PROFILE`` env var wins — only
-    auto-populate when unset, so cron + CI overrides via env keep their
-    precedence.
-
-    Prior contract: the test layer runner injected ``AWS_PROFILE`` into
-    every subprocess it spawned; bare ``recon-gen`` invocations (e.g.,
-    ``recon-gen json apply --execute -c run/config.postgres.yaml`` outside
-    the runner) relied on the operator's ambient shell having ``AWS_PROFILE``
-    already exported. Picking it up from the cfg at load time closes
-    that gap so both invocation shapes use the same identity.
-    """
-    profile = cfg.auth.aws.profile
-    if not profile:
-        return
-    import os  # noqa: PLC0415 — lazy: only fired when cfg supplies a profile
-    os.environ.setdefault("AWS_PROFILE", profile)  # typing-smell: ignore[envvar-bypass]: cfg-supplied profile name (auth.aws.profile) per [[feedback_no_credential_friction]]

@@ -31,7 +31,7 @@ from tests._test_helpers import make_test_config
 def _minimal_app_with_visual(visual: object) -> App:
     """Build a one-sheet App that hosts ``visual`` so we can drive
     ``check_app2_parity(app)`` without exercising the dataset / drill
-    / param validators that come BEFORE the gate in ``emit_analysis``.
+    / param validators that come BEFORE the gate in ``App.validate()``.
     Calls the gate directly to keep failure isolation tight."""
     app = App(name="da-gate-test", cfg=make_test_config())
     analysis = app.set_analysis(
@@ -55,7 +55,7 @@ def test_kpi_with_only_registered_fields_passes_gate() -> None:
     the gate cleanly — every dataclass field is in the registry."""
     cfg = make_test_config()
     # Build a Measure that the KPI can hold without exercising dataset
-    # resolution (we never call emit_analysis here — direct gate call).
+    # resolution (we never call validate() here — direct gate call).
     from recon_gen.common.tree.structure import Dataset
     ds = Dataset(identifier="gate-ds", arn="arn:aws:quicksight:::dataset/gate-ds")
     measure = Measure(dataset=ds, column="n", kind="sum")

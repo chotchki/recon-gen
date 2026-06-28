@@ -27,9 +27,8 @@ Construction-time (raise immediately):
   ``minimum_value`` and ``minimum_parameter`` (or both on the
   maximum side).
 
-Emit-time (validated by ``App.resolve_auto_ids`` + the
-``_validate_*`` methods, all run from ``emit_analysis`` /
-``emit_dashboard``):
+Validation-time (``App.resolve_auto_ids`` + the ``_validate_*``
+methods, all run from ``App.validate()``):
 
 - Auto-IDs resolve for any node that didn't carry an explicit ID.
 - ``_validate_dataset_references`` — every typed Dataset ref in the

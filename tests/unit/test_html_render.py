@@ -212,7 +212,7 @@ def test_emit_html_resolves_auto_visual_ids() -> None:
     default ``visual_id=AUTO`` must have IDs resolved before they
     land in HTML. Pre-fix this emitted ``data-visual-id=
     "_AutoSentinel.AUTO"`` because resolution only ran inside
-    emit_analysis / emit_dashboard."""
+    ``App.resolve_auto_ids()``."""
     from recon_gen.common.tree._helpers import auto_id
 
     sheet = Sheet(

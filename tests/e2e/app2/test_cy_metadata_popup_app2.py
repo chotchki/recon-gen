@@ -174,7 +174,7 @@ def _build_l1_app_with_stub() -> tuple[Any, dict[str, VisualId]]:
     instance = default_l2_instance()
     build_all_l1_dashboard_datasets(cfg, instance)
     tree_app = build_l1_dashboard_app(cfg, l2_instance=instance)
-    # emit_analysis() resolves auto-IDs (visual.visual_id = AUTO → a
+    # resolve_auto_ids() resolves auto-IDs (visual.visual_id = AUTO → a
     # concrete UUID) in addition to running validation walks; we need
     # the resolved form so the stub fetcher can key by visual_id.
     tree_app.validate()
@@ -186,7 +186,7 @@ def _build_l1_app_with_stub() -> tuple[Any, dict[str, VisualId]]:
         for visual in sheet.visuals:
             t = getattr(visual, "title", None)
             if t in titles:
-                # emit_analysis() above has run, so visual_id is the
+                # resolve_auto_ids() above has run, so visual_id is the
                 # resolved VisualId form, not the AUTO sentinel. The
                 # ``isinstance(str, ...)`` narrow keeps pyright happy
                 # without a brittle cast — and surfaces the resolve
@@ -195,7 +195,7 @@ def _build_l1_app_with_stub() -> tuple[Any, dict[str, VisualId]]:
                 vid = visual.visual_id
                 assert isinstance(vid, str), (
                     f"visual_id for {t!r} unresolved after "
-                    f"emit_analysis — got {vid!r}"
+                    f"resolve_auto_ids — got {vid!r}"
                 )
                 by_title[t] = VisualId(vid)
     missing = titles - set(by_title)
