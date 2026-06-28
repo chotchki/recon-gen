@@ -137,3 +137,61 @@ pyright + the unit tier catch any miss.
 7. `models.py` — delete all 139 dataclasses + strip `to_aws_json` from the
    kept DatasetParameter family; drop the now-unused imports in tree modules.
 8. Final: pyright-clean + full unit tier green + `grep to_aws_json src/` → 0.
+
+## Execution progress (2026-06-27) + a scope correction the audit got wrong
+
+Stages 1–5 DONE + committed green (`DW.8.1 (1..5/n)`): test_models teardown,
+test_tree migration (5-reader workflow classification + AST transformer),
+the App/structure emit methods, the four invariant relocations (4a:
+currency→`__post_init__`, datetime-aggregation→`Measure.validate_column_type`,
+filter-scope→`FilterGroup.validate_scope`, drill-source→`Drill.resolve_source_shapes`,
+all walked by `App.validate()`), every leaf `.emit()` (4b, via ruff for the
+~100 unused imports), and `build_theme` + the Theme model graph (DW.8.3). The
+whole visual/field/filter/control/param/action/text-box/theme emit graph
+(~120 classes) is gone. Bonus removal: the now-dead `app2_only` renderer-gate
+flag (its only consumer was `Sheet.emit`).
+
+Two things the audit MIS-MAPPED, found during execution:
+
+- **Leaf `.emit()` methods carried DOMAIN invariants, not just QS shape.**
+  Currency-on-non-numerical, the v11.24.1 datetime-aggregation guard,
+  filter-group-must-be-scoped, and the drill-source shape-tag check all lived
+  inside `.emit()`. Deleting blind would have dropped them. They relocated to
+  `__post_init__` / the `validate()` walk (stage 4a). `field_label` (was
+  `_field_label`) is NOT QS-only either — App2's `_tree_fetcher` imports it for
+  headers; it survived + went public. `Drillable.emit` (returns a dict, not a
+  QS model) is App2-consumed — KEPT.
+
+- **The DataSet model graph is LOAD-BEARING — NOT a clean DELETE.** The audit
+  put `DataSet`/`CustomSql`/`PhysicalTable`/`LogicalTable*`/`InputColumn`/
+  `DataSetUsageConfiguration` in the 139-delete set. But `build_dataset` RETURNS
+  a `DataSet`, and that return is consumed: every app's `app.py` reads
+  `aws.DataSetId` off it to build the tree-Dataset ARN (l1/l2ft/investigation/
+  executives + `sheets/app_info.py`), AND ~6 `tests/json/` files + `e2e/db/
+  test_dataset_sql_smoke.py` validate dataset SQL by reading
+  `ds.DataSetId` / `ds.PhysicalTableMap[..].CustomSql.SqlQuery` / `.Name`.
+  `Tag` (via `config.tags()` called in `build_dataset`'s tail) +
+  `dataset_permissions` are blocked behind the same refactor.
+
+### Remaining work (stages 6+7 = ONE entangled unit, bigger than mapped)
+
+The DataSet-graph removal is its own focused sub-stage (call it DW.8.1.b):
+
+1. Refactor `build_dataset` to keep the registry side-effects (`register_sql` /
+   `register_dataset_params` / `register_contract` / picker hint) and STOP
+   building/returning the `DataSet` — return the `dataset_id` (str) instead.
+   The SQL is already the App2 source of truth via `register_sql`/`get_sql`.
+2. Update the return-type chain: every app `build_*_dataset()` (`-> DataSet`
+   → `-> str`), each app's `build_all_*` (`list[DataSet]` → `list[str]`), and
+   the `{vid: Dataset(identifier=vid, arn=cfg.aws.dataset_arn(aws.DataSetId))}`
+   dict-builders (`aws.DataSetId` → the returned id) in all 4 apps + app_info +
+   picker_datasets.
+3. Migrate the dataset-SQL test surface (`tests/json/test_dataset_sql_contract_projection`,
+   `test_executives`, `test_investigation`, `test_l2_flow_tracing`, `test_app_info`,
+   `test_dataset_parameters`, `tests/e2e/db/test_dataset_sql_smoke`) off
+   `DataSet.PhysicalTableMap/CustomSql/DataSetId` onto `get_sql(id)` /
+   `get_contract(id)` / the id string.
+4. THEN delete the DataSet graph + `Tag` + `config.tags()` + `dataset_permissions`
+   + the DataSource graph (test-only now) from models.py, and strip `to_aws_json`
+   from the kept `DatasetParameter` family.
+5. Final: `grep to_aws_json src/` → 0 + full suite green.
