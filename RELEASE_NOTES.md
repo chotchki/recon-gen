@@ -12,6 +12,48 @@
 > `--help`) against the code. The v14.6.0 → v13.14.4 entries below predate that
 > pass and are left as written.
 
+## v16.0.1 — author credit (white-label-able) + the handbook live on the demos
+
+Patch. My name was on NONE of the outputs; now it's on all of them, and
+it's white-label-able from the L2.
+
+A "Made by Christopher Hotchkiss" footer renders on every self-hosted
+dashboard and Studio page and in the handbook. The credit is an L2
+instance attribute — an `attribution:` block (name / url / prefix +
+an `enabled` toggle) sitting next to `theme:`, the branding an instance
+already carries. Omit a field and it falls back to the baked default, so
+a plain `pip install recon-gen` shows the credit out of the box; set
+`enabled: false` to drop the footer entirely (neutral white-label chrome).
+The Studio L2 editor gets a matching structured form, so you can edit the
+credit without hand-touching yaml. The audit PDF is deliberately untouched
+— that artifact is cryptographically fingerprinted and stays austere.
+
+The handbook also wasn't rendering on the public demos — `/docs` 404'd.
+Two causes: both demos launched with `--no-docs`, AND a build-on-launch
+wouldn't have worked anyway, because a themed L2 makes mkdocs write a CSS
+shim into the installed package's docs tree — a path the demo sandbox
+denies. The fix is build-once-serve-static: a new `--docs-dir` /
+`RECON_GEN_DOCS_SITE_DIR` mounts a pre-built site read-only and skips the
+build (loud-fail if the dir has no `index.html`). Provisioning builds the
+site once unsandboxed; the nightly refresh rebuilds with an atomic swap
+that keeps last-good on a bad build.
+
+### Added
+
+- An `attribution:` block on the L2 instance (name / url / prefix /
+  enabled), resolved onto the baked default credit. Single home in
+  `common/attribution.py`; round-trips through the L2 serializer.
+- A Studio L2 editor surface for the credit (structured form at
+  `/l2_shape/attribution/`).
+- `--docs-dir` flag (and `RECON_GEN_DOCS_SITE_DIR` env) on `recon-gen
+  dashboards` / `recon-gen studio` — serve a pre-built handbook read-only.
+
+### Fixed
+
+- The handbook renders at `/docs` on both public demo hosts again (was 404).
+
+---
+
 ## v16.0.0 — QuickSight removed: fully local, no AWS
 
 Major. The deprecation in v15 lands. The AWS QuickSight renderer is GONE — the boto3
