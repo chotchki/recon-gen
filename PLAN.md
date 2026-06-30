@@ -808,21 +808,6 @@ Removing QuickSight (Phase DW) lifted a rock: collapsing the `[qs, app2]` parame
 - [ ] DY.9 - **Build the App2 dashboard screenshot capture (DW.8.4 placeholder → real).** `src/recon_gen/common/browser/screenshot.py::capture_app_dashboards` is a `NotImplementedError` whose docstring carries the full recipe; `tests/unit/test_screenshot_placeholder.py` pins it (fails when the build lands — the signal). Build per the recipe: start the `recon-gen dashboards` Starlette app on an ephemeral localhost port → `with webkit_page(...) as page: page.goto("http://127.0.0.1:<port>/dashboards/<slug>/")` → walk `app.analysis.sheets` (`click_sheet_tab` → settle → `page.screenshot(full_page=True)`) → move `url_params` from QS's `#p.<name>=` embed-hash to App2's `?param_<name>=` query string. Replace the placeholder-pin test with real capture coverage. Natural DX fit (App2-docs).
 - [ ] DY.10 - **Fix the 3 REAL App2 bugs parked behind xfail (fix the bug, not the marker).** Distinct from DY.4's stale-marker strip — these are live-renderer bugs: **(a+b)** `test_l1_additive_pickers.py:446 + :543` — the App2 picker race on the L1 Exceptions sheet (visual `/data` responses fire before `expect_response` registers its listener; SQL is fast, not perf) → fix the App2 picker's response sequencing (or the test's listener-before-trigger ordering if the race is test-side). **(c)** `test_html2_executives_live.py:339` — the date filter doesn't narrow Active Accounts / Net Money Moved (bind not reaching, OR the matviews encode as-of-now vs as-of-`:window` semantics) → triage which, fix the SQL bind or the matview date semantics. May be silently XPASSing now (`strict=False`) — confirm current state first. Same fix-and-enable posture: a current-renderer bug behind an xfail is a POLICY-2 deferral to resolve, not preserve.
 - [ ] DY.7 - Verify: full chain green on PG AND on DuckDB (`up_to=agreement` both dialects), the coverage-reconciliation gate (DY.1) green, zero unexplained always-skips (every skip is a documented data-conditional or permanent gap), zero stale xpass, the screenshot-placeholder pin replaced. Operator review of `dy_0_skip_inventory.md` final state.
-## Phase DZ - Attribution footer + public-demo docs live on both
-- [x] DZ.1 - attribution module (name/URL + footer HTML + copyright)
-- [x] DZ.2 - footer into HTMX page shell + Tailwind rebuild
-- [x] DZ.3 - mkdocs copyright, single-sourced from attribution
-- [x] DZ.4 - tests: footer in HTMX surfaces + copyright in mkdocs build
-- [x] DZ.5 - serve pre-built docs dir (--docs-dir / env), skip on-launch build
-- [x] DZ.6 - demo deploy: build docs once + drop --no-docs + install docs deps
-- [x] DZ.7 - runbook update + SQLite→DuckDB stale-prose fix
-- [x] DZ.8 - verify local (footer + /docs) + unit layer green
-- [ ] DZ.9 - operator host rollout — release + apply DZ.6 deploy changes on the Mac mini
-- [x] DZ.10 - L2 attribution: primitive + validate + loader (next to theme)
-- [x] DZ.11 - Resolver: overlay L2 attribution onto attribution.py defaults
-- [x] DZ.12 - Live footer + handbook copyright read resolved attribution; retire static constant
-- [x] DZ.13 - Studio L2 editor: attribution edit surface (render + persist)
-- [x] DZ.14 - Re-verify local + unit layer green; refresh RELEASE_NOTES draft
 
 ## Backlog (not yet phased)
 

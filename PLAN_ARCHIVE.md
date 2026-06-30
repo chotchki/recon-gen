@@ -5310,3 +5310,24 @@ Together these break the project convention "left clicks move LEFT, right clicks
 - **DL.5** — Phase exit + v14.5.0 release cut **MOOTED**. DL.2/DL.3/DL.4 commits raced into the v14.4.0 tag during the v14.4.0 release commit's 107s pre-push hook window — the hook fetched + integrated them so the final tagged commit `9b28c53e` is a descendant of `5940f74e` (DL.4). Tag is immutable per `[[feedback_no_tag_rewriting]]`; RELEASE_NOTES.md updated post-tag via the notes-correction commit `c18779b5`.
 
 **Closing context:** v14.4.0 carries the entire DL phase work alongside DK and the DJ tech-debt sweep — three phases in one tag because of the race-swept window. No structured triples needed; the data-shape fix worked for both renderers simultaneously. DL.2's parametrized harness now catches future cross-sheet drill regressions at chain time, not at operator-cold-read time.
+
+---
+
+## 2026-06-30
+
+## Phase DZ - Attribution footer + public-demo docs live on both
+- [x] DZ.1 - attribution module (name/URL + footer HTML + copyright)
+- [x] DZ.2 - footer into HTMX page shell + Tailwind rebuild
+- [x] DZ.3 - mkdocs copyright, single-sourced from attribution
+- [x] DZ.4 - tests: footer in HTMX surfaces + copyright in mkdocs build
+- [x] DZ.5 - serve pre-built docs dir (--docs-dir / env), skip on-launch build
+- [x] DZ.6 - demo deploy: build docs once + drop --no-docs + install docs deps
+- [x] DZ.7 - runbook update + SQLite→DuckDB stale-prose fix
+- [x] DZ.8 - verify local (footer + /docs) + unit layer green
+- [x] DZ.9 - operator host rollout — release + apply DZ.6 deploy changes on the Mac mini
+- [x] DZ.10 - L2 attribution: primitive + validate + loader (next to theme)
+- [x] DZ.11 - Resolver: overlay L2 attribution onto attribution.py defaults
+- [x] DZ.12 - Live footer + handbook copyright read resolved attribution; retire static constant
+- [x] DZ.13 - Studio L2 editor: attribution edit surface (render + persist)
+- [x] DZ.14 - Re-verify local + unit layer green; refresh RELEASE_NOTES draft
+
