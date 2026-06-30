@@ -74,6 +74,7 @@ from .primitives import (
     TransferTemplate,
     TwoLegRail,
 )
+from ..attribution import Attribution
 from .theme import ThemePreset
 
 
@@ -419,6 +420,60 @@ def _load_theme(
         logo=logo,
         favicon=favicon,
     )
+
+
+def _load_attribution(raw: object, *, path: str) -> Attribution | None:
+    """Optional inline author-credit override (DZ.10), sibling to ``theme``.
+
+    YAML shape — every field optional:
+
+        attribution:
+          name: "Acme Reconciliation"
+          url: "https://acme.example"     # or a mailto: — used as href verbatim
+          prefix: "Built by"
+          enabled: true                    # false drops the footer entirely
+
+    None / missing returns None — the renderer falls back to the baked
+    default credit (``common/attribution.py``). To remove a single field
+    omit the key (an empty string is rejected, same as ``description``);
+    to suppress the whole footer set ``enabled: false``. ``enabled``
+    defaults to True.
+    """
+    if raw is None:
+        return None
+    raw_d = _as_mapping(raw, path=path, what="attribution")
+    _allowed = {"name", "url", "prefix", "enabled"}
+    unknown = sorted(set(raw_d) - _allowed)
+    if unknown:
+        raise L2LoaderError(
+            f"{path}: unknown keys {unknown}. Allowed: {sorted(_allowed)}."
+        )
+    enabled_raw = raw_d.get("enabled", True)
+    if not isinstance(enabled_raw, bool):
+        raise L2LoaderError(
+            f"{path}.enabled: expected a bool, got "
+            f"{type(enabled_raw).__name__}"
+        )
+    result = Attribution(
+        name=_load_optional_string(raw_d.get("name"), path=f"{path}.name"),
+        url=_load_optional_string(raw_d.get("url"), path=f"{path}.url"),
+        prefix=_load_optional_string(
+            raw_d.get("prefix"), path=f"{path}.prefix",
+        ),
+        enabled=enabled_raw,
+    )
+    # An all-default block (``attribution: {}`` or every field omitted)
+    # is equivalent to no block — normalize to None so serialize stays
+    # compact and ``load(write(x)) == x`` holds (None, not a degenerate
+    # all-default Attribution).
+    if (
+        result.name is None
+        and result.url is None
+        and result.prefix is None
+        and result.enabled
+    ):
+        return None
+    return result
 
 
 def _load_optional_brand_asset(
@@ -1444,6 +1499,9 @@ def load_instance(path: Path | str, *, validate: bool = True) -> L2Instance:
         ),
         theme=_load_theme(
             raw_d.get("theme"), path="theme", base_dir=yaml_path.parent,
+        ),
+        attribution=_load_attribution(
+            raw_d.get("attribution"), path="attribution",
         ),
         institution_name=_load_optional_string(
             raw_d.get("institution_name"), path="institution_name",

@@ -348,6 +348,9 @@ def run_html_server(
         build_smoke_app,
         stub_money_trail_fetcher,
     )
+    from recon_gen.common.attribution import (  # noqa: PLC0415
+        resolve_attribution,
+    )
     from recon_gen.common.html.server import (  # noqa: PLC0415
         ServedDashboard,
         make_app,
@@ -525,6 +528,11 @@ def run_html_server(
                 dashboards=dashboards, dev_log=dev_log, docs_dir=docs_dir,
                 studio_routes=studio_routes,
                 banner_text=cfg.app2.banner_text,
+                # DZ.12 — the footer credit resolves from the L2 instance's
+                # ``attribution:`` block (None ⇒ baked default credit;
+                # enabled=false ⇒ no footer). Mirrors banner_text: the
+                # caller resolves, make_app just threads it to the shell.
+                attribution=resolve_attribution(instance.attribution),
                 # DD.3 — passing cfg threads through to make_app's auth
                 # middleware short-circuit. When cfg.auth.oidc + .session
                 # are both set, JwtCookieMiddleware + the /auth/* routes

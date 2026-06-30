@@ -70,6 +70,9 @@ EntityKind: TypeAlias = Literal[
     # textarea). Phase CP removed ``role_business_day_offsets`` —
     # offsets moved onto per-Account / per-AccountTemplate.
     "instance",
+    # DZ.13 — the author-credit footer override (sibling of ``theme``).
+    # Structured form: name / url / prefix scalars + an enabled toggle.
+    "attribution",
 ]
 
 
@@ -77,7 +80,7 @@ EntityKind: TypeAlias = Literal[
 # L2Instance rather than a tuple. Routes / handlers branch on this
 # to skip list view, create page, delete, and per-id addressing.
 SINGLETON_KINDS: frozenset[EntityKind] = frozenset(
-    {"theme", "instance"},
+    {"theme", "instance", "attribution"},
 )
 
 
@@ -644,6 +647,7 @@ def singleton_save_l2(
     import yaml  # noqa: PLC0415 — lazy
     from recon_gen.common.l2.loader import (  # noqa: PLC0415 — lazy to dodge cycle
         L2LoaderError,
+        _load_attribution,
         _load_description,
         _load_optional_string,
         _load_theme,
@@ -653,6 +657,9 @@ def singleton_save_l2(
         # Empty ⇒ clear the singleton; silent-fallback takes over.
         if kind == "theme":
             return dataclasses.replace(instance, theme=None)
+        if kind == "attribution":
+            # DZ.13 — cleared ⇒ no override ⇒ the baked default credit.
+            return dataclasses.replace(instance, attribution=None)
         # AI.2.c + BXa.1 — instance settings: empty block clears the
         # top-level fields (description + institution_name +
         # institution_acronym). Phase CP removed
@@ -676,6 +683,10 @@ def singleton_save_l2(
         if kind == "theme":
             new_theme = _load_theme(parsed_map, path=kind)
             return dataclasses.replace(instance, theme=new_theme)
+        if kind == "attribution":
+            # DZ.13 — the loader normalizes an all-default block to None.
+            new_attr = _load_attribution(parsed_map, path=kind)
+            return dataclasses.replace(instance, attribution=new_attr)
         # AI.2.c + BXa.1 — instance settings: the block IS the full
         # state of the editable top-level fields (an omitted key clears
         # that field). Reuse the loader's per-field validators.

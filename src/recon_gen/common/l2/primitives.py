@@ -44,6 +44,7 @@ from datetime import timedelta
 from decimal import Decimal
 from typing import Final, Literal, NewType, TypeAlias
 
+from ..attribution import Attribution
 from .theme import ThemePreset
 
 
@@ -767,6 +768,13 @@ class L2Instance:
     # alongside the institution's primitives. ``None`` means "fall back
     # to the registry default" (``common/theme.py::DEFAULT_PRESET``).
     theme: ThemePreset | None = None
+    # DZ.10 — optional inline author-credit override, sibling to ``theme``
+    # (both are per-instance branding). ``None`` means "fall back to the
+    # baked default credit" (``common/attribution.py`` constants); an
+    # ``Attribution(enabled=False)`` suppresses the footer entirely. The
+    # live renderer + the handbook both resolve it via
+    # ``attribution.resolve_attribution`` so one path serves both.
+    attribution: Attribution | None = None
     # BXa.1 (2026-05-30): promoted from the deleted hardcoded table inside
     # ``_sasquatch_pr_vocabulary``. Curated AML / compliance scenario
     # actors used by the handbook's Investigation walkthroughs (anchor +

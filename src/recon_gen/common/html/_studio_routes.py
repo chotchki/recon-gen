@@ -363,6 +363,9 @@ _HOME_SINGLETONS: tuple[tuple[str, str, str], ...] = (
     # role_business_day_offsets from the singleton — offsets now live
     # per-Account / per-AccountTemplate.
     ("instance", "Instance settings", "description"),
+    # DZ.13 — author-credit footer override (structured form). "set" when
+    # the L2 carries an ``attribution:`` block; unset ⇒ the baked default.
+    ("attribution", "Attribution", "attribution"),
 )
 
 
@@ -878,7 +881,7 @@ def _render_home_page(
         # cleanup 2026-06-11 dropped the persona singleton from this
         # ternary; persona was structured-form per BF.7 before deletion.)
         singleton_form_kind = (
-            "structured form" if kind == "theme"
+            "structured form" if kind in ("theme", "attribution")
             else "single YAML block"
         )
         singleton_link = (

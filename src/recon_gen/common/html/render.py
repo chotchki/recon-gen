@@ -75,8 +75,9 @@ def _json_default(obj: Any) -> Any:
     )
 
 from recon_gen.common.attribution import (
-    ATTRIBUTION_PREFIX,
+    ResolvedAttribution,
     attribution_link_html,
+    resolve_attribution,
 )
 from recon_gen.common.theme import DEFAULT_PRESET
 from recon_gen.common.l2.theme import ThemePreset
@@ -444,17 +445,31 @@ def _banner_html(banner_text: str | None) -> str:
     )
 
 
-# Author credit at the foot of every HTMX page (Studio + Dashboards).
-# Name/URL are single-sourced from common/attribution.py; the Tailwind
-# utilities are literals HERE because input.css's @source only scans
-# common/html/**/*.py, so attribution.py's strings wouldn't compile.
-_ATTRIBUTION_FOOTER_HTML: str = (
-    '<footer class="border-t border-surface-alt mt-12 py-4 '
-    'text-center text-xs text-secondary-fg">'
-    f"{ATTRIBUTION_PREFIX} "
-    + attribution_link_html(link_class="text-accent hover:underline")
-    + "</footer>"
-)
+def _attribution_footer_html(
+    attribution: ResolvedAttribution | None = None,
+) -> str:
+    """Author credit at the foot of every HTMX page (Studio + Dashboards).
+
+    DZ.12 — driven by the L2 instance's resolved ``attribution`` (the
+    caller passes ``resolve_attribution(l2.attribution)``); ``None``
+    yields the baked default credit. Returns ``""`` when the credit is
+    suppressed (``enabled=False``) so a white-label deploy renders no
+    footer. The name/URL/prefix are operator-supplied via the L2 yaml,
+    so they're HTML-escaped (``attribution_link_html`` escapes the
+    anchor; the prefix is escaped here). The Tailwind utilities are
+    literals HERE because ``input.css``'s ``@source`` only scans
+    ``common/html/**/*.py`` — attribution.py's strings wouldn't compile.
+    """
+    r = attribution if attribution is not None else resolve_attribution(None)
+    if not r.enabled:
+        return ""
+    return (
+        '<footer class="border-t border-surface-alt mt-12 py-4 '
+        'text-center text-xs text-secondary-fg">'
+        f"{html.escape(r.prefix)} "
+        + attribution_link_html(r, link_class="text-accent hover:underline")
+        + "</footer>"
+    )
 
 
 _PAGE_SHELL = """\
@@ -1368,6 +1383,7 @@ def emit_dashboards_list(
     docs_url: str | None = None,
     studio_enabled: bool = False,
     banner_text: str | None = None,
+    attribution: ResolvedAttribution | None = None,
 ) -> str:
     """Render the ``/dashboards`` landing page.
 
@@ -1435,7 +1451,7 @@ def emit_dashboards_list(
         theme_style=_emit_theme_style(theme),
         nav=top_nav,
         banner=_banner_html(banner_text),
-        footer=_ATTRIBUTION_FOOTER_HTML,
+        footer=_attribution_footer_html(attribution),
     )
 
 
@@ -1448,6 +1464,7 @@ def emit_error_page(
     theme: ThemePreset | None = None,
     auto_reload_secs: int | None = None,
     banner_text: str | None = None,
+    attribution: ResolvedAttribution | None = None,
 ) -> str:
     """Render a themed error page for 4xx / 5xx responses (X.2.m).
 
@@ -1529,7 +1546,7 @@ def emit_error_page(
         theme_style=_emit_theme_style(theme),
         nav="",
         banner=_banner_html(banner_text),
-        footer=_ATTRIBUTION_FOOTER_HTML,
+        footer=_attribution_footer_html(attribution),
     )
 
 
@@ -1763,6 +1780,7 @@ def emit_html(
     prefix_override: str | None = None,
     page_size_override: str | None = None,
     banner_text: str | None = None,
+    attribution: ResolvedAttribution | None = None,
 ) -> str:
     """Render a tree ``Sheet`` as a standalone HTML page.
 
@@ -1941,7 +1959,7 @@ def emit_html(
         theme_style=_emit_theme_style(theme),
         nav=top_nav,
         banner=_banner_html(banner_text),
-        footer=_ATTRIBUTION_FOOTER_HTML,
+        footer=_attribution_footer_html(attribution),
     )
 
 

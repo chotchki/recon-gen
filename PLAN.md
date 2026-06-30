@@ -818,6 +818,11 @@ Removing QuickSight (Phase DW) lifted a rock: collapsing the `[qs, app2]` parame
 - [x] DZ.7 - runbook update + SQLite→DuckDB stale-prose fix
 - [x] DZ.8 - verify local (footer + /docs) + unit layer green
 - [ ] DZ.9 - operator host rollout — release + apply DZ.6 deploy changes on the Mac mini
+- [x] DZ.10 - L2 attribution: primitive + validate + loader (next to theme)
+- [x] DZ.11 - Resolver: overlay L2 attribution onto attribution.py defaults
+- [x] DZ.12 - Live footer + handbook copyright read resolved attribution; retire static constant
+- [x] DZ.13 - Studio L2 editor: attribution edit surface (render + persist)
+- [x] DZ.14 - Re-verify local + unit layer green; refresh RELEASE_NOTES draft
 
 ## Backlog (not yet phased)
 

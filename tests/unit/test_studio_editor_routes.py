@@ -27,6 +27,7 @@ import pytest
 starlette = pytest.importorskip("starlette")
 TestClient = pytest.importorskip("starlette.testclient").TestClient
 
+from recon_gen.common.attribution import Attribution
 from recon_gen.common.html._smoke_app import (
     SMOKE_FILTER_SPECS,
     build_smoke_app,
@@ -2877,3 +2878,95 @@ def test_bx2_post_create_with_back_from_still_round_trips(
         )
     assert resp.status_code == 303, resp.text
     assert resp.headers.get("location") == "/etl/triage"
+
+
+# ---------------------------------------------------------------------------
+# DZ.13 — attribution singleton (author-credit footer override)
+# ---------------------------------------------------------------------------
+
+
+def test_singleton_attribution_get_renders_structured_form(
+    writable_l2_yaml: Path,
+) -> None:
+    """GET /l2_shape/attribution/ renders the structured form: the three
+    text scalars + the show-footer checkbox + the intro prose."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.get("/l2_shape/attribution/")
+    assert resp.status_code == 200, resp.text
+    body = resp.text
+    assert 'name="name"' in body
+    assert 'name="url"' in body
+    assert 'name="prefix"' in body
+    assert 'type="checkbox"' in body and 'name="enabled"' in body
+    assert "Show the footer credit" in body
+    # Fresh instance (no block) ⇒ checkbox defaults checked.
+    assert "checked" in body
+
+
+def test_singleton_attribution_save_override_round_trips(
+    writable_l2_yaml: Path,
+) -> None:
+    """POST the structured form ⇒ the L2 grows an attribution override
+    that survives reload."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.post(
+            "/l2_shape/attribution/",
+            data={
+                "name": "Acme Recon",
+                "url": "https://acme.example",
+                "prefix": "Built by",
+                "enabled": "on",
+            },
+            follow_redirects=False,
+        )
+    assert resp.status_code == 303, resp.text
+    reloaded = load_instance(writable_l2_yaml)
+    assert reloaded.attribution == Attribution(
+        name="Acme Recon", url="https://acme.example", prefix="Built by",
+    )
+
+
+def test_singleton_attribution_save_suppress(writable_l2_yaml: Path) -> None:
+    """Unchecking the box (no ``enabled`` field submitted) persists an
+    ``enabled=false`` override ⇒ the footer is dropped."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.post(
+            "/l2_shape/attribution/",
+            data={"name": "", "url": "", "prefix": ""},  # enabled omitted ⇒ unchecked
+            follow_redirects=False,
+        )
+    assert resp.status_code == 303, resp.text
+    reloaded = load_instance(writable_l2_yaml)
+    assert reloaded.attribution == Attribution(enabled=False)
+
+
+def test_singleton_attribution_save_blank_clears_to_default(
+    writable_l2_yaml: Path,
+) -> None:
+    """All-blank fields + checked ⇒ no override (the loader normalizes an
+    all-default block to None) ⇒ the baked default credit renders."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.post(
+            "/l2_shape/attribution/",
+            data={"name": "", "url": "", "prefix": "", "enabled": "on"},
+            follow_redirects=False,
+        )
+    assert resp.status_code == 303, resp.text
+    assert load_instance(writable_l2_yaml).attribution is None
+
+
+def test_attribution_section_listed_on_studio_home(
+    writable_l2_yaml: Path,
+) -> None:
+    """The Studio home page surfaces an Attribution section with an Edit
+    link to the singleton form — the operator's way in."""
+    app = _build_app(writable_l2_yaml)
+    with TestClient(app) as c:  # type: ignore[arg-type]: TestClient stubs accept ASGI apps but the inferred return type from make_app is Any
+        resp = c.get("/")
+    assert resp.status_code == 200, resp.text
+    assert "Attribution" in resp.text
+    assert 'href="/l2_shape/attribution/"' in resp.text

@@ -38,6 +38,7 @@ from recon_gen.common.l2.primitives import (
     TransferTemplate,
     TwoLegRail,
 )
+from recon_gen.common.attribution import Attribution
 from recon_gen.common.l2.theme import ThemePreset
 from recon_gen.common.l2.primitives import InvestigationPersona
 
@@ -81,6 +82,8 @@ def serialize_l2(instance: L2Instance) -> str:
         ]
     if instance.theme is not None:
         out["theme"] = _dump_theme(instance.theme)
+    if instance.attribution is not None:
+        out["attribution"] = _dump_attribution(instance.attribution)
     if instance.institution_name is not None:
         out["institution_name"] = instance.institution_name
     if instance.institution_acronym is not None:
@@ -362,6 +365,26 @@ def _dump_investigation_persona(
 ) -> dict[str, Any]:  # typing-smell: ignore[explicit-any]: per-field heterogeneous YAML row
     """Serialize one InvestigationPersona back to YAML. BXa.1."""
     return asdict(p)
+
+
+def _dump_attribution(a: Attribution) -> dict[str, Any]:  # typing-smell: ignore[explicit-any]: per-field heterogeneous YAML row
+    """Serialize an Attribution override back to YAML (DZ.10).
+
+    Omits None text fields and emits ``enabled`` only when False (its
+    non-default), so a credit that overrides just the URL round-trips to
+    a one-key block. The loader normalizes an all-default block to None,
+    so this is only ever called on a block that carries real intent.
+    """
+    out: dict[str, Any] = {}  # typing-smell: ignore[explicit-any]: per-field heterogeneous YAML row
+    if a.name is not None:
+        out["name"] = a.name
+    if a.url is not None:
+        out["url"] = a.url
+    if a.prefix is not None:
+        out["prefix"] = a.prefix
+    if not a.enabled:
+        out["enabled"] = False
+    return out
 
 
 # ---------------------------------------------------------------------------

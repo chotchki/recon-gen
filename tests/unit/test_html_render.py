@@ -23,7 +23,12 @@ from __future__ import annotations
 import pytest
 
 from tests._test_helpers import make_test_config
-from recon_gen.common.attribution import ATTRIBUTION_NAME, ATTRIBUTION_URL
+from recon_gen.common.attribution import (
+    ATTRIBUTION_NAME,
+    ATTRIBUTION_URL,
+    Attribution,
+    resolve_attribution,
+)
 from recon_gen.common.html import emit_html
 from recon_gen.common.html.render import (
     emit_dashboards_list,
@@ -829,3 +834,38 @@ def test_attribution_footer_links_the_name_to_the_author_site() -> None:
     start = out.index(anchor)
     end = out.index("</a>", start)
     assert ATTRIBUTION_NAME in out[start:end]
+
+
+# --- DZ.12 — the footer honors an L2 instance's attribution override -----
+
+
+def test_footer_honors_l2_attribution_override() -> None:
+    """A white-labeled L2 (resolved attribution passed through) flips the
+    footer credit; the baked default name no longer appears."""
+    resolved = resolve_attribution(
+        Attribution(name="Acme Recon", url="https://acme.example", prefix="Built by"),
+    )
+    out = emit_dashboards_list(
+        [("l1_dashboard", "L1 Reconciliation")], attribution=resolved,
+    )
+    assert "<footer" in out
+    assert "Acme Recon" in out
+    assert 'href="https://acme.example"' in out
+    assert "Built by" in out
+    # The seam actually replaced the default — not appended to it.
+    assert ATTRIBUTION_NAME not in out
+    assert ATTRIBUTION_URL not in out
+
+
+def test_footer_suppressed_when_attribution_disabled() -> None:
+    """``enabled=false`` (neutral-chrome white-label) drops the footer
+    entirely — the {footer} slot fills with empty string."""
+    resolved = resolve_attribution(Attribution(enabled=False))
+    sheet = _minimal_sheet()
+    out = emit_html(
+        _build_app(sheet), sheet,
+        dashboard_id="test-dashboard", attribution=resolved,
+    )
+    assert "<footer" not in out
+    assert ATTRIBUTION_NAME not in out
+    assert "{footer}" not in out  # slot was filled (with ""), not left raw

@@ -82,6 +82,7 @@ import traceback
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from recon_gen.common.attribution import ResolvedAttribution
     from recon_gen.common.config import Config
 
 html_escape = _html_module.escape
@@ -559,6 +560,7 @@ def make_app(
     docs_dir: Path | None = None,
     studio_routes: Sequence[Route | Mount] | None = None,
     banner_text: str | None = None,
+    attribution: "ResolvedAttribution | None" = None,
     cfg: "Config | None" = None,
 ) -> Starlette:
     """Build a Starlette ASGI app serving multiple dashboards.
@@ -685,6 +687,7 @@ def make_app(
                 listing, theme=listing_theme, docs_url=docs_url,
                 studio_enabled=studio_enabled,
                 banner_text=banner_text,
+                attribution=attribution,
             ),
         )
 
@@ -759,6 +762,7 @@ def make_app(
             prefix_override=url_prefix,
             page_size_override=url_page_size,
             banner_text=banner_text,
+            attribution=attribution,
         ))
 
     async def sheet_view(request: Request) -> Response:
@@ -820,6 +824,7 @@ def make_app(
             prefix_override=url_prefix,
             page_size_override=url_page_size,
             banner_text=banner_text,
+            attribution=attribution,
         ))
 
     async def visual_data(request: Request) -> Response:
@@ -1159,6 +1164,7 @@ def make_app(
                 ),
                 theme=listing_theme,
                 banner_text=banner_text,
+                attribution=attribution,
             ),
             status_code=404,
         )
@@ -1188,6 +1194,7 @@ def make_app(
                 theme=listing_theme,
                 auto_reload_secs=5,
                 banner_text=banner_text,
+                attribution=attribution,
             ),
             status_code=503,
         )
@@ -1217,6 +1224,7 @@ def make_app(
                 traceback_text=tb_text,
                 theme=listing_theme,
                 banner_text=banner_text,
+                attribution=attribution,
             ),
             status_code=500,
         )

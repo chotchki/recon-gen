@@ -170,10 +170,18 @@ def define_env(env: Any) -> None:
 
     # Author credit in the site footer — the same "Made by" line the
     # HTMX renderer's footer carries, single-sourced from
-    # common/attribution.py. mkdocs-material renders the ``copyright``
-    # config key as raw HTML in the footer, so the anchor passes through.
-    from recon_gen.common.attribution import attribution_copyright_html
-    env.conf["copyright"] = attribution_copyright_html()
+    # common/attribution.py. DZ.12 — resolved from THIS L2 instance's
+    # ``attribution:`` block (the handbook is built per-L2, so a
+    # white-labeled instance gets a white-labeled footer here too;
+    # enabled=false yields ""). mkdocs-material renders ``copyright`` as
+    # raw HTML, so the anchor passes through.
+    from recon_gen.common.attribution import (
+        attribution_copyright_html,
+        resolve_attribution,
+    )
+    env.conf["copyright"] = attribution_copyright_html(
+        resolve_attribution(default_l2.attribution)
+    )
 
     # If the L2 carries inline brand assets, override mkdocs theme.logo
     # / theme.favicon. URLs pass through; absolute paths get copied into

@@ -70,6 +70,7 @@ _KIND_LABEL_SINGULAR: Mapping[EntityKind, str] = {
     "limit_schedule": "limit schedule",
     "theme": "theme",
     "instance": "instance settings",
+    "attribution": "attribution",
 }
 
 _KIND_LABEL_PLURAL: Mapping[EntityKind, str] = {
@@ -81,6 +82,7 @@ _KIND_LABEL_PLURAL: Mapping[EntityKind, str] = {
     "limit_schedule": "Limit schedules",
     "theme": "Theme",
     "instance": "Instance settings",
+    "attribution": "Attribution",
 }
 
 

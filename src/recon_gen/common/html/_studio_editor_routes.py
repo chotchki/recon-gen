@@ -4613,6 +4613,8 @@ def _singleton_has_no_value(instance: Any, kind: EntityKind) -> bool:  # typing-
             and getattr(instance, "institution_name", None) is None
             and getattr(instance, "institution_acronym", None) is None
         )
+    if kind == "attribution":
+        return getattr(instance, "attribution", None) is None
     return False
 
 
@@ -5823,6 +5825,20 @@ _SINGLETON_INTRO_BY_KIND: Mapping[EntityKind, tuple[str, str]] = {
         "institution_name regex-extracts from the description when "
         "absent; audit PDF falls back to <code>cfg.aws.deployment_name</code>).</p>"
     ),
+    "attribution": (
+        "Attribution",
+        "<p><strong>Attribution</strong> is the author credit in the "
+        "footer of every dashboard, Studio page, and the handbook — "
+        "the <em>Made by &lt;name&gt;</em> line. Leave every field blank "
+        "(with <strong>Show the footer credit</strong> checked) to keep "
+        "the tool's baked-in default credit.</p>"
+        "<p>Override <code>name</code> / <code>url</code> / "
+        "<code>prefix</code> to white-label the credit "
+        "(the <code>url</code> can be a site or a <code>mailto:</code>); "
+        "uncheck <strong>Show the footer credit</strong> to drop the "
+        "footer entirely (neutral chrome). The audit PDF is never "
+        "touched — it stays austere by design.</p>"
+    ),
 }
 
 
@@ -5975,6 +5991,91 @@ def _render_instance_form(values: Mapping[str, str]) -> str:
         f'Free-form prose (markdown OK). Handbook templates render this '
         f'as the "what is this institution" intro paragraph; the '
         f'institution_name regex extracts from here when not set above.'
+        f'</small>'
+        f'</div>'
+    )
+    return "".join(parts)
+
+
+# DZ.13 — attribution singleton structured form. Three optional text
+# scalars (name / url / prefix) + a "show the footer credit" checkbox,
+# mirroring the theme / instance singleton forms: per-field controls get
+# dumped to a YAML block that ``singleton_save_l2`` feeds back through
+# ``_load_attribution``.
+_ATTRIBUTION_TEXT_FIELDS: tuple[tuple[str, str, str], ...] = (
+    # (form-name, label, helper)
+    ("name", "Name",
+     "Credited name in the footer. Blank ⇒ the tool's default author."),
+    ("url", "Link URL",
+     "Where the name links — a site or a mailto:. Blank ⇒ the default."),
+    ("prefix", "Prefix",
+     "Lead-in before the name. Blank ⇒ the default (\"Made by\")."),
+)
+
+
+def _attribution_dict_from_instance(instance: Any) -> dict[str, str]:  # typing-smell: ignore[explicit-any]: L2Instance dataclass shape — getattr threads through
+    """Pre-populate the attribution singleton form from the instance.
+
+    A fresh instance (no ``attribution:`` block) defaults the checkbox to
+    checked, so saving with blank fields keeps the footer on with the
+    baked default credit; unchecking is the explicit "no footer" gesture.
+    """
+    a = getattr(instance, "attribution", None)
+    if a is None:
+        return {"name": "", "url": "", "prefix": "", "enabled": "on"}
+    return {
+        "name": a.name or "",
+        "url": a.url or "",
+        "prefix": a.prefix or "",
+        "enabled": "on" if a.enabled else "",
+    }
+
+
+def _attribution_form_to_dict(form: Mapping[str, str]) -> dict[str, object]:
+    """Read the attribution structured form into the dict
+    ``singleton_save_l2`` feeds to ``_load_attribution`` via YAML.
+
+    Empty text fields are omitted (the loader treats an omitted field as
+    "use the default"). The checkbox is present only when checked; absent
+    ⇒ ``enabled: false`` (suppress the footer). An all-blank + checked
+    submit dumps to ``{}`` ⇒ the loader normalizes to None ⇒ the baked
+    default credit.
+    """
+    out: dict[str, object] = {}
+    for fname in ("name", "url", "prefix"):
+        v = str(form.get(fname, "")).strip()
+        if v:
+            out[fname] = v
+    if "enabled" not in form:  # checkbox unchecked ⇒ suppress the footer
+        out["enabled"] = False
+    return out
+
+
+def _render_attribution_form(values: Mapping[str, str]) -> str:
+    """DZ.13 — render the attribution singleton structured form body."""
+    row_cls = field_row_classes()
+    input_cls = field_input_classes()
+    label_cls = "font-semibold text-xs text-primary-fg"
+    helper_cls = "text-xs text-secondary-fg"
+    parts: list[str] = []
+    for fname, label, helper in _ATTRIBUTION_TEXT_FIELDS:
+        v = values.get(fname, "")
+        parts.append(
+            f'<div class="{row_cls}">'
+            f'<label for="field-{fname}" class="{label_cls}">{escape(label)}</label>'
+            f'<input type="text" id="field-{fname}" name="{fname}" '
+            f'value="{escape(v)}" class="{input_cls}">'
+            f'<small class="{helper_cls}">{escape(helper)}</small>'
+            f'</div>'
+        )
+    checked = " checked" if values.get("enabled") else ""
+    parts.append(
+        f'<div class="{row_cls}">'
+        f'<label for="field-enabled" class="flex items-center gap-2 {label_cls}">'
+        f'<input type="checkbox" id="field-enabled" name="enabled"{checked}> '
+        f'Show the footer credit</label>'
+        f'<small class="{helper_cls}">'
+        f'Uncheck to drop the footer entirely (neutral white-label chrome).'
         f'</small>'
         f'</div>'
     )
@@ -6511,6 +6612,23 @@ def _render_singleton_page(
             else _instance_dict_from_instance(instance)
         )
         form_body = _render_instance_form(instance_dict)
+    elif kind == "attribution":
+        if structured_overrides is not None:
+            # On a re-render after a validation error, reconstruct the
+            # checkbox from the dict ``_attribution_form_to_dict`` built —
+            # it sets ``enabled`` only when False (unchecked); absent ⇒
+            # checked. str()-coercing a bool would render "False" (truthy)
+            # so map it explicitly, not via the str() shortcut.
+            ov = structured_overrides
+            attr_dict = {
+                "name": str(ov.get("name", "")),
+                "url": str(ov.get("url", "")),
+                "prefix": str(ov.get("prefix", "")),
+                "enabled": "" if ov.get("enabled") is False else "on",
+            }
+        else:
+            attr_dict = _attribution_dict_from_instance(instance)
+        form_body = _render_attribution_form(attr_dict)
     else:
         current_yaml = yaml_text if yaml_text is not None else _singleton_yaml_text(instance, kind)
         form_body = (
@@ -8006,6 +8124,13 @@ def _make_handlers(
                 yaml_text = _yaml.safe_dump(
                     structured_dict, default_flow_style=False, sort_keys=False,
                 ) if structured_dict else ""
+            elif kind == "attribution":
+                structured_dict = _attribution_form_to_dict(
+                    {k: str(v) for k, v in form.multi_items()},
+                )
+                yaml_text = _yaml.safe_dump(
+                    structured_dict, default_flow_style=False, sort_keys=False,
+                ) if structured_dict else ""
             else:
                 yaml_text = str(form.get("yaml", ""))
             try:
@@ -8669,7 +8794,8 @@ _VALID_KINDS: frozenset[EntityKind] = frozenset(
      # BXa.1 + persona-dead-code-cleanup (2026-06-11) — `persona`
      # singleton removed; was the source of institution_name +
      # institution_acronym before BXa.1 promoted them to `instance`.
-     "theme", "instance"),
+     # DZ.13 — `attribution` is the third singleton (footer author credit).
+     "theme", "instance", "attribution"),
 )
 
 
