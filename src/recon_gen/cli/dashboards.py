@@ -96,6 +96,18 @@ from recon_gen.cli._html_serve import run_html_server
     ),
 )
 @click.option(
+    "--docs-dir",
+    "docs_site_dir",
+    default=None,
+    help=(
+        "Path to a PRE-BUILT mkdocs site dir to serve at `/docs` — skips "
+        "the on-launch build entirely (DZ.5). Use when the site is built "
+        "once out-of-band (e.g. the demo refresh job) so the heavy build "
+        "stays off the launch path. Overrides `--no-docs`. Env fallback: "
+        "`RECON_GEN_DOCS_SITE_DIR` (validated must_be_dir)."
+    ),
+)
+@click.option(
     "--tls-cert",
     "tls_cert",
     default=None,
@@ -126,6 +138,7 @@ def dashboards(
     stub: bool,
     app_name: str,
     embed_docs: bool,
+    docs_site_dir: str | None,
     tls_cert: str | None,
     tls_key: str | None,
 ) -> None:
@@ -157,6 +170,7 @@ def dashboards(
         l2_instance_path=l2_path,
         host=host, port=port, dev_log=dev_log,
         app_name=app_name, stub=stub, embed_docs=embed_docs,
+        docs_site_dir=docs_site_dir,
         studio_routes_factory=None,  # Dashboards-only: no Studio mount.
         tls_cert=tls_cert, tls_key=tls_key,
     )

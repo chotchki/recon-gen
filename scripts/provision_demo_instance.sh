@@ -133,11 +133,27 @@ AUDIT_PDF="$INSTANCE_DIR/audit.pdf"
 "$RECON_GEN_BIN" audit apply -c "$CFG_FILE" --l2 "$L2_FILE" --execute -o "$AUDIT_PDF"
 "$RECON_GEN_BIN" audit verify "$AUDIT_PDF" -c "$CFG_FILE" --l2 "$L2_FILE"
 
+echo "==> docs build (handbook against this L2)"
+# DZ.6 — build the mkdocs handbook ONCE here, into $INSTANCE_DIR/site.
+# The launchd-managed server serves this dir read-only via `--docs-dir`
+# (it does NOT build on launch — the build writes a theme-CSS shim into
+# the installed package's docs tree, a write the server's sandbox
+# denies, and rebuilding on every KeepAlive respawn would delay the
+# bind). Fatal here on purpose: the server's `--docs-dir` requires this
+# dir to exist with an index.html, so provisioning must produce it
+# before launchd loads the plist. (refresh-demos.sh rebuilds it nightly
+# with an atomic swap.) `--no-docs` build strictness so a stray mkdocs
+# warning doesn't abort a fresh provision.
+SITE_DIR="$INSTANCE_DIR/site"
+rm -rf "$SITE_DIR"
+"$RECON_GEN_BIN" docs apply --l2 "$L2_FILE" -o "$SITE_DIR" --no-strict
+
 echo "==> $INSTANCE provisioned at $INSTANCE_DIR"
-echo "    db:  $DB_FILE"
-echo "    cfg: $CFG_FILE"
-echo "    l2:  $L2_FILE"
-echo "    pdf: $AUDIT_PDF"
+echo "    db:   $DB_FILE"
+echo "    cfg:  $CFG_FILE"
+echo "    l2:   $L2_FILE"
+echo "    pdf:  $AUDIT_PDF"
+echo "    site: $SITE_DIR (served at /docs/)"
 echo ""
 echo "Next: load the launchd plist for this instance:"
 echo "  launchctl load -w ~/Library/LaunchAgents/io.hotchkiss.recon-demo.${INSTANCE/_*/}.plist"

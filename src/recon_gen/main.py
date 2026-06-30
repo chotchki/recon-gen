@@ -168,6 +168,13 @@ def define_env(env: Any) -> None:
     # ``{% for a in l2.accounts %}{{ a.id }}: {{ a.description }}…``.
     env.variables["l2"] = default_l2
 
+    # Author credit in the site footer — the same "Made by" line the
+    # HTMX renderer's footer carries, single-sourced from
+    # common/attribution.py. mkdocs-material renders the ``copyright``
+    # config key as raw HTML in the footer, so the anchor passes through.
+    from recon_gen.common.attribution import attribution_copyright_html
+    env.conf["copyright"] = attribution_copyright_html()
+
     # If the L2 carries inline brand assets, override mkdocs theme.logo
     # / theme.favicon. URLs pass through; absolute paths get copied into
     # docs_dir/img/_l2_<kind><ext> and the theme key is rewritten to

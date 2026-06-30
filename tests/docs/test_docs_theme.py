@@ -78,3 +78,25 @@ def test_docs_build_carries_l2_theme_and_site_css_is_persona_neutral(
     assert "var(--qs-accent)" in site_css
     assert "--snb-" not in site_css, "site.css must not hard-code the SNB palette"
     assert _OLD_SNB_HEX not in site_css.upper()
+
+
+def test_docs_build_carries_author_copyright() -> None:
+    """DZ.3 — the mkdocs handbook footer credits the author.
+
+    main.py's ``define_env`` injects the ``copyright`` config key from
+    ``common/attribution.py`` (single-sourced with the HTMX renderer's
+    footer). mkdocs-material renders it as the footer ``md-copyright``
+    block. Assert against the attribution constants so a white-label
+    override moves the test with the seam.
+    """
+    from recon_gen.common.attribution import (
+        ATTRIBUTION_NAME,
+        ATTRIBUTION_URL,
+    )
+
+    out = build_handbook(_SPEC_EXAMPLE, strict=False, portable=False)
+    index = (out / "index.html").read_text(errors="replace")
+
+    assert 'class="md-copyright"' in index, "no Material footer copyright"
+    assert ATTRIBUTION_NAME in index
+    assert f'href="{ATTRIBUTION_URL}"' in index

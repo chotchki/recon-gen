@@ -2,7 +2,10 @@
 
 End-to-end runbook for the Phase AE Cloudflare-routed public demo at
 `recon-gen-spec.hotchkiss.io` (dashboards) and
-`recon-gen-sasquatch.hotchkiss.io` (studio --demo-mode).
+`recon-gen-sasquatch.hotchkiss.io` (studio). Both serve a pre-built
+mkdocs handbook at `/docs` (DZ.6). Backed by per-instance DuckDB
+(`current.duckdb`) since CU.1 — the SQLite dialect was dropped in
+v13.0.0 (CB.8).
 
 This document is operator-private — it lives under `docs/operations/`
 which is excluded from the public mkdocs build at
@@ -56,12 +59,13 @@ are the friction points that cost time on the original install:
 │   io.hotchkiss.recon-demo.spec.plist   io.hotchkiss.recon-demo.     │
 │   sandbox-exec -f spec.sb --                .sasquatch.plist        │
 │   recon-gen dashboards                  launch-sasquatch.sh         │
-│   --port 8401 --no-docs                 (mktemp + sandbox-exec       │
-│   (binds 127.0.0.1:8401)                 + recon-gen studio         │
-│                                          --demo-mode --port 8402)    │
+│   --port 8401 --docs-dir site           (mktemp + sandbox-exec       │
+│   (binds 127.0.0.1:8401)                 + recon-gen studio          │
+│                                          --port 8402 --docs-dir site)│
 │         │                                       │                    │
-│         └────► spec_example/current.sqlite3     └────► sasquatch_pr/ │
-│                                                       current.sqlite3│
+│         └────► spec_example/current.duckdb      └────► sasquatch_pr/ │
+│                + spec_example/site (/docs)            current.duckdb  │
+│                                                       + .../site      │
 │                                                                      │
 │   io.hotchkiss.recon-demo.refresh.plist (StartCalendarInterval 03:00)│
 │     refresh-demos.sh: pip install --upgrade → schema + data +       │
@@ -110,10 +114,15 @@ sudo -u recon-demo mkdir -p \
     /Users/recon-demo/runner \
     /Users/recon-demo/Library/LaunchAgents
 
-# Create the venv + install recon-gen with HTTP-serving extras.
+# Create the venv + install recon-gen. The `[prod]` extra is the one
+# production bucket post-BS.6 (the old `[deploy,demo,audit,serve]` split
+# is dead — pip would warn + install NONE of the runtime deps). `[prod]`
+# carries App2 (starlette/uvicorn), the DB drivers, the audit-PDF stack,
+# AND mkdocs — the handbook build (`docs apply`) needs it (DZ.6 serves a
+# pre-built /docs on both demos).
 sudo -u recon-demo /opt/homebrew/bin/python3.13 -m venv /Users/recon-demo/venv
 sudo -u recon-demo -H /Users/recon-demo/venv/bin/pip install --upgrade pip
-sudo -u recon-demo -H /Users/recon-demo/venv/bin/pip install "recon-gen[deploy,demo,audit,serve]"
+sudo -u recon-demo -H /Users/recon-demo/venv/bin/pip install "recon-gen[prod]"
 ```
 
 ### 3. Install the sandbox profiles + launcher wrappers
@@ -153,13 +162,13 @@ sudo -u recon-demo /usr/bin/sandbox-exec \
 
 # Inside the sandboxed shell:
 touch /Users/recon-demo/spec_example/l2.yaml      # MUST FAIL
-touch /Users/recon-demo/spec_example/current.sqlite3.x  # MUST SUCCEED
+touch /Users/recon-demo/spec_example/current.duckdb.x  # MUST SUCCEED
 exit
 ```
 
 If either outcome is wrong, edit the `.sb` file and re-test.
 
-### 5. Provision both SQLite instances
+### 5. Provision both DuckDB instances
 
 As recon-demo:
 
@@ -168,8 +177,12 @@ As recon-demo:
 /Users/recon-demo/bin/provision_demo_instance.sh sasquatch_pr 8402
 ```
 
-Each takes ~30s. The script prints the rebuilt db path + invokes audit
-verify as a sanity probe; failure aborts before launchd loads the plist.
+Each takes ~30s. The script rebuilds `current.duckdb` (schema + data +
+refresh), invokes audit verify as a sanity probe, and builds the mkdocs
+handbook into `<instance>/site` (DZ.6 — the server serves this dir at
+`/docs` and never builds on launch). Any step's failure aborts before
+launchd loads the plist — including the docs build, since the plist's
+`--docs-dir` requires `<instance>/site/index.html` to exist.
 
 ### 6. Install Cloudflare Tunnel + register
 
@@ -209,8 +222,9 @@ sudo cp deploy/launchd/io.hotchkiss.recon-demo.*.plist /Library/LaunchDaemons/
 sudo chown root:wheel /Library/LaunchDaemons/io.hotchkiss.recon-demo.*.plist
 sudo chmod 0644 /Library/LaunchDaemons/io.hotchkiss.recon-demo.*.plist
 
-# Bootstrap each (spec first, then tunnel + refresh + sasquatch — sasquatch
-# needs v11.6.5+ on PyPI for the --demo-mode flag, so do it last)
+# Bootstrap each (spec first, then tunnel + refresh + sasquatch). The
+# sasquatch wrapper serves a pre-built /docs from <instance>/site, so
+# provision (step 5) must have built it first.
 for plist in /Library/LaunchDaemons/io.hotchkiss.recon-demo.{spec,tunnel,refresh,sasquatch}.plist; do
     sudo launchctl bootstrap system "$plist"
     sleep 3
@@ -250,6 +264,13 @@ with label `mac-mini-demo` and status `Idle`.
 ```bash
 curl -sI https://recon-gen-spec.hotchkiss.io/dashboards/l1_dashboard/
 curl -sI https://recon-gen-sasquatch.hotchkiss.io/dashboards/l1_dashboard/
+# Both should return HTTP/2 200.
+
+# Handbook served at /docs (DZ.6). A 404 here means the server booted
+# without --docs-dir (old plist) or <instance>/site is missing/empty —
+# rebuild it (provision or refresh-demos) + reload the plist.
+curl -sI https://recon-gen-spec.hotchkiss.io/docs/
+curl -sI https://recon-gen-sasquatch.hotchkiss.io/docs/
 # Both should return HTTP/2 200.
 ```
 
@@ -310,6 +331,48 @@ Holds the demo at 11.6.3 until the env var is cleared. The nightly
 refresh job also honors `RECON_GEN_PIN_VERSION` when set in its
 plist's `EnvironmentVariables` block (edit the plist + reload).
 
+### Rolling out the `/docs` change (DZ.6) to a live host
+
+One-time, to make the handbook appear at `/docs` on a host that was set
+up before DZ.6. Order matters — the new plists pass `--docs-dir
+<instance>/site`, which the server hard-fails on if that dir has no
+`index.html`, so build the site BEFORE reloading the plists. The
+`--docs-dir` flag needs a wheel with DZ.5 support, so don't reload onto
+an older pin.
+
+```bash
+# 1. Copy the updated deploy artifacts from your dev clone (NOT as
+#    recon-demo). New spec plist + sasquatch wrapper carry --docs-dir;
+#    provision + refresh now build <instance>/site.
+sudo cp deploy/launchd/io.hotchkiss.recon-demo.spec.plist /Library/LaunchDaemons/
+sudo cp deploy/launchd/launch-sasquatch.sh /Users/recon-demo/bin/
+sudo cp deploy/launchd/refresh-demos.sh /Users/recon-demo/bin/
+sudo cp scripts/provision_demo_instance.sh /Users/recon-demo/bin/
+sudo chown root:wheel /Library/LaunchDaemons/io.hotchkiss.recon-demo.spec.plist
+sudo chmod 0644 /Library/LaunchDaemons/io.hotchkiss.recon-demo.spec.plist
+sudo chown recon-demo:staff /Users/recon-demo/bin/*.sh
+sudo chmod 0500 /Users/recon-demo/bin/*.sh
+
+# 2. Upgrade the wheel (gets DZ.5 + ensures mkdocs via [prod]) AND build
+#    <instance>/site for both instances. refresh-demos.sh does both —
+#    pip-upgrade + rebuild db + build site + SIGTERM-respawn — so one run
+#    leaves every site/ populated. (Or run provision_demo_instance.sh per
+#    instance for a full clean rebuild.)
+sudo -u recon-demo -H /Users/recon-demo/venv/bin/pip install --upgrade "recon-gen[prod]"
+sudo -u recon-demo /Users/recon-demo/bin/refresh-demos.sh
+
+# 3. Reload the daemons so the servers start with --docs-dir. The
+#    sasquatch wrapper is re-read on respawn (step 2 already cycled it),
+#    but the spec plist's ProgramArguments change needs a bootout +
+#    bootstrap.
+sudo launchctl bootout system/io.hotchkiss.recon-demo.spec
+sudo launchctl bootstrap system /Library/LaunchDaemons/io.hotchkiss.recon-demo.spec.plist
+
+# 4. Verify (see Health check above).
+curl -sI https://recon-gen-spec.hotchkiss.io/docs/        # expect 200
+curl -sI https://recon-gen-sasquatch.hotchkiss.io/docs/   # expect 200
+```
+
 ## Troubleshooting
 
 ### "demo URL returns 502 / 503"
@@ -326,7 +389,7 @@ cloudflared can't reach the origin. Order of investigation:
 `refresh-demos.sh` uses `set -e` so any sub-step failure stops the
 script. The most common causes:
 
-- **pip install --upgrade times out** — TestPyPI / PyPI propagation delay or network blip. The previous wheel + previous SQLite db both stay in place; the server is unaffected.
+- **pip install --upgrade times out** — TestPyPI / PyPI propagation delay or network blip. The previous wheel + previous DuckDB db both stay in place; the server is unaffected.
 - **schema apply fails on a new wheel's schema migration** — the migration changed in a way the existing cfg doesn't accept. Pin to the prior version via `RECON_GEN_PIN_VERSION` and investigate.
 - **audit verify fails** — seed pipeline + matview refresh disagree on L1 invariants for the new wheel. Bug in the just-shipped wheel; pin to prior + open an issue.
 
@@ -383,4 +446,4 @@ sudo sysadminctl -deleteUser recon-demo -keep
 
 - **AE.2.b.chrome** — Demo-mode banner across the studio chrome + Deploy button hide. Route-level lockdown already prevents the mutation; the banner is friendlier UX so visitors know what they're looking at.
 - **AE.9** — Smoke test `tests/operations/test_demo_host_smoke.py` (gated on `RECON_DEMO_HOST=1`) for an opt-in cron probe of both URLs.
-- **AE.11** — Once AE.1 + AE.7 + AE.9 are all green, fold AE into the PLAN_ARCHIVE.md sweep + add "AE — Mac mini self-hosted Cloudflare-routed demo (SQLite, daily refresh, sandbox-exec)" to the Phase history one-liner block.
+- **AE.11** — Once AE.1 + AE.7 + AE.9 are all green, fold AE into the PLAN_ARCHIVE.md sweep + add "AE — Mac mini self-hosted Cloudflare-routed demo (DuckDB since CU.1, daily refresh, sandbox-exec)" to the Phase history one-liner block.

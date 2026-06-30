@@ -74,15 +74,23 @@ def test_render_module_vendor_constants_are_local() -> None:
         assert (_VENDOR_DIR / rel).is_file(), f"{name} → {rel!r} not committed"
 
 
+# Match only RESOURCE-loading elements — ``<script src>`` / ``<link href>``
+# — pointing at a remote origin. A bare ``href`` on an ``<a>`` anchor is a
+# user-clickable hyperlink (e.g. the attribution footer's link to the
+# author's site, DZ.2), NOT a runtime fetch, so it doesn't violate the
+# offline contract and must not trip this gate.
 _EXTERNAL_ASSET_RE = re.compile(
-    r'(?:src|href)\s*=\s*["\'](?:https?:)?//', re.IGNORECASE,
+    r'<(?:script|link)\b[^>]*\b(?:src|href)\s*=\s*["\'](?:https?:)?//',
+    re.IGNORECASE,
 )
 
 
 def test_page_shell_has_no_external_script_or_link() -> None:
     """The rendered page shell pulls zero JS/CSS from a remote origin —
     every ``<script src>`` / ``<link href>`` is a local ``/static/...``
-    path. This is the App 2 offline contract (X.2.p)."""
+    path. This is the App 2 offline contract (X.2.p). External ``<a>``
+    hyperlinks (the attribution footer) are exempt — they're navigation,
+    not resource loads."""
     html = emit_dashboards_list([("d1", "Dashboard One"), ("d2", "Dashboard Two")])
     leaks = _EXTERNAL_ASSET_RE.findall(html)
     assert not leaks, (

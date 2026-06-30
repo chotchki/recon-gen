@@ -710,6 +710,28 @@ RECON_GEN_DOCS_L2_INSTANCE: Final = EnvVar(
     validator=must_be_file,
 )
 
+# DZ.5 — pre-built mkdocs site directory for the studio / dashboards
+# `/docs` mount. When set (CLI `--docs-dir` or this env), the server
+# mounts THIS directory at `/docs` and SKIPS the on-launch mkdocs build.
+# Two reasons it matters on the launchd demo host: (1) the build is heavy
+# and would delay the bind on every KeepAlive respawn, and (2) an L2 with
+# a `theme:` block makes the build write a generated CSS shim INTO the
+# docs source tree (`<site-packages>/recon_gen/docs/stylesheets/`), which
+# the server's sandbox denies — so a sandboxed on-launch build silently
+# fails. The refresh job builds the site once (unsandboxed) and points
+# the server here to serve it read-only.
+RECON_GEN_DOCS_SITE_DIR: Final = EnvVar(
+    name="RECON_GEN_DOCS_SITE_DIR",
+    description=(
+        "Path to a pre-built mkdocs site dir to serve at /docs. Set → "
+        "mount it + skip the on-launch build. Absent → build on launch "
+        "(needs the docs extra) unless --no-docs."
+    ),
+    coercer=Path,
+    optional=True,
+    validator=must_be_dir,
+)
+
 # DC.1 — App2 TLS cert + key paths. The studio + dashboards CLI
 # accept `--tls-cert` / `--tls-key` flags; when absent, fall back to
 # cfg.app2.tls.{cert_path,key_path}. Pre-v14.0.0 these env vars were

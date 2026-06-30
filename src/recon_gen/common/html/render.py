@@ -74,6 +74,10 @@ def _json_default(obj: Any) -> Any:
         f"Object of type {type(obj).__name__} is not JSON serializable"
     )
 
+from recon_gen.common.attribution import (
+    ATTRIBUTION_PREFIX,
+    attribution_link_html,
+)
 from recon_gen.common.theme import DEFAULT_PRESET
 from recon_gen.common.l2.theme import ThemePreset
 from recon_gen.common.tree._helpers import _AutoSentinel
@@ -440,6 +444,19 @@ def _banner_html(banner_text: str | None) -> str:
     )
 
 
+# Author credit at the foot of every HTMX page (Studio + Dashboards).
+# Name/URL are single-sourced from common/attribution.py; the Tailwind
+# utilities are literals HERE because input.css's @source only scans
+# common/html/**/*.py, so attribution.py's strings wouldn't compile.
+_ATTRIBUTION_FOOTER_HTML: str = (
+    '<footer class="border-t border-surface-alt mt-12 py-4 '
+    'text-center text-xs text-secondary-fg">'
+    f"{ATTRIBUTION_PREFIX} "
+    + attribution_link_html(link_class="text-accent hover:underline")
+    + "</footer>"
+)
+
+
 _PAGE_SHELL = """\
 <!DOCTYPE html>
 <html lang="en">
@@ -455,6 +472,7 @@ _PAGE_SHELL = """\
 </head>
 <body class="bg-surface-bg text-primary-fg font-sans antialiased">
 {nav}{banner}{body}
+{footer}
   <!-- CN.5 — handbook side panel. Hidden by default; JS reveals
        it on ? button click + injects the fetched handbook HTML. -->
   <aside id="handbook-side-panel"
@@ -1417,6 +1435,7 @@ def emit_dashboards_list(
         theme_style=_emit_theme_style(theme),
         nav=top_nav,
         banner=_banner_html(banner_text),
+        footer=_ATTRIBUTION_FOOTER_HTML,
     )
 
 
@@ -1510,6 +1529,7 @@ def emit_error_page(
         theme_style=_emit_theme_style(theme),
         nav="",
         banner=_banner_html(banner_text),
+        footer=_ATTRIBUTION_FOOTER_HTML,
     )
 
 
@@ -1921,6 +1941,7 @@ def emit_html(
         theme_style=_emit_theme_style(theme),
         nav=top_nav,
         banner=_banner_html(banner_text),
+        footer=_ATTRIBUTION_FOOTER_HTML,
     )
 
 

@@ -132,6 +132,26 @@ refresh_one() {
     mv "$next_db" "$current_db"
     rm -f "$current_db.wal"
 
+    # DZ.6 — rebuild the handbook into site.next, then swap, so a
+    # mid-build window never serves a partial tree and a failed build
+    # leaves the previous site/ intact. Built here (unsandboxed) because
+    # the server's sandbox denies the build's write into the package docs
+    # tree; the server serves site/ read-only via --docs-dir and reopens
+    # it on the KeepAlive respawn below. NON-FATAL: the DB refresh +
+    # audit gate already succeeded and current.duckdb is swapped, so a
+    # docs warning must not abort the run (the `if` guard keeps set -e
+    # from tripping on a non-zero build).
+    site_dir="$instance_dir/site"
+    site_next="$instance_dir/site.next"
+    rm -rf "$site_next"
+    if "$RECON_GEN" docs apply --l2 "$l2" -o "$site_next" --no-strict; then
+        rm -rf "$site_dir"
+        mv "$site_next" "$site_dir"
+    else
+        echo "WARN: docs build failed — keeping previous $site_dir" >&2
+        rm -rf "$site_next"
+    fi
+
     # Restart the per-instance server so it reopens current.duckdb.
     # SIGTERM the running process (matched by its unique --port, scoped
     # to our own uid); KeepAlive=true in the plist makes launchd respawn

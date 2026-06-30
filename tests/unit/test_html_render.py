@@ -23,7 +23,12 @@ from __future__ import annotations
 import pytest
 
 from tests._test_helpers import make_test_config
+from recon_gen.common.attribution import ATTRIBUTION_NAME, ATTRIBUTION_URL
 from recon_gen.common.html import emit_html
+from recon_gen.common.html.render import (
+    emit_dashboards_list,
+    emit_error_page,
+)
 from recon_gen.common.ids import SheetId, VisualId
 from recon_gen.common.l2.primitives import POSTED_STATUS
 from recon_gen.common.tree.structure import Analysis, App, Sheet
@@ -776,3 +781,51 @@ def test_emit_html_threads_page_size_url_param_into_filter_form() -> None:
         page_size_override="not-an-int",
     )
     assert 'name="page_size"' not in out_garbage
+
+
+# --- DZ.2 — author-attribution footer on every HTMX page shell ----------
+# The footer is wired into _PAGE_SHELL, so every surface that fills the
+# shell (sheet pages, the /dashboards landing list, error pages) carries
+# it. Assertions key off the attribution constants, not the literal
+# name, so a white-label override moves the test with the seam.
+
+
+def _assert_has_attribution_footer(out: str) -> None:
+    assert "<footer" in out and "</footer>" in out
+    assert ATTRIBUTION_NAME in out
+    assert ATTRIBUTION_URL in out
+    # Exactly one footer, and the {footer} slot was actually filled.
+    assert out.count("<footer") == 1
+    assert "{footer}" not in out
+
+
+def test_sheet_page_carries_attribution_footer() -> None:
+    sheet = _minimal_sheet()
+    out = emit_html(
+        _build_app(sheet), sheet, dashboard_id="test-dashboard",
+    )
+    _assert_has_attribution_footer(out)
+
+
+def test_dashboards_landing_carries_attribution_footer() -> None:
+    out = emit_dashboards_list([("l1_dashboard", "L1 Reconciliation")])
+    _assert_has_attribution_footer(out)
+
+
+def test_error_page_carries_attribution_footer() -> None:
+    out = emit_error_page(
+        status_code=500, headline="Boom", subtitle="probe",
+    )
+    _assert_has_attribution_footer(out)
+
+
+def test_attribution_footer_links_the_name_to_the_author_site() -> None:
+    """chotchki's intent: the name links to his site as the contact
+    affordance. Assert the name sits inside an anchor to that URL, not
+    merely that both strings appear somewhere on the page."""
+    out = emit_error_page(status_code=404, headline="x", subtitle="y")
+    anchor = f'<a href="{ATTRIBUTION_URL}"'
+    assert anchor in out
+    start = out.index(anchor)
+    end = out.index("</a>", start)
+    assert ATTRIBUTION_NAME in out[start:end]

@@ -64,7 +64,14 @@
         <string>8401</string>
         <string>--host</string>
         <string>127.0.0.1</string>
-        <string>--no-docs</string>
+        <!-- DZ.6 — serve the handbook pre-built by provision /
+             refresh-demos into $INSTANCE_DIR/site (read-only). NOT
+             --no-docs + on-launch build: the build writes a theme-CSS
+             shim into the package docs tree, which this sandbox denies,
+             and rebuilding on every KeepAlive respawn would delay the
+             bind. -->
+        <string>--docs-dir</string>
+        <string>/Users/recon-demo/spec_example/site</string>
     </array>
 
     <key>WorkingDirectory</key>

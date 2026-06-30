@@ -62,10 +62,14 @@ cp "$CANONICAL_L2" "$STUDIO_STATE_DIR/l2.yaml"
 ulimit -f 51200
 
 # Pass `-c` / `--l2` / `--port` / `--host` via positional CLI args.
-# `--no-docs` keeps the mkdocs build off the critical path on launch
-# (the demo doesn't ship the handbook). The `--l2` flag now points at
-# the tmpdir overlay (CU.2) — `recon-gen` sees a writable path with no
-# awareness it's a demo install.
+# DZ.6 — `--docs-dir` serves the handbook pre-built by provision /
+# refresh-demos into $INSTANCE_DIR/site (read-only). NOT --no-docs +
+# on-launch build: a themed L2 makes the build write a CSS shim into the
+# installed package's docs tree, a write this sandbox denies, and a
+# rebuild on every KeepAlive respawn would delay the bind. The site dir
+# is canonical (outside STUDIO_STATE_DIR), so it survives the per-launch
+# tmpdir churn. The `--l2` flag points at the tmpdir overlay (CU.2) —
+# `recon-gen` sees a writable path with no awareness it's a demo install.
 exec /usr/bin/sandbox-exec \
     -D HOME=/Users/recon-demo \
     -D INSTANCE_DIR="$INSTANCE_DIR" \
@@ -78,4 +82,4 @@ exec /usr/bin/sandbox-exec \
         --l2 "$STUDIO_STATE_DIR/l2.yaml" \
         --port 8402 \
         --host 127.0.0.1 \
-        --no-docs
+        --docs-dir "$INSTANCE_DIR/site"

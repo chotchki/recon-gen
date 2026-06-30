@@ -235,6 +235,84 @@ type StudioRoutesFactory = Callable[
 ]
 
 
+def _resolve_handbook_docs_dir(
+    *,
+    embed_docs: bool,
+    docs_site_dir: str | None,
+    l2_instance_path: Path | None,
+) -> tuple[Path | None, "tempfile.TemporaryDirectory[str] | None"]:
+    """Pick the directory to mount at ``/docs`` for the studio / dashboards
+    server. Returns ``(docs_dir, docs_tmp)``:
+
+    - ``docs_dir is None`` → ``/docs`` stays unmounted.
+    - ``docs_tmp`` is non-None only for the build-on-launch path; the
+      caller MUST keep the handle alive for the server's lifetime and
+      clean it up on shutdown (the tempdir holds the built site).
+
+    Two modes:
+
+    1. DZ.5 pre-built dir (``--docs-dir`` / ``RECON_GEN_DOCS_SITE_DIR``):
+       serve it directly, NO build. Keeps the heavy mkdocs build off the
+       launch critical path; it also dodges the sandboxed demo server's
+       inability to run the build at all (a themed L2 makes mkdocs write a
+       CSS shim into the docs source tree, a write the sandbox denies).
+       The launchd demo host builds the site once in its unsandboxed
+       refresh job and points the server here. CLI flag wins over env
+       (mirrors the TLS precedence). An explicit override beats
+       ``--no-docs`` (a positive "serve THIS" request). A configured dir
+       with no ``index.html`` is operator error → loud ``UsageError``,
+       never a silent skip.
+    2. X.2.i build-on-launch (default): build into a tempdir against the
+       same L2. Best-effort — needs the ``[docs]`` extra; a
+       ``[serve]``-only install (no mkdocs) silently skips, never a hard
+       fail.
+    """
+    from recon_gen.common.env_keys import (  # noqa: PLC0415 — lazy: only when serving
+        RECON_GEN_DOCS_SITE_DIR,
+    )
+
+    docs_site_override: str | None = docs_site_dir
+    if docs_site_override is None:
+        env_docs = RECON_GEN_DOCS_SITE_DIR.get_or_none()
+        if env_docs is not None:
+            docs_site_override = str(env_docs)
+
+    if docs_site_override is not None:
+        prebuilt = Path(docs_site_override)
+        if (prebuilt / "index.html").is_file():
+            click.echo(f"docs: serving pre-built handbook at /docs/ ({prebuilt})")
+            return prebuilt, None
+        raise click.UsageError(
+            f"docs-dir {prebuilt} has no index.html — build it first with "
+            f"`recon-gen docs apply -o {prebuilt}` (or unset --docs-dir / "
+            f"RECON_GEN_DOCS_SITE_DIR to build on launch)."
+        )
+
+    if not (
+        embed_docs
+        and importlib.util.find_spec("mkdocs") is not None
+        and l2_instance_path is not None
+    ):
+        return None, None
+
+    from recon_gen.cli.docs import build_docs_site  # noqa: PLC0415
+
+    docs_tmp = tempfile.TemporaryDirectory(prefix="qs-html-docs-")
+    # strict=False — a stray mkdocs warning shouldn't take the server
+    # down; `docs apply --strict` is the place that gates on those.
+    rc = build_docs_site(str(l2_instance_path), docs_tmp.name, strict=False)
+    if rc == 0 and (Path(docs_tmp.name) / "index.html").is_file():
+        click.echo("docs: embedded handbook at /docs/")
+        return Path(docs_tmp.name), docs_tmp
+
+    click.echo(
+        "docs: mkdocs build failed — serving without /docs "
+        "(run `recon-gen docs apply` to triage)"
+    )
+    docs_tmp.cleanup()
+    return None, None
+
+
 def run_html_server(
     *,
     cfg: Any,  # type: ignore[no-untyped-def]: cfg untyped pending CLI-wide sweep
@@ -246,6 +324,7 @@ def run_html_server(
     app_name: str,
     stub: bool,
     embed_docs: bool,
+    docs_site_dir: str | None = None,
     studio_routes_factory: StudioRoutesFactory | None = None,
     tls_cert: str | None = None,
     tls_key: str | None = None,
@@ -326,32 +405,11 @@ def run_html_server(
     if theme is not None:
         click.echo(f"theme: L2-driven ({theme.theme_name})")
 
-    # X.2.i — build the mkdocs handbook into a tempdir (against the same
-    # L2) and embed it at /docs. Best-effort: needs the [docs] extra; a
-    # [serve]-only install (no mkdocs) silently skips, never a hard fail.
-    docs_dir: Path | None = None
-    docs_tmp: tempfile.TemporaryDirectory[str] | None = None
-    if (
-        embed_docs
-        and importlib.util.find_spec("mkdocs") is not None
-        and l2_instance_path is not None
-    ):
-        from recon_gen.cli.docs import build_docs_site  # noqa: PLC0415
-
-        docs_tmp = tempfile.TemporaryDirectory(prefix="qs-html-docs-")
-        # strict=False — a stray mkdocs warning shouldn't take the server
-        # down; `docs apply --strict` is the place that gates on those.
-        rc = build_docs_site(str(l2_instance_path), docs_tmp.name, strict=False)
-        if rc == 0 and (Path(docs_tmp.name) / "index.html").is_file():
-            docs_dir = Path(docs_tmp.name)
-            click.echo("docs: embedded handbook at /docs/")
-        else:
-            click.echo(
-                "docs: mkdocs build failed — serving without /docs "
-                "(run `recon-gen docs apply` to triage)"
-            )
-            docs_tmp.cleanup()
-            docs_tmp = None
+    docs_dir, docs_tmp = _resolve_handbook_docs_dir(
+        embed_docs=embed_docs,
+        docs_site_dir=docs_site_dir,
+        l2_instance_path=l2_instance_path,
+    )
 
     # Build the real apps' trees here (sync) — ``build_*_datasets``
     # populates the shared SQL registry (per-app-prefixed IDs → no
