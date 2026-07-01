@@ -297,10 +297,22 @@ L1_PICKER_SPECS: tuple[SheetAnchorSpec, ...] = (
         # Sorted-by-magnitude_amount is the visual default — pick the top
         # row of the smallest cust-N for the MUI window bias (see Drift).
         anchor_order="account_id ASC, magnitude_amount DESC",
+        # DY.10.1 — the anchor MUST carry a non-NULL rail_name. L1
+        # Exceptions unions per-kind branches; the drift / ledger_drift /
+        # overdraft / eod branches have NULL rail_name (they're not
+        # rail-scoped). Without the constraint the ``account_id ASC``
+        # bias lands on ``acct-ledger-drift-parent-d0`` (a NULL-rail
+        # ledger_drift row), and the "Transfer Type" picker (column
+        # rail_name) then tries to drive TomSelect to the literal
+        # ``'None'`` — no such advertised rail, setValue no-ops, the
+        # instrumented pick_filter screams "value never landed". A
+        # rail-bearing exception (limit_breach / stuck_* / chain) is the
+        # only anchor that can satisfy EVERY picker including Transfer
+        # Type. Composes with the account-universe intersect below.
         anchor_where_template=(
             "account_id IN ("
             "SELECT account_id FROM {prefix}_current_daily_balances"
-            ")"
+            ") AND rail_name IS NOT NULL"
         ),
         pickers=(
             PickerSpec(
@@ -426,19 +438,21 @@ def test_l1_additive_pickers_keep_anchor_row(
     # here was WRONG. The instrumentation (App2Driver._record_requests +
     # _wait_for_refetch scream) proved there is no expect_response race:
     # the dropdown-search + visual /data requests DO fire and return 200.
-    # The real failure was the ``before_count == 0`` SKIP below — every
-    # date-windowed L1 sheet (Drift / Overdraft / Limit Breach / L1
-    # Exceptions / Transactions) renders EMPTY by default on the browser
-    # harness's per-test isolated seed. That seed is minimal (no
-    # densify/plants: ~30 exceptions vs data-apply's 3229) and its sparse
-    # violations don't reliably land in the now-dynamic 7-day default
-    # window (as_of_frame(window_days=7)) — so before_count is 0 (or
-    # nonzero) depending on the per-run fuzz seed. The seed distribution
-    # and the dynamic as_of window drifted apart (the pre-as_of "old date
-    # range anchor"). FIX in flight: make the seed deterministically plant
-    # a recent violation of every L1 kind inside the default window so
-    # these run instead of skip (PLAN DY.10.1). Until then they skip with
-    # the documented data-conditional reason below.
+    # The real failure was a ``before_count == 0`` SKIP — but only ONE
+    # date-windowed sheet was actually empty in the default window
+    # (as_of_frame(window_days=7)): sasquatch_pr's Limit Breach. DY.10.1
+    # empirical measurement corrected the "all 5 sheets empty" story:
+    # Drift / Overdraft / L1 Exceptions / Transactions all populated
+    # in-window on the full `data apply` seed; spec_example was fully
+    # covered. Root cause of the Limit Breach hole: `densify_scenario`'s
+    # limit_breach replicas collided on a day-blind supersession key so
+    # only the oldest-day (out-of-window) leg survived — fixed at root by
+    # day-keying the LimitBreachGenerator leg id/transfer_id
+    # (common/spine/limit_breach.py), so densify now spreads breaches
+    # across the window incl. recent days. The ``before_count == 0`` skip
+    # BELOW stays as the guard the DY.7.1 example-L2 gate enforces (a skip
+    # firing on spec/sasquatch is a hard session-level failure there); on
+    # the fixed seed it no longer fires for any of the 7 sheets.
     driver, dashboard_arg = l1_dashboard_driver
     driver.open(dashboard_arg, sheet=spec.sheet_name)
     driver.wait_loaded(spec.target_visual)

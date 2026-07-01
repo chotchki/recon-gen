@@ -1017,12 +1017,14 @@ def _chain_completion_for_rail(
     return [ChainCompletionGenerator(
         # The OLD multi_xor matview keys on the chain-parent's
         # transfer_id. LimitBreachGenerator's transfer_id is
-        # `xfer-limit-breach-{rail}-{direction}-{account}` — that's
-        # what we thread.
+        # `xfer-limit-breach-{rail}-{direction}-{account}-{anchor_day}`
+        # (DY.10.1 added the day so densify replicas don't collide) —
+        # thread the SAME day-keyed shape so the completion references
+        # the leg that actually exists.
         parent_transfer_id=(
             f"xfer-limit-breach-"
             f"{parent_gen.rail_name}-{parent_gen.direction}-"
-            f"{parent_gen.account_id}"
+            f"{parent_gen.account_id}-{parent_gen.anchor_day.isoformat()}"
         ),
         parent_name=parent_name,
         account_id=parent_gen.account_id,

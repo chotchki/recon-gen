@@ -207,10 +207,22 @@ class LimitBreachGenerator:
         else:  # Inbound
             amount_direction = "Credit"
             amount_money = amount_magnitude
+        # DY.10.1 — the leg id/transfer_id carry the anchor_day. The
+        # supersession key is `id` (current_transactions picks MAX(entry)
+        # per id, schema.py); WITHOUT the day, densify's N same-account
+        # same-rail replicas across the window (days_ago 4/11/18/25/32)
+        # collided on ONE id → only the last-emitted (oldest-day) leg
+        # survived, so densify silently no-op'd for limit_breach and the
+        # recent-window breach never materialized (sasquatch's Limit
+        # Breach sheet rendered empty in the default 7-day view). Keying
+        # on the day makes each day's breach a distinct leg — they ARE
+        # independent single-leg events on different days, so a distinct
+        # id/transfer_id per day is the correct identity anyway.
+        day_key = self.anchor_day.isoformat()
         insert_tx(
             conn,
             prefix=self.prefix,
-            id=f"tx-limit-breach-{self.rail_name}-{self.direction}-{self.account_id}",
+            id=f"tx-limit-breach-{self.rail_name}-{self.direction}-{self.account_id}-{day_key}",
             account_id=self.account_id,
             account_name=f"Limit Breach ({self.rail_name} {self.direction})",
             account_role=self.account_role,
@@ -220,7 +232,7 @@ class LimitBreachGenerator:
             amount_direction=amount_direction,
             status=POSTED_STATUS,
             posting=ts(self.anchor_day),
-            transfer_id=f"xfer-limit-breach-{self.rail_name}-{self.direction}-{self.account_id}",
+            transfer_id=f"xfer-limit-breach-{self.rail_name}-{self.direction}-{self.account_id}-{day_key}",
             rail_name=self.rail_name,
             origin=ORIGIN_INTERNAL_INITIATED,
             metadata=metadata,
