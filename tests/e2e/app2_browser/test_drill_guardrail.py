@@ -53,9 +53,13 @@ from tests.e2e._helpers.drill_enumeration import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
     from tests.e2e._drivers import DashboardDriver
+
+    # A per-source-sheet required-filter preselect: drives the pick(s)
+    # that populate the source visual, returns False on a genuine data gap.
+    _PreselectFn = Callable[[DashboardDriver], bool]
 
 
 pytestmark = [
@@ -76,18 +80,32 @@ pytestmark = [
 # destination sheet's ``sheet_id`` (the str value, not the SheetId
 # wrapper).
 
-# Operator 2026-06-16 — sentinel that a drilled row-0 value is a planted
-# ERROR, not a real entity. The `_spine_plant` rail tags the zero-amount
-# DL.3.1 drill-scaffolding marker tx; those markers also surface as L2FT
-# violations whose `entity_a` is a rail (not a chain), so a drill like
-# "View in Chains (filter parent_chain_name to entity_a)" writes a value
-# no chain matches → empty destination. Per operator: plants ARE
-# user-facing errors and legitimately do NOT round-trip through a drill
-# (the drilled value has no match in the destination's universe). The
-# guardrail exempts these rows from the populated/narrowed contract —
-# same principle as the additive-picker anchor skipping `_spine_plant`.
-# Making pickers/drills SELECT error rows is a separate backlog item.
+# The `_spine_plant` rail tags the zero-amount DL.3.1 drill-scaffolding
+# marker tx. Those markers aggregate every ViolationGenerator's marker
+# leg, so on the L2 Violation Detail table (ORDER BY count DESC) the
+# `_spine_plant` 'Unmatched Rail Name' row sorts to row 0 — it's the ONLY
+# undeclared rail in the seed and carries the highest posting count. It's
+# meaningless scaffolding, not a real user-facing rail, so the row-0 walk
+# should skip PAST it to a genuine rail. DY.7.1 retired the blanket
+# `_PLANT_ERROR_SENTINEL`-in-any-cell skip (which was over-broad — the
+# marker even round-trips to Rails) in favor of the destination-aware row
+# selector below; the constant now just names the marker for exclusion.
 _PLANT_ERROR_SENTINEL = "_spine_plant"
+
+# The L2FT ``L2 Violation Detail`` source hangs BOTH the Rails and the
+# Chains cross-sheet drill on ONE ``entity_a`` column, and each row's
+# ``check_type`` makes ``entity_a`` valid for at most ONE destination. A
+# blind row-0 drill reads whichever kind sorts highest (the `_spine_plant`
+# 'Unmatched Rail Name' marker) and lands the Chains destination empty (a
+# rail is never a chain parent). Select the row whose ``check_type`` is
+# valid for THIS drill's destination instead. Keyed by ``dst_sheet_id`` →
+# (accepted Title-Case ``check_type`` labels the unified-exceptions SQL
+# CASTs, exclude the `_spine_plant` scaffolding marker?).
+_L2_VIOLATION_DETAIL_TITLE = "L2 Violation Detail"
+_L2FT_EXC_ROW_SELECT: dict[str, tuple[frozenset[str], bool]] = {
+    "l2ft-sheet-rails": (frozenset({"Unmatched Rail Name"}), True),
+    "l2ft-sheet-chains": (frozenset({"Chain Orphans"}), False),
+}
 
 _DST_ANCHOR_FALLBACKS: dict[str, str] = {
     # L1 Daily Statement's first visual is the "Statement of Account"
@@ -143,6 +161,60 @@ def _pick_anchor_visual_title(site: DrillSite) -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# Per-source required-filter preselect (pick-first source sheets)
+# ---------------------------------------------------------------------------
+#
+# Some source sheets are EMPTY on cold open by design — a required filter
+# defaults to a no-match sentinel until the analyst picks (e.g. L1 Daily
+# Statement's pL1DsAccount = '__l1_no_account_selected__'). The guardrail
+# opens the sheet with no selection, so row 0 doesn't exist and the read
+# skips as a false "data gap". A preselect callable keyed by
+# ``src_sheet_id`` drives the required pick(s) so the source populates
+# before row 0 is read. Returns True on success, False when the sheet has
+# no pickable value (a genuine data gap — caller skips).
+
+
+def _preselect_daily_statement(driver: "DashboardDriver") -> bool:
+    """Put L1 Daily Statement into a populated state before the row-0 read.
+
+    'Posted Money Records' is empty on cold open: ``pL1DsAccount`` defaults
+    to the ``__l1_no_account_selected__`` sentinel (a pick-an-account-first
+    sheet). The Account universe is available without a Role pick, and the
+    Business Day picker defaults to the as_of anchor day — which is data-
+    bearing for any account active on that day — so picking an Account is
+    enough to fill the table (verified: picking the first account surfaces
+    ~29 posting rows with the default Business Day untouched).
+
+    Iterate the account list (capped) rather than trusting index 0 alone:
+    on a sparse instance the first alphabetical account may have no posting
+    on the default day. Return True at the first account whose pick
+    populates 'Posted Money Records'; False when none do (genuine data gap
+    → caller skips).
+    """
+    accounts = driver.filter_options("Account")
+    for account in accounts[:_DS_PRESELECT_MAX_TRIES]:
+        driver.pick_filter("Account", [account])
+        driver.wait_loaded("Posted Money Records")
+        if driver.table_row_count("Posted Money Records") > 0:
+            return True
+    return False
+
+
+# Cap the Daily Statement account probe — the first data-bearing account
+# is alphabetically early on both instances; the cap bounds the pathological
+# "every account sparse on the default day" case to a fast skip.
+_DS_PRESELECT_MAX_TRIES = 8
+
+
+# Keyed by ``src_sheet_id`` (str). Only pick-first source sheets need an
+# entry; every other source populates on cold open (row 0 is readable
+# straight after ``open`` + ``wait_loaded``).
+_SRC_REQUIRED_PICKS: dict[str, "_PreselectFn"] = {
+    "l1-sheet-daily-statement": _preselect_daily_statement,
+}
+
+
+# ---------------------------------------------------------------------------
 # Drill source column resolution
 # ---------------------------------------------------------------------------
 
@@ -195,17 +267,52 @@ def _resolve_drill_writes(drill: Drill) -> list[_DrillWriteMap]:
     return out
 
 
+def _select_source_row_index(
+    driver: "DashboardDriver",
+    site: DrillSite,
+    src_visual_title: str,
+) -> int | None:
+    """Pick the source row index to drill from.
+
+    Default: row 0. For the L2FT ``L2 Violation Detail`` source — which
+    hangs BOTH the Rails and Chains cross-sheet drills on one ``entity_a``
+    column — pick the first row whose ``check_type`` is valid for THIS
+    drill's destination (a rail row for the Rails drill, a Chain Orphans
+    row for the Chains drill). Row 0 is the count-DESC top, always the
+    ``_spine_plant`` 'Unmatched Rail Name' marker, which is valid ONLY for
+    Rails and lands the Chains destination empty.
+
+    Returns ``None`` when no row matches (the source genuinely lacks a
+    drillable row for this destination — caller skips as a data gap).
+    """
+    dst_id = str(site.dst_sheet.sheet_id)
+    spec = _L2FT_EXC_ROW_SELECT.get(dst_id)
+    if spec is None or src_visual_title != _L2_VIOLATION_DETAIL_TITLE:
+        return 0
+    accepted, exclude_plant = spec
+    rows = driver.table_rows(
+        src_visual_title, columns=["check_type", "entity_a"],
+    )
+    for idx, row in enumerate(rows):
+        ct = row.get("check_type") or row.get("Check Type")
+        ea = row.get("entity_a") or row.get("Entity A") or ""
+        if ct in accepted and not (exclude_plant and _PLANT_ERROR_SENTINEL in ea):
+            return idx
+    return None
+
+
 def _read_source_row_values(
     driver: "DashboardDriver",
     visual_title: str,
     writes: list[_DrillWriteMap],
+    row_index: int = 0,
 ) -> dict[str, str] | None:
-    """Read row 0 of ``visual_title`` and return ``{param_name:
+    """Read ``row_index`` of ``visual_title`` and return ``{param_name:
     source_value}`` for every column in ``writes`` the row carries.
 
-    Returns ``None`` when the source table is empty (no row to drill
-    from — the calling test skips with a "test-data gap" reason rather
-    than failing).
+    Returns ``None`` when the source table has no row at ``row_index``
+    (empty table or the selector aimed past the end — the calling test
+    skips with a "test-data gap" reason rather than failing).
     """
     columns = [w.source_column for w in writes]
     try:
@@ -218,14 +325,14 @@ def _read_source_row_values(
         # id column on an aggregated Table). Caller decides whether
         # this is a skip or a fail.
         return None
-    if not rows:
+    if row_index >= len(rows):
         return None
-    row0 = rows[0]
+    row = rows[row_index]
     out: dict[str, str] = {}
     for w in writes:
         cell = (
-            row0.get(w.source_column)
-            or row0.get(_title_case(w.source_column))
+            row.get(w.source_column)
+            or row.get(_title_case(w.source_column))
         )
         if cell is None:
             return None
@@ -395,43 +502,68 @@ def _run_cross_sheet_drill_guardrail(
     driver.open(dashboard_arg, sheet=src_sheet_name)
     driver.wait_loaded(src_visual_title)
 
-    # Step 2: read row 0's source values for the drilled columns.
+    # Step 1b: pick-first source sheets are empty on cold open (a required
+    # filter defaults to a no-match sentinel). Drive the required pick(s)
+    # so the source populates before row 0 is read. See _SRC_REQUIRED_PICKS.
+    preselect = _SRC_REQUIRED_PICKS.get(str(site.src_sheet.sheet_id))
+    if preselect is not None:
+        if not preselect(driver):
+            pytest.skip(
+                f"Source sheet {src_sheet_name!r} needs a required-filter "
+                f"preselect to populate, but no pickable value exists on "
+                f"the seed (e.g. no account with an active business day) — "
+                f"genuine data gap, not a drill-mechanics bug."
+            )
+        driver.wait_loaded(src_visual_title)
+
+    # Step 2: choose the row to drill (row 0 unless the source hangs
+    # multiple destination-specific drills on one column — see
+    # _select_source_row_index) and read its drilled-column values.
+    row_index = _select_source_row_index(driver, site, src_visual_title)
+    if row_index is None:
+        pytest.skip(
+            f"Source visual {src_visual_title!r} on {src_sheet_name!r} has "
+            f"no row valid for the {dst_sheet_name!r} drill "
+            f"({site.drill.name!r}) — e.g. no rail-keyed / chain-orphan row "
+            f"to drill for this destination. Test-data gap, not a bug."
+        )
     writes = _resolve_drill_writes(site.drill)
     source_values: dict[str, str] = {}
     if writes:
-        result = _read_source_row_values(driver, src_visual_title, writes)
+        result = _read_source_row_values(
+            driver, src_visual_title, writes, row_index=row_index,
+        )
         if result is None:
             pytest.skip(
                 f"Source visual {src_visual_title!r} on "
                 f"{src_sheet_name!r} is empty OR doesn't surface "
                 f"the drilled columns "
                 f"({[w.source_column for w in writes]}) in its rendered "
-                f"cells — no row to drill from. This is a test-data "
-                f"gap (seed needs a row exercising this drill), not a "
-                f"drill-mechanics bug."
+                f"cells at row {row_index} — no row to drill from. This is "
+                f"a test-data gap (seed needs a row exercising this drill), "
+                f"not a drill-mechanics bug."
             )
         source_values = result
 
-    # Operator 2026-06-16 — exempt planted-error rows from the
-    # populated/narrowed contract: the drilled value has no match in the
-    # destination's universe (e.g. a `_spine_plant` rail surfacing as an
-    # L2FT violation drilled into Chains via parent_chain_name). See
-    # _PLANT_ERROR_SENTINEL.
-    if any(_PLANT_ERROR_SENTINEL in str(v) for v in source_values.values()):
-        pytest.skip(
-            f"Drill {site.drill.name!r} from row 0 of {src_visual_title!r} "
-            f"reads a planted-error value ({source_values!r}); planted "
-            f"errors don't round-trip through drills (operator 2026-06-16) "
-            f"— the guardrail exercises VALID-row drills. Selecting error "
-            f"rows in pickers/drills is a separate backlog enhancement."
-        )
-
-    # Step 3: fire the drill.
+    # Step 3: fire the drill from the selected row.
     if site.drill.trigger == "DATA_POINT_MENU":
-        driver.drill_from_first_row_via_menu(
-            src_visual_title, site.drill.name,
-        )
+        if row_index == 0:
+            driver.drill_from_first_row_via_menu(
+                src_visual_title, site.drill.name,
+            )
+        else:
+            driver.drill_from_row_via_menu(
+                src_visual_title, row_index, site.drill.name,
+            )
     else:
+        if row_index != 0:
+            pytest.fail(
+                f"DL.2 harness: row-index {row_index} selected for a "
+                f"DATA_POINT_CLICK drill {site.drill.name!r}, but only row "
+                f"0 is reachable via drill_from_first_row (no index-"
+                f"selecting click verb exists). Restrict the selector to "
+                f"MENU drills or build the click verb."
+            )
         driver.drill_from_first_row(src_visual_title)
 
     # Step 4: wait for the destination's anchor visual to render +

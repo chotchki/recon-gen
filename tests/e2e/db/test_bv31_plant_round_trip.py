@@ -47,6 +47,9 @@ from recon_gen.common.l2.plant_registry import (
     PlantKindEntry,
     PrimitiveIntField,
 )
+from recon_gen.apps.l2_flow_tracing.datasets import (
+    build_unified_l2_exceptions_dataset,
+)
 from recon_gen.common.l2.schema import emit_schema, refresh_matviews_sql
 from recon_gen.common.l2.seed import emit_baseline_seed
 from recon_gen.common.sql.dialect import Dialect
@@ -220,6 +223,60 @@ def _signal_etl_run_coverage(
     return asyncio.run(_go())
 
 
+# The L2FT Exceptions sheet's ``check_type`` column is a Title-Case CAST
+# literal the unified-exceptions UNION emits (build_unified_l2_exceptions_
+# dataset), NOT the snake_case section_kind slug. Map the plant kind →
+# that rendered label so the probe can COUNT the specific violation kind.
+# DY.7.1 — retires the -1 "L2FT not unit-testable" bail for these four.
+_L2FT_EXC_CHECK_TYPE_BY_KIND: dict[str, str] = {
+    "chain_orphan": "Chain Orphans",
+    "dead_bundles_activity": "Dead Bundles Activity",
+    "dead_metadata": "Dead Metadata Declarations",
+    "dead_limit_schedule": "Dead Limit Schedules",
+}
+
+
+def _signal_l2ft_exception(
+    conn: duckdb.DuckDBPyConnection, l2_path: Path, check_type_label: str,
+) -> int:
+    """``SUM(count)`` over ``L2 Violation Detail`` rows for one
+    ``check_type`` — the rendered bar height the L2FT Exceptions sheet's
+    stacked bar shows for that violation kind.
+
+    DY.7.1 — replaces the ``-1`` "not unit-testable at BV.3.1" bail for the
+    four L2FT-exception plant kinds. ``build_unified_l2_exceptions_dataset``
+    emits a plain SELECT (no ``<<$param>>`` placeholders — verified), so it
+    runs straight on the seeded conn: no fresh pool, no single-writer file-
+    lock dance the etl/triage probes have to negotiate. ``check_type_label``
+    is the Title-Case CAST literal, not the snake_case section_kind.
+
+    ``SUM(count)`` — NOT ``COUNT(*)`` — because ``chain_orphan`` plants
+    against the first Required chain that's ALREADY orphaned on the
+    baseline seed: the plant raises that existing row's ``orphan_count``
+    (its bar segment grows) without adding a new row, so a row-count probe
+    reads a flat delta of 0. The dashboard's stacked-bar magnitude IS
+    ``SUM(count)`` per kind, so that's the honest "did the plant move the
+    dashboard" signal — and it's strictly more sensitive than ``COUNT(*)``
+    for the dead_* kinds too (a new dead row contributes its own count)."""
+    cfg = make_test_config(
+        aws_deployment_name="recon-bv31",
+        db=DbConfig(table_prefix=_PREFIX, dialect=Dialect.DUCKDB),
+    )
+    inst = load_instance(l2_path)
+    bd = build_unified_l2_exceptions_dataset(cfg, inst)
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            f"SELECT COALESCE(SUM(count), 0) FROM ({bd.sql}) _exc "
+            f"WHERE check_type = ?",
+            [check_type_label],
+        )
+        row = cur.fetchone()
+        return int(row[0]) if row and row[0] is not None else 0
+    finally:
+        cur.close()
+
+
 def _signal_for(
     conn: duckdb.DuckDBPyConnection, db_path: str, l2_path: Path,
     entry: PlantKindEntry,
@@ -248,7 +305,15 @@ def _signal_for(
         return _signal_etl_triage(db_path, l2_path, entry.section_kind or entry.kind)
     if "/etl/run" in check.url_path:
         return _signal_etl_run_coverage(db_path, l2_path)
-    # L2FT + L1 dashboard URLs aren't unit-testable here — defer to BV.3.3.
+    if "l2ft-sheet-l2-exceptions" in check.url_path:
+        # DY.7.1 — the four L2FT-exception kinds ARE unit-testable: the
+        # unified-exceptions dataset is a plain COUNT-able SELECT. Map
+        # kind → the rendered Title-Case check_type and probe it.
+        label = _L2FT_EXC_CHECK_TYPE_BY_KIND.get(entry.kind)
+        if label is not None:
+            return _signal_l2ft_exception(conn, l2_path, label)
+    # Remaining L1 dashboard URLs (supersession-audit) aren't unit-
+    # testable here — defer to BV.3.3 browser e2e.
     return -1  # sentinel: not-checkable-at-unit-layer
 
 
