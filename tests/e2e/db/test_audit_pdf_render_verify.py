@@ -40,6 +40,7 @@ from recon_gen.common.env_keys import (
     EnvVarInvalid,
     RECON_GEN_CONFIG,
     RECON_GEN_DB_TABLE_PREFIX,
+    RECON_GEN_DEMO_DATABASE_URL,
     RECON_GEN_DEPLOYMENT_NAME,
     RECON_GEN_LAYER,
     RECON_GEN_RUN_DIR,
@@ -116,17 +117,29 @@ def _resolve_l2_path() -> Path | None:
 
 def _seeded_cli_env(seeded_cfg: Config) -> dict[str, str]:
     """Build subprocess env that points the CLI at ``seeded_cfg``'s
-    isolated prefix + deployment_name. Config's env-override path
-    (``common/config.py::load_config``) reads these before yaml
-    fallback, so the CLI ends up with the same prefix the fixture
-    seeded against — `qsgen_postgres_<suffix>` instead of cfg yaml's
-    plain `qsgen_postgres`.
-    """
-    return {
+    isolated prefix + deployment_name + DB URL. Config's env-override path
+    (``common/config.py::load_config``) reads these before yaml fallback,
+    so the CLI ends up on the same store the fixture seeded against.
+
+    DY.7.1.f(a) — ``RECON_GEN_DEMO_DATABASE_URL`` is the load-bearing addition
+    for DuckDB. PG/Oracle isolate PER-PREFIX (same DB URL, distinct
+    `qsgen_postgres_<suffix>` prefix), so threading the prefix alone put the
+    CLI on the right store. DuckDB isolates PER-FILE
+    (`_isolate_cfg` → a distinct `.duckdb` per worker), so under xdist the
+    seed writes worker W's isolated file while the CLI, honoring only `-c
+    <cfg>`, opened the cfg's BASE file → "Table … does not exist" (flaky by
+    which worker won the base file). Threading the URL points the subprocess
+    at the SAME isolated file the fixture seeded — the same fix
+    ``test_audit_direct._seeded_env`` already carries. See
+    [[project_duckdb_test_isolation_is_per_file]]."""
+    env = {
         **os.environ,
         RECON_GEN_DB_TABLE_PREFIX.name: seeded_cfg.db.table_prefix,
         RECON_GEN_DEPLOYMENT_NAME.name: seeded_cfg.aws.deployment_name,
     }
+    if seeded_cfg.db.url:
+        env[RECON_GEN_DEMO_DATABASE_URL.name] = seeded_cfg.db.url
+    return env
 
 
 def test_audit_apply_renders_pdf(tmp_path: Path, seeded_cfg: Config) -> None:
