@@ -7,8 +7,8 @@ Six operations:
   clean       — ``rm -rf site/``.
   test        — pytest the docs gates (link sweep + persona neutrality).
   export      — extract mkdocs source for hand-build (legacy ``export docs``).
-  screenshot  — capture dashboards to PNG (App2 capture: placeholder
-                pending post-DW; see common/browser/screenshot.py).
+  screenshot  — capture dashboards to PNG (self-hosted App2 capture;
+                see common/browser/screenshot.py).
 
 No ``--execute`` here — building a static site to a directory isn't
 a destructive side effect.
@@ -173,29 +173,17 @@ def _bake_portable_wasm(output_dir: Path) -> None:
     shutil.rmtree(style_dir / "wasm-graphviz")
 
 
-# Per CLI app slug: (module path, builder function, output-subdir slug).
-# The output-subdir slug is the short form (l1, l2ft, inv, exec) that
-# matches the existing `docs/walkthroughs/screenshots/<short>/` convention
-# already wired into handbook + walkthrough markdown refs. Lazy-imported
-# in _build_app_for_screenshots so the CLI loads quickly when this command
-# isn't invoked.
-SCREENSHOT_APPS: dict[str, tuple[str, str, str]] = {
-    "l1-dashboard": (
-        "recon_gen.apps.l1_dashboard.app", "build_l1_dashboard_app",
-        "l1",
-    ),
-    "l2-flow-tracing": (
-        "recon_gen.apps.l2_flow_tracing.app", "build_l2_flow_tracing_app",
-        "l2ft",
-    ),
-    "investigation": (
-        "recon_gen.apps.investigation.app", "build_investigation_app",
-        "inv",
-    ),
-    "executives": (
-        "recon_gen.apps.executives.app", "build_executives_app",
-        "exec",
-    ),
+# Per CLI app slug → output-subdir slug. The subdir is the short form
+# (l1, l2ft, inv, exec) that matches the existing
+# `docs/walkthroughs/screenshots/<short>/` convention already wired into
+# handbook + walkthrough markdown refs. The actual tree build now rides
+# `_html_serve.build_real_app` (keyed on the underscore app name), which
+# owns the module→builder mapping — DY.9 dropped the duplicate copy here.
+SCREENSHOT_APPS: dict[str, str] = {
+    "l1-dashboard": "l1",
+    "l2-flow-tracing": "l2ft",
+    "investigation": "inv",
+    "executives": "exec",
 }
 
 
@@ -263,26 +251,17 @@ def _copy_tree(src: Path, dst: Path) -> int:
     return sum(1 for p in dst.rglob("*") if p.is_file())
 
 
-def _build_app_for_screenshots(app_slug: str, cfg, l2_instance):  # type: ignore[no-untyped-def]: cfg/l2_instance untyped pending CLI-wide sweep
-    """Import + call the builder for ``app_slug``; resolve auto-IDs."""
-    import importlib
-    mod_path, fn_name, _subdir = SCREENSHOT_APPS[app_slug]
-    mod = importlib.import_module(mod_path)
-    builder = getattr(mod, fn_name)
-    app = builder(cfg, l2_instance=l2_instance)
-    # resolve_auto_ids() materializes the tree's auto-IDs so sheet
-    # objects match what was deployed — the only side effect this
-    # screenshot path needs. (The QS emitter is being removed in the
-    # DW phase, so depend on the narrow primitive directly.)
-    app.resolve_auto_ids()
-    return app
-
-
 def _warm_db_for_screenshots(database_url: str) -> None:
     """Per the F12 cold-start footgun: SELECT 1 to warm the cluster
-    before generating an embed URL. Without this, QuickSight shows
-    'We can't open that dashboard' on the first walk."""
+    before the first sheet load. Without this, a cold Aurora / Oracle
+    cluster stalls the first dashboard's queries.
+
+    DuckDB (the post-CB.8 local default) is a local file with no cluster
+    cold-start — warmup is a no-op there, and the psycopg branch below
+    can't parse a ``duckdb://`` URL anyway. Skip it."""
     scheme = (database_url.split("://", 1)[0] or "").lower()
+    if scheme.startswith("duckdb"):
+        return
     if scheme.startswith("oracle"):
         import oracledb  # type: ignore[import-untyped]: third-party library lacks PEP 561 stubs
         try:
@@ -762,13 +741,13 @@ def docs_screenshot(
     surface for every app (replaces the per-app capture scripts that
     used to live under ``scripts/``).
 
-    Post-DW the capture engine is an App2 placeholder
-    (``common/browser/screenshot.py::capture_app_dashboards`` raises
-    NotImplementedError until the self-hosted capture is built — the QS
-    embed-URL path was removed with QuickSight). The command + its
-    scaffolding (app-slug map, date-param resolution, output layout, DB
-    warmup) are wired and waiting. The handbook + walkthrough pages embed
-    these screenshots by relative path under
+    DY.9 — the capture engine is the self-hosted App2 path
+    (``common/browser/screenshot.py::capture_app_dashboards``): each app's
+    tree is built via ``_html_serve.build_real_app``, served on an
+    ephemeral localhost port by the same Starlette stack ``recon-gen
+    dashboards`` runs, and walked sheet-by-sheet in WebKit. (The pre-DW QS
+    embed-URL path was removed with QuickSight.) The handbook + walkthrough
+    pages embed these screenshots by relative path under
     ``docs/walkthroughs/screenshots/<app>/``.
     """
     if app is None and not all_apps:
@@ -807,10 +786,15 @@ def docs_screenshot(
                 f"--date-to must be YYYY-MM-DD; got {date_to!r} ({exc})"
             )
 
-    l2_instance = None
+    # A concrete instance is REQUIRED — build_real_app registers each app's
+    # datasets against it. --l2 override wins; else the bundled default
+    # (mirrors resolve_l2_for_demo, the prelude dashboards/studio use).
     if l2_instance_path is not None:
         from recon_gen.common.l2 import load_instance
         l2_instance = load_instance(Path(l2_instance_path))
+    else:
+        from recon_gen.common.l2 import default_l2_instance
+        l2_instance = default_l2_instance()
 
     if not skip_warmup:
         # Demo URL is guaranteed non-None here — the guard above raises
@@ -823,7 +807,11 @@ def docs_screenshot(
         _warm_db_for_screenshots(cfg.db.url)
         click.echo(" OK")
 
+    from recon_gen.cli._html_serve import build_real_app
     from recon_gen.common.browser.screenshot import capture_app_dashboards
+    from recon_gen.common.theme import resolve_l2_theme
+
+    theme = resolve_l2_theme(l2_instance)
 
     output_root = Path(output)
     output_root.mkdir(parents=True, exist_ok=True)
@@ -831,10 +819,14 @@ def docs_screenshot(
     grand_total = 0
     for slug in apps_to_capture:
         click.echo(f"== {slug} ==")
-        app_obj = _build_app_for_screenshots(slug, cfg, l2_instance)
+        # docs-screenshot slugs are hyphenated (l1-dashboard); the serve
+        # path's REAL_APPS + build_real_app key on the underscore form.
+        app_name = slug.replace("-", "_")
+        tree_app, _landing = build_real_app(app_name, cfg, l2_instance)
+        assert tree_app.analysis is not None  # build_real_app raises otherwise
 
         # Write to the short-slug subdir (l1/, l2ft/, inv/, exec/).
-        _, _, output_subdir = SCREENSHOT_APPS[slug]
+        output_subdir = SCREENSHOT_APPS[slug]
         out_dir = output_root / output_subdir
 
         url_params: dict[str, str] = {}
@@ -850,15 +842,13 @@ def docs_screenshot(
                 + ", ".join(f"{k}={v}" for k, v in url_params.items())
             )
 
-        click.echo(f"-> capturing {len(app_obj.analysis.sheets)} sheets at "
+        click.echo(f"-> capturing {len(tree_app.analysis.sheets)} sheets at "
                    f"{viewport[0]}x{viewport[1]} into {out_dir}/")
-        # Post-DW: the QS embed-URL capture is gone; capture_app_dashboards
-        # is the App2 placeholder (raises NotImplementedError until the
-        # self-hosted capture is built — see its module docstring + the
-        # PLAN.md DW backlog). The command + scaffolding above are wired
-        # and waiting for it.
         results = capture_app_dashboards(
-            app_obj,
+            tree_app,
+            cfg=cfg,
+            dashboard_id=app_name,
+            theme=theme,
             output_dir=out_dir,
             viewport=viewport,
             initial_settle_ms=initial_settle_ms,
