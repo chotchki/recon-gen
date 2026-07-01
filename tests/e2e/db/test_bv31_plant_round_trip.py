@@ -277,6 +277,33 @@ def _signal_l2ft_exception(
         cur.close()
 
 
+def _signal_supersession(db_path: str, l2_path: Path) -> int:
+    """Count of L1 Supersession-Audit transaction-trail rows — the same
+    dataset the Supersession Audit sheet's 'Transactions Audit' table
+    renders. DY.7.1 — retires the ``-1`` bail for ``supersession_audit``.
+
+    ``build_supersession_transactions_dataset`` carries ``<<$param>>``
+    sentinels (supersede-reason / transaction / no-reason), so it runs
+    through ``query_db_via_cfg`` — the ``execute_visual_sql`` path that
+    translates the placeholders + applies the match-all sentinel defaults
+    — rather than raw on the conn. Uses ``db_path`` like the etl/triage
+    probes (fresh connection; DuckDB has no ``Connection.backup()`` to
+    clone the seeded conn)."""
+    from tests.e2e._drivers.base import query_db_via_cfg
+    from recon_gen.apps.l1_dashboard.datasets import (
+        build_supersession_transactions_dataset,
+    )
+
+    inst = load_instance(l2_path)
+    cfg = make_test_config(
+        aws_deployment_name="recon-bv31",
+        db=DbConfig(table_prefix=_PREFIX, dialect=Dialect.DUCKDB, url=db_path),
+    )
+    bd = build_supersession_transactions_dataset(cfg, inst)
+    rows = query_db_via_cfg(cfg, bd.sql, dataset_parameters=bd.dataset_params)
+    return len(rows)
+
+
 def _signal_for(
     conn: duckdb.DuckDBPyConnection, db_path: str, l2_path: Path,
     entry: PlantKindEntry,
@@ -312,8 +339,13 @@ def _signal_for(
         label = _L2FT_EXC_CHECK_TYPE_BY_KIND.get(entry.kind)
         if label is not None:
             return _signal_l2ft_exception(conn, l2_path, label)
-    # Remaining L1 dashboard URLs (supersession-audit) aren't unit-
-    # testable here — defer to BV.3.3 browser e2e.
+    if "l1-sheet-supersession-audit" in check.url_path:
+        # DY.7.1 — supersession_audit's plant emits an original+correction
+        # TRANSACTION pair; the Transactions Audit dataset surfaces the
+        # multi-entry trail. Probe it via the param-aware SQL path.
+        return _signal_supersession(db_path, l2_path)
+    # Any remaining unhandled dashboard URL isn't unit-testable here —
+    # defer to BV.3.3 browser e2e.
     return -1  # sentinel: not-checkable-at-unit-layer
 
 
