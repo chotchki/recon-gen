@@ -35,7 +35,6 @@ from recon_gen.apps.l1_dashboard.app import (
     _DRIFT_TIMELINES_NAME,
     _DRIFT_TIMELINES_TITLE,
     _DRIFT_TITLE,
-    _DRILL_RESET_SENTINEL,
     _GETTING_STARTED_NAME,
     _GETTING_STARTED_TITLE,
     _LIMIT_BREACH_NAME,
@@ -1743,113 +1742,90 @@ def test_supersession_audit_has_supersedes_filter() -> None:
 
 
 def test_drill_target_parameters_registered() -> None:
-    """M.2b.7: the analysis-level sentinel-pattern param ``pL1FilterAccount``
-    lands with the "__ALL__" default and is never surfaced as a sheet
-    control — drills set it, the destination calc fields treat the
-    sentinel as PASS so the un-drilled state shows everything.
+    """M.2b.7 / DY.10: the account + transfer cross-sheet drills write
+    dataset-bridge pushdown params (``pL1DriftAccount`` /
+    ``pL1TxTransferId``) that the destination sheets' own dropdowns
+    register via ``_populate_pushdown_value_dropdown`` — so the drill
+    narrows via the dataset SQL bind on BOTH renderers (App2 doesn't
+    honor analysis-level calc-field FilterGroups).
 
-    DL.3.2 — the Transactions drill destination dropped its analysis-
-    level proxy ``pL1TxTransfer`` and now writes the dataset-bridge
-    analysis param ``pL1TxTransferId`` directly (so App2's URL-param
-    → SQL bind path narrows the same way QS's MappedDataSetParameters
-    bridge does). The ``pL1TxTransferId`` param IS still registered on
-    the analysis — it's created by ``_populate_pushdown_value_dropdown``
-    for the Transactions sheet's Transfer dropdown — so the cross-
-    reference at deploy time succeeds.
+    DY.10 retired the pre-existing ``pL1FilterAccount`` calc-field param
+    + its 4 FilterGroups (the drill_guardrail Exceptions→Drift 6/14 row
+    mismatch on sasquatch was the App2 symptom); DL.3.2 did the same for
+    Transactions (``pL1TxTransfer`` → ``pL1TxTransferId``).
     """
-    from recon_gen.apps.l1_dashboard.app import P_L1_FILTER_ACCOUNT
-    from recon_gen.apps.l1_dashboard.datasets import P_L1_TX_TRANSFER_ID
+    from recon_gen.apps.l1_dashboard.datasets import (
+        L1_ALL_SENTINEL,
+        P_L1_DRIFT_ACCOUNT,
+        P_L1_TX_TRANSFER_ID,
+    )
     from recon_gen.common.ids import ParameterName
     from recon_gen.common.tree import StringParam
 
     app = build_l1_dashboard_app(_CFG)
     assert app.analysis is not None
     by_name = {p.name: p for p in app.analysis.parameters}
-    assert P_L1_FILTER_ACCOUNT in by_name
-    # DL.3.2 — pL1TxTransferId is created by the Transactions sheet's
-    # Transfer dropdown wiring (`_populate_pushdown_value_dropdown`),
-    # NOT by `_wire_drill_filter_groups`. The drill writes it directly.
-    p_transfer_id_pname = ParameterName(P_L1_TX_TRANSFER_ID)
-    assert p_transfer_id_pname in by_name
-    p_account = by_name[P_L1_FILTER_ACCOUNT]
-    p_transfer = by_name[p_transfer_id_pname]
-    assert isinstance(p_account, StringParam)
-    assert isinstance(p_transfer, StringParam)
-    assert p_account.default == [_DRILL_RESET_SENTINEL]
-    # DL.3.2 — pL1TxTransferId uses the dataset-side sentinel
-    # (L1_ALL_SENTINEL = "__l1_all__") because its narrowing is via
-    # SQL pushdown (`_data_value_clause`), not via an analysis-level
-    # calc-field.
-    from recon_gen.apps.l1_dashboard.datasets import L1_ALL_SENTINEL
-    assert p_transfer.default == [L1_ALL_SENTINEL]
+
+    # DY.10 — the retired calc-field param is gone; the account drill
+    # writes pL1DriftAccount via SQL pushdown now.
+    assert ParameterName("pL1FilterAccount") not in by_name
+
+    p_drift_account = ParameterName(P_L1_DRIFT_ACCOUNT)
+    p_transfer_id = ParameterName(P_L1_TX_TRANSFER_ID)
+    assert p_drift_account in by_name
+    assert p_transfer_id in by_name
+    p_da = by_name[p_drift_account]
+    p_tx = by_name[p_transfer_id]
+    assert isinstance(p_da, StringParam)
+    assert isinstance(p_tx, StringParam)
+    # Both use the dataset-side sentinel (L1_ALL_SENTINEL = "__l1_all__")
+    # because narrowing is SQL pushdown (`_account_display_clause` /
+    # `_data_value_clause`), not an analysis-level calc-field.
+    assert p_da.default == [L1_ALL_SENTINEL]
+    assert p_tx.default == [L1_ALL_SENTINEL]
 
 
-def test_drill_calc_fields_present() -> None:
-    """M.2b.7 / DL.3.2: 4 sentinel-or-match calc fields, one per
-    pL1FilterAccount drill destination dataset (drift / ledger_drift /
-    overdraft / limit_breach). Each calc field's expression compares
-    its dataset's column against ``pL1FilterAccount``; PASS when the
-    param is "__ALL__" OR the column matches; FAIL otherwise.
-
-    DL.3.2 — the Transactions destination dropped its calc-field
-    pattern; narrowing happens via dataset SQL pushdown on
-    ``pL1TxTransferId`` instead (see
-    ``_data_value_clause('transfer_id', P_L1_TX_TRANSFER_ID)`` in
-    ``datasets.py``)."""
+def test_account_drill_calc_fields_removed() -> None:
+    """DY.10: the 4 account-drill sentinel-or-match calc fields (drift /
+    ledger_drift / overdraft / limit_breach) are GONE — the account drill
+    narrows via the ``pL1DriftAccount`` SQL pushdown now, not an analysis-
+    level calc-field FilterGroup App2 can't honor. Regression guard so the
+    App2-broken pattern doesn't creep back (mirrors DL.3.2's pL1TxTransfer
+    removal)."""
     app = build_l1_dashboard_app(_CFG)
     assert app.analysis is not None
     calc_names = {c.name for c in app.analysis.calc_fields}
-    expected = {
+    banned = {
         "_drill_pass_pL1FilterAccount_on_drift",
         "_drill_pass_pL1FilterAccount_on_ledger_drift",
         "_drill_pass_pL1FilterAccount_on_overdraft",
         "_drill_pass_pL1FilterAccount_on_limit_breach",
+        "_drill_pass_pL1TxTransfer_on_transactions",
     }
-    assert expected.issubset(calc_names), (
-        f"missing calc fields: {expected - calc_names}"
-    )
-    # DL.3.2 — pL1TxTransfer's calc field is GONE.
-    assert "_drill_pass_pL1TxTransfer_on_transactions" not in calc_names, (
-        "DL.3.2 dropped the pL1TxTransfer calc-field FilterGroup; "
-        "narrowing now happens via pL1TxTransferId SQL pushdown"
+    leaked = banned & calc_names
+    assert not leaked, (
+        f"App2-broken calc-field drill FilterGroups resurfaced: {leaked}"
     )
 
-    # Each expression is the sentinel-or-match shape.
-    by_name = {c.name: c for c in app.analysis.calc_fields}
-    for cf_name in expected:
-        cf = by_name[cf_name]
-        assert "'__ALL__'" in cf.expression, (
-            f"{cf_name} missing sentinel guard"
-        )
-        assert "'PASS'" in cf.expression
-        assert "'FAIL'" in cf.expression
 
-
-def test_drill_filter_groups_present() -> None:
-    """M.2b.7 / DL.3.2: 4 SINGLE_DATASET FilterGroups (one per
-    pL1FilterAccount destination) apply the calc-field PASS filter to
-    scope each destination sheet's visuals when its sentinel-pattern
-    param is set.
-
-    DL.3.2 — the Transactions destination dropped its FilterGroup;
-    narrowing happens via dataset SQL pushdown on ``pL1TxTransferId``
-    instead."""
+def test_account_drill_filter_groups_removed() -> None:
+    """DY.10: the 4 account-drill SINGLE_DATASET FilterGroups are GONE
+    (see test_account_drill_calc_fields_removed) — the account drill
+    narrows via the pL1DriftAccount SQL pushdown on both renderers now.
+    Regression guard against the App2-broken calc-field pattern."""
     app = build_l1_dashboard_app(_CFG)
     assert app.analysis is not None
     fg_ids = {fg.filter_group_id for fg in app.analysis.filter_groups}
-    expected = {
+    banned = {
         "fg-l1-drill-account-on-drift",
         "fg-l1-drill-account-on-ledger-drift",
         "fg-l1-drill-account-on-overdraft",
         "fg-l1-drill-account-on-limit-breach",
+        "fg-l1-drill-transfer-on-transactions",
     }
-    assert expected.issubset(fg_ids), (
-        f"missing filter groups: {expected - fg_ids}"
-    )
-    # DL.3.2 — fg-l1-drill-transfer-on-transactions is GONE.
-    assert "fg-l1-drill-transfer-on-transactions" not in fg_ids, (
-        "DL.3.2 dropped this FilterGroup; narrowing now via "
-        "pL1TxTransferId SQL pushdown on the Transactions dataset"
+    leaked = banned & fg_ids
+    assert not leaked, (
+        f"App2-broken drill FilterGroups resurfaced: {leaked}"
     )
 
 

@@ -336,20 +336,6 @@ def _date_sensitive_count_kpis(
     return results
 
 
-@pytest.mark.xfail(
-    reason=(
-        "Pre-existing live-DB failure (verified against pre-port code "
-        "with git stash + run): the wide-vs-narrow assert reports the "
-        "same value for both Active Accounts and Net Money Moved — i.e. "
-        "the date filter isn't narrowing those KPIs. Either the SQL "
-        "bind isn't reaching, OR the underlying matviews encode "
-        "as-of-current-time rather than as-of-:date-window semantics "
-        "(Active Accounts is plausibly invariant to historical date "
-        "filters by design — it's the *current* roster). The port "
-        "doesn't introduce this; flagged for separate triage."
-    ),
-    strict=False,
-)
 def test_date_filter_narrows_every_date_sensitive_count_kpi(
     live_db_exec_driver: _LiveDriver,
 ) -> None:

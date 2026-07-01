@@ -32,7 +32,7 @@ from recon_gen.common.html.render import (
     ParameterDateSpec,
     _render_filter_form,
 )
-from recon_gen.apps.l1_dashboard.app import _DAILY_STATEMENT_NAME, _DRILL_RESET_SENTINEL
+from recon_gen.apps.l1_dashboard.app import _DAILY_STATEMENT_NAME
 from recon_gen.apps.l1_dashboard.datasets import P_L1_DS_BALANCE_DATE_DSP
 from recon_gen.apps.l2_flow_tracing.app import _RAILS_NAME
 from recon_gen.common.ids import ParameterName, SheetId
@@ -46,6 +46,11 @@ from recon_gen.common.tree import (
     StringParam,
 )
 from tests._test_helpers import make_test_config
+
+# DY.10 — ``_DRILL_RESET_SENTINEL`` is gone from the L1 app (retired
+# calc-field pattern); this filter-spec fixture only needs a generic
+# sentinel string, so keep one locally.
+_DRILL_RESET_SENTINEL = "__ALL__"
 
 
 def _sheet_with_controls() -> Sheet:

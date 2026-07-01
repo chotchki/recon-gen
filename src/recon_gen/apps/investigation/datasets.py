@@ -58,7 +58,6 @@ from recon_gen.common.sheets.app_info import (
     build_liveness_dataset,
     build_matview_status_dataset,
 )
-from recon_gen.common.html._tree_fetcher import PickerMatviewHint
 from recon_gen.common.sql.dialect import Dialect
 from recon_gen.common.sql.display_labels import account_display_expr
 from recon_gen.common.sql.money import cents_to_dollars_sql
@@ -951,15 +950,15 @@ def build_account_network_accounts_dataset(cfg: Config) -> BuiltDataset:
         _anetwork_accounts_sql(cfg.db.table_prefix),
         ANETWORK_ACCOUNTS_CONTRACT,
         visual_identifier=DS_INV_ANETWORK_ACCOUNTS,
-        # CQ.2.g — universe is exactly the inv_money_trail_edges
-        # matview. select_expr must match the SELECT-side projection
-        # in _anetwork_accounts_sql; both use account_display_expr.
-        picker_matview_hint=PickerMatviewHint(
-            matview=f"{cfg.db.table_prefix}_inv_money_trail_edges",
-            select_expr=account_display_expr(
-                "source_account_name", "source_account_id",
-            ),
-        ),
+        # DY.10 (#331) — no picker_matview_hint. The hint's single
+        # select_expr can only project ONE side of the money-trail
+        # matview; the source-only projection dropped convergence-anchor
+        # accounts (which appear only as TARGETS — e.g. Juniper Ridge on
+        # sasquatch), so operators literally couldn't pick the accounts
+        # they were investigating. The wrap path (_anetwork_accounts_sql)
+        # already UNIONs source+target (DG.3), so falling back to it
+        # serves the full universe; the per-account DISTINCT cost is
+        # negligible for the tens-of-accounts inv universe.
     )
 
 

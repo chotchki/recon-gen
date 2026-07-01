@@ -22,7 +22,6 @@ from typing import Any
 
 import pytest
 
-from recon_gen.apps.l1_dashboard.app import _DRILL_RESET_SENTINEL
 from recon_gen.common.db import AsyncConnectionPool, make_connection_pool
 from recon_gen.common.html._sql_executor import (
     apply_dataset_param_defaults,
@@ -42,6 +41,11 @@ from recon_gen.common.models import (
 )
 from recon_gen.common.sql.dialect import Dialect
 from tests._test_helpers import make_test_config
+
+# DY.10 — the L1 app's ``_DRILL_RESET_SENTINEL`` (the retired calc-field
+# reset value) is gone; these SQL-executor fixtures only need a generic
+# single-valued default sentinel, so keep one locally.
+_DRILL_RESET_SENTINEL = "__ALL__"
 
 
 def _string_dsp(

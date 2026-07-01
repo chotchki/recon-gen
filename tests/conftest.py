@@ -364,7 +364,7 @@ def pytest_runtest_teardown(item: Any) -> Generator[None, None, None]:  # typing
 # `invalid-exempt` (still surfaced — no lazy exemptions).
 # ---------------------------------------------------------------------------
 
-_EXAMPLE_L2_STEMS: Final = frozenset({"spec_example", "sasquatch_pr"})
+_EXAMPLE_L2_STEMS: Final = frozenset({"spec_example", "sasquatch_pr"})  # typing-smell: ignore[no-inline-production-constants]: L2 yaml stems not the DEFAULT_PREFIX table prefix; sasquatch_pr has no src constant
 # Only the per-L2 e2e tiers genuinely run "a spec/sasquatch test" — the
 # runner dispatches one L2 instance per cell there. The `unit` tier runs
 # ONCE (not per-L2); its skips are code/docs/structure conditionals (e.g.
@@ -407,7 +407,7 @@ def _example_l2_run(item: Any) -> bool:  # typing-smell: ignore[explicit-any]: p
     return Path(str(env)).stem in _EXAMPLE_L2_STEMS
 
 
-def _example_l2_reason_text(report: Any) -> str:  # typing-smell: ignore[explicit-any]: pytest TestReport
+def _example_l2_reason_text(report: Any) -> str:  # typing-smell: ignore[explicit-any]: pytest TestReport from makereport hook
     wx = getattr(report, "wasxfail", None)
     if wx:
         return f"xfail: {wx}"
@@ -422,7 +422,7 @@ def _example_l2_reason_text(report: Any) -> str:  # typing-smell: ignore[explici
     return f"skip: {lr}"
 
 
-def _example_l2_category(item: Any, reason: str) -> str:  # typing-smell: ignore[explicit-any]: pytest Item
+def _example_l2_category(item: Any, reason: str) -> str:  # typing-smell: ignore[explicit-any]: pytest Item from makereport hook
     marker = item.get_closest_marker("example_l2_exempt")
     if marker is not None:
         m_reason = str(

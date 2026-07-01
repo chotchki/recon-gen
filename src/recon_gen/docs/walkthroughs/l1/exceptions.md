@@ -70,10 +70,10 @@ See it live: https://recon-gen-spec.hotchkiss.io/
 
 ## Drills
 
-- **Left-click any `account_id`** → narrows the **Drift** sheet to that account
-  (`pL1FilterAccount` parameter). Per the CLAUDE.md drill-direction convention, a
-  left-click moves you LEFT — back toward the per-invariant source of the
-  violation.
+- **Left-click the account** → narrows the **Drift** sheet to that account
+  (`pL1DriftAccount` parameter — the same pushdown the Drift sheet's Account
+  dropdown uses). Per the CLAUDE.md drill-direction convention, a left-click
+  moves you LEFT — back toward the per-invariant source of the violation.
 - **Right-click → "View Daily Statement for this account-day"** → opens **Daily
   Statement** filtered to the clicked account + business day for the per-leg walk.
   A right-click moves you RIGHT — deeper into the investigation.

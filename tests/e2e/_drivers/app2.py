@@ -50,6 +50,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from recon_gen.common.browser.helpers import webkit_page
 from recon_gen.common.config import Config
@@ -918,6 +919,33 @@ class App2Driver:
 
     # -- writes ----------------------------------------------------------
 
+    @contextlib.contextmanager
+    def _record_requests(
+        self, url_needle: str,
+    ) -> "Generator[list[str], None, None]":
+        """Record every request whose URL contains ``url_needle`` for the
+        block's duration, yielding the growing list.
+
+        Lets a caller assert "the server call I expected actually fired"
+        and SCREAM the specific gap when it didn't — instead of degrading
+        into a downstream opaque timeout or a vague "the value never
+        appeared". When a driver mutation is supposed to cause a server
+        call, wrap it here and check the list is non-empty; an empty list
+        means the expected call DID NOT HAPPEN (a no-op'd mutation / an
+        unwired callback) — a different bug than the call firing and
+        coming back wrong."""
+        seen: list[str] = []
+
+        def _on_req(req: Any) -> None:
+            if url_needle in req.url:
+                seen.append(req.url)
+
+        self._page.on("request", _on_req)
+        try:
+            yield seen
+        finally:
+            self._page.remove_listener("request", _on_req)
+
     def _wait_for_refetch(self, action: Callable[[], object]) -> None:
         """Run ``action`` (which mutates a ``#filter-form`` input + fires
         a bubbling ``change``), then block until every visual on the
@@ -939,10 +967,25 @@ class App2Driver:
         shape. Polling skeleton-absence is per-visual and ordering-
         agnostic; queue-last is invisible to the test.
         """
-        with self._page.expect_response(
-            _VISUAL_DATA_URL_RE, timeout=_REFETCH_TIMEOUT_MS,
-        ):
-            action()
+        try:
+            with self._page.expect_response(
+                _VISUAL_DATA_URL_RE, timeout=_REFETCH_TIMEOUT_MS,
+            ):
+                action()
+        except PlaywrightTimeoutError as exc:
+            # The mutation fired NO visual /data refetch — scream the gap
+            # instead of surfacing Playwright's opaque "Timeout Xms exceeded
+            # waiting for event 'response'". Usually a setValue no-op (picked
+            # value absent from the control's option set) or an unwired
+            # auto-refresh: the form serialized unchanged, so no re-query
+            # fired. The expected server call did not happen.
+            raise AssertionError(
+                f"App2 _wait_for_refetch: the mutation fired NO visual /data "
+                f"refetch within {_REFETCH_TIMEOUT_MS / 1000:.0f}s — the "
+                f"control change triggered no re-query (setValue no-op / "
+                f"value-not-in-options / unwired auto-refresh). Expected "
+                f"server call did not happen."
+            ) from exc
         # Wait for all per-visual skeletons to clear (HTMX wiped each
         # one on its swap response). 15s ceiling matches wait_loaded.
         self._page.wait_for_function(
@@ -1181,6 +1224,7 @@ class App2Driver:
             load_budget_s = (
                 RECON_E2E_PAGE_TIMEOUT.get_or_none() or 30_000
             ) / 1000.0
+            typeahead_url = sel.evaluate("(s) => s.dataset.typeaheadUrl || ''")
             for v in vals:
                 # FAST PATH — the value is already in ``ts.options`` (the
                 # ``_assert_pickable`` pattern pre-loads + asserts it via
@@ -1193,33 +1237,51 @@ class App2Driver:
                     continue
                 # SLOW PATH — genuinely absent: force a per-query fetch, then
                 # wait (on the page-timeout budget) for the value to land.
-                sel.evaluate(
-                    """(s, q) => {
-                        if (!s.tomselect) return;
-                        if (s.tomselect.loadedSearches) {
-                            delete s.tomselect.loadedSearches[q];
-                        }
-                        s.tomselect.load(q);
-                    }""",
-                    v,
-                )
-                deadline = _time.monotonic() + load_budget_s
-                while _time.monotonic() < deadline:
-                    if sel.evaluate(_has_opt_js, v):
-                        break
-                    self._page.wait_for_timeout(100)
-                # Observability (the client-side analog of a server overload
-                # signal): if the option STILL isn't loaded after its fetch
-                # budget, FAIL HERE naming the gap — never fall through to a
-                # ``setValue`` that silently no-ops into an opaque refetch
-                # timeout.
+                # Instrument the fetch: a typeahead-wired control MUST fire a
+                # dropdown-search request when we call ``load(q)``. Record
+                # them so a miss screams the SPECIFIC gap (the load callback
+                # never reached the endpoint — expected call did not happen)
+                # rather than the generic "option absent", which conflates a
+                # front-end wiring gap with a back-end option-universe gap.
+                with self._record_requests("/dropdown-search/") as searches:
+                    sel.evaluate(
+                        """(s, q) => {
+                            if (!s.tomselect) return;
+                            if (s.tomselect.loadedSearches) {
+                                delete s.tomselect.loadedSearches[q];
+                            }
+                            s.tomselect.load(q);
+                        }""",
+                        v,
+                    )
+                    deadline = _time.monotonic() + load_budget_s
+                    while _time.monotonic() < deadline:
+                        if sel.evaluate(_has_opt_js, v):
+                            break
+                        self._page.wait_for_timeout(100)
+                # Observability — never fall through to a ``setValue`` that
+                # silently no-ops into an opaque refetch timeout. Name which
+                # half broke (chotchki: when a call is expected, check it
+                # fired; if not, scream).
                 if not sel.evaluate(_has_opt_js, v):
+                    if not searches:
+                        raise AssertionError(
+                            f"App2 pick_filter({label!r}): "
+                            f"tomselect.load({v!r}) fired NO dropdown-search "
+                            f"request within {load_budget_s:.0f}s. The control "
+                            f"IS typeahead-wired (data-typeahead-url="
+                            f"{typeahead_url!r}) yet the load callback never "
+                            f"hit the endpoint — the EXPECTED SERVER CALL DID "
+                            f"NOT HAPPEN. (A back-end universe gap would show "
+                            f"the request firing but returning without {v!r}.)"
+                        )
                     raise AssertionError(
-                        f"App2 pick_filter({label!r}): typeahead option "
-                        f"{v!r} did not land in ts.options within "
-                        f"{load_budget_s:.0f}s of its dropdown-search fetch "
-                        f"— setValue would no-op. Option-load failure, not a "
-                        f"refetch timeout."
+                        f"App2 pick_filter({label!r}): {len(searches)} "
+                        f"dropdown-search request(s) fired to {typeahead_url!r}"
+                        f" but {v!r} never landed in ts.options — the endpoint "
+                        f"returned an option set WITHOUT this value (back-end "
+                        f"universe / SQL gap, not a wiring gap). setValue would "
+                        f"no-op."
                     )
         # DM.5 — is THIS control a cascade SOURCE? A cascade TARGET
         # ``<select>`` (e.g. Daily Statement's Account picker) carries
