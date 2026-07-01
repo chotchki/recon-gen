@@ -105,6 +105,17 @@ def test_min_sigma_slider_shrinks_anomalies_kpi(inv_dashboard_driver: tuple["Das
     )
 
 
+@pytest.mark.example_l2_exempt(
+    reason=(
+        "l2-feature-absent: spec_example declares single-leg templates + no "
+        "multi-hop chains, so the money-trail matview offers no chain root "
+        "with >=2 distinct hop amounts to threshold the Min-hop slider "
+        "between. The slider-narrowing invariant IS exercised on "
+        "sasquatch_pr (rich chains — verified DY.7.1.c); spec has no "
+        "multi-hop data to narrow, so the skip is legit ONLY here."
+    ),
+    instances=["spec_example"],
+)
 def test_min_hop_amount_slider_shrinks_money_trail_table(inv_dashboard_driver: tuple["DashboardDriver", str]) -> None:
     """Pushing the "Min hop amount ($)" slider to its max ($1,000) must
     shrink the Money Trail Hop-by-Hop table vs its default ($0).
@@ -247,6 +258,16 @@ def test_bg4_volume_anomalies_kpi_matches_filtered_matview_and_distribution(
     driver.screenshot()
 
 
+@pytest.mark.example_l2_exempt(
+    reason=(
+        "l2-feature-absent: spec_example's default scenario plants no "
+        "recipient-fanout rows (the inv_fanout picker requires a rail shape "
+        "spec doesn't declare), so the Recipient Fanout dataset is empty and "
+        "the inflows-only-truth KPI check has nothing to assert. Exercised on "
+        "sasquatch_pr (fanout plants present); legit-absent ONLY on spec."
+    ),
+    instances=["spec_example"],
+)
 def test_bg4_recipient_fanout_kpis_match_inflows_only_truth(
     inv_dashboard_driver: tuple["DashboardDriver", str], cfg: Config,
 ) -> None:
