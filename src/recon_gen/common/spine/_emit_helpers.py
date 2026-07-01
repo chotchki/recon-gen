@@ -239,16 +239,26 @@ def insert_balance(
     conn: SyncConnection,
     *,
     prefix: str = DEFAULT_PREFIX,
+    columns: Sequence[str] | None = None,
     **vals: object,
 ) -> None:
     """Insert one row into ``<prefix>_daily_balances``. Mirrors
     `insert_tx` for the balance table — same dialect dispatch via the
-    ``SyncConnection`` Protocol."""
+    ``SyncConnection`` Protocol.
+
+    Column shape: ``columns=None`` → ``DB_COLS`` (the spine-author
+    subset); ``columns=<tuple>`` → an arbitrary subset (e.g. add
+    ``supersedes`` for a technical-correction row — mirrors
+    ``bulk_insert_balance``'s ``columns`` knob). Single-row ``execute``,
+    so it works against the dry-run capture cursor the byte-identical
+    seed path uses (unlike ``bulk_insert_balance``, whose PG/Oracle path
+    calls ``executemany`` — absent on the dry-run cursor)."""
+    cols = tuple(columns) if columns is not None else DB_COLS
     style = _placeholder_style(conn)
-    placeholders = _build_placeholders(style, len(DB_COLS))
+    placeholders = _build_placeholders(style, len(cols))
     table = f"{prefix}_daily_balances"
     sql = (
-        f"INSERT INTO {table} ({', '.join(DB_COLS)}) "
+        f"INSERT INTO {table} ({', '.join(cols)}) "
         f"VALUES ({placeholders})"
     )
     # AO.1: money + expected_eod_balance are BIGINT cents — coerce
@@ -256,7 +266,7 @@ def insert_balance(
     params = [
         _coerce_to_cents_int(vals.get(c)) if c in _DB_MONEY_COLS
         else vals.get(c)
-        for c in DB_COLS
+        for c in cols
     ]
     cur = conn.cursor()
     try:

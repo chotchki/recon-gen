@@ -83,6 +83,9 @@ from recon_gen.common.spine.fan_in_disagreement import (
 from recon_gen.common.spine.inv_fanout import InvFanoutGenerator
 from recon_gen.common.spine.rail_firing import RailFiringGenerator
 from recon_gen.common.spine.supersession import SupersessionGenerator
+from recon_gen.common.spine.balance_supersession import (
+    BalanceSupersessionGenerator,
+)
 from recon_gen.common.spine.transfer_template import TransferTemplateGenerator
 from recon_gen.common.spine.two_template_chain import TwoTemplateChainGenerator
 from recon_gen.common.spine.generator import ViolationGenerator
@@ -187,6 +190,10 @@ INVARIANT_GENERATOR_EDGES: Final[
     # generators (recognized via the `intended` subtype at gate time).
     FailedTransactionGenerator: (),
     SupersessionGenerator: (),
+    # DY.7.1 — daily-balance supersession (sibling of SupersessionGenerator).
+    # Audit-fixture: surfaces only in the Daily Balances Audit trail, no
+    # matview, no invariant. Empty edge tuple per the AY.2.b widening.
+    BalanceSupersessionGenerator: (),
     # AY.2.b — seed-color coverage generators. Emit CoverageObservation
     # evidence (NOT RuleViolation) — they're the "I planted a healthy
     # shape firing" claim that powers L1 Dashboard's PostedRequirements
@@ -311,6 +318,7 @@ ALL_AUDIT_FIXTURE_GENERATORS: Final[
 ] = (
     FailedTransactionGenerator,
     SupersessionGenerator,
+    BalanceSupersessionGenerator,
 )
 """Audit-fixture generators (AY.2.b) — emit AuditFixture evidence
 the audit PDF reads directly; no Invariant counterpart on the

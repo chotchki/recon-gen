@@ -58,12 +58,14 @@ from recon_gen.common.as_of_frame import AsOfFrame
 from recon_gen.common.intervals import DateInterval, SingleDayPlant
 from recon_gen.common.l2.primitives import (
     L2Instance,
+    SCOPE_INTERNAL,
     Scope,
     SingleLegRail,
     TransferTemplate,
     TwoLegRail,
 )
 from recon_gen.common.l2.seed import (
+    BalanceSupersessionPlant,
     ChainParentDisagreementPlant,
     DriftPlant,
     ExpectedEodBalancePlant,
@@ -87,6 +89,9 @@ from recon_gen.common.l2.seed import (
     TwoTemplateChainPlant,
     XorVariantMissedFiringPlant,
     XorVariantOverlapPlant,
+)
+from recon_gen.common.spine.balance_supersession import (
+    BalanceSupersessionGenerator,
 )
 from recon_gen.common.spine.chain_completion import ChainCompletionGenerator
 from recon_gen.common.spine.chain_parent_disagreement import (
@@ -270,6 +275,10 @@ def scenario_to_generators(
     for spp in scenarios.supersession_plants:
         out.append(_adapt_supersession(
             spp, instance, scenarios, anchor_day, plant_window,
+        ))
+    for bsp in scenarios.balance_supersession_plants:
+        out.append(_adapt_balance_supersession(
+            bsp, instance, scenarios, anchor_day, plant_window,
         ))
 
     # Seed-color (broad-mode) plants — CoverageObservation evidence.
@@ -804,6 +813,34 @@ def _adapt_supersession(
         rail_name=str(plant.rail_name),
         original_amount=float(plant.original_amount),
         corrected_amount=float(plant.corrected_amount),
+        anchor_day=anchor_day,
+    )
+
+
+def _adapt_balance_supersession(
+    plant: BalanceSupersessionPlant, instance: L2Instance,
+    scenarios: ScenarioPlant, anchor_day: date,
+    plant_window: DateInterval | None = None,
+) -> ViolationGenerator:
+    # DY.7.1 — per-plant anchor_day derivation (same BC.4 policy as
+    # _adapt_supersession); the account triple comes straight off the
+    # plant (a dedicated synthetic leaf) rather than _resolve_account_triple
+    # since the account is NOT declared on the instance — it exists only
+    # via this generator's own rows.
+    if plant_window is not None:
+        offset = max(plant.days_ago - 1, 0)
+        anchor_day = SingleDayPlant.at_offset_from_end(
+            plant_window, offset,
+        ).day
+    return BalanceSupersessionGenerator(
+        account_id=str(plant.account_id),
+        account_name=plant.account_name,
+        account_role=str(plant.account_role),
+        account_scope=SCOPE_INTERNAL,
+        account_parent_role=str(plant.account_parent_role),
+        rail_name=str(plant.rail_name),
+        original_money=float(plant.original_money),
+        corrected_money=float(plant.corrected_money),
         anchor_day=anchor_day,
     )
 

@@ -65,6 +65,7 @@ from .primitives import (
     TwoLegRail,
 )
 from .seed import (
+    BalanceSupersessionPlant,
     ChainParentDisagreementPlant,
     DriftPlant,
     FailedTransactionPlant,
@@ -586,6 +587,32 @@ def default_scenario_for(
             ),
         )
 
+    # DY.7.1 — balance-side supersession (the Daily Balances Audit surface).
+    # A DEDICATED synthetic leaf (NOT cust1/cust2, which are invariant plant
+    # targets) so it perturbs nothing: the generator emits its own posting
+    # for `corrected_money`, so the leaf's subledger equals the correction
+    # → drift 0. `original_money` is the superseded (wrong) balance. Reuses
+    # the picked customer template's role/parent so it's a valid leaf that
+    # renders on the Daily Statement drill destination.
+    balance_supersession_plants: tuple[BalanceSupersessionPlant, ...] = ()
+    if super_rail is not None and template.parent_role is not None:
+        bal_corr = _plant_amount_for_rail(super_rail, Decimal("500.00"))
+        # Original understated 10% — the "we booked too little, restated up"
+        # correction pattern (mirror of the tx supersession's overstatement).
+        bal_orig = (bal_corr * Decimal("0.90")).quantize(Decimal("0.01"))
+        balance_supersession_plants = (
+            BalanceSupersessionPlant(
+                account_id=Identifier("balance-supersede-audit-0001"),
+                account_name="Balance Supersession Audit Subject",
+                account_role=template.role,
+                account_parent_role=template.parent_role,
+                days_ago=4,
+                rail_name=super_rail.name,
+                original_money=bal_orig,
+                corrected_money=bal_corr,
+            ),
+        )
+
     inv_fanout_plants: tuple[InvFanoutPlant, ...] = ()
     if inv_fanout_picks is not None:
         senders, fanout_rail = inv_fanout_picks
@@ -756,6 +783,9 @@ def default_scenario_for(
         failed_transaction_plants=failed_transaction_plants if include_l1 else (),
         stuck_unbundled_plants=stuck_unbundled_plants if include_l1 else (),
         supersession_plants=supersession_plants if include_l1 else (),
+        balance_supersession_plants=(
+            balance_supersession_plants if include_l1 else ()
+        ),
         transfer_template_plants=transfer_template_plants if include_broad else (),
         rail_firing_plants=rail_firing_plants,
         inv_fanout_plants=inv_fanout_plants if include_l1 else (),
@@ -936,6 +966,10 @@ def densify_scenario(
         supersession_plants=tuple(
             r for p in base.supersession_plants for r in replicate_super(p)
         ),
+        # DY.7.1 — NOT replicated: one Daily-Balances-Audit subject is
+        # enough for the audit surface (a dedicated synthetic account; a
+        # densify fan-out across days would add clutter for no coverage).
+        balance_supersession_plants=base.balance_supersession_plants,
         transfer_template_plants=base.transfer_template_plants,
         rail_firing_plants=base.rail_firing_plants,
         inv_fanout_plants=base.inv_fanout_plants,
@@ -1008,6 +1042,7 @@ def boost_inv_fanout_plants(
         failed_transaction_plants=base.failed_transaction_plants,
         stuck_unbundled_plants=base.stuck_unbundled_plants,
         supersession_plants=base.supersession_plants,
+        balance_supersession_plants=base.balance_supersession_plants,
         transfer_template_plants=base.transfer_template_plants,
         rail_firing_plants=base.rail_firing_plants,
         inv_fanout_plants=boosted,
@@ -1097,6 +1132,7 @@ def add_broken_rail_plants(
         failed_transaction_plants=base.failed_transaction_plants,
         stuck_unbundled_plants=base.stuck_unbundled_plants,
         supersession_plants=base.supersession_plants,
+        balance_supersession_plants=base.balance_supersession_plants,
         transfer_template_plants=base.transfer_template_plants,
         rail_firing_plants=base.rail_firing_plants,
         inv_fanout_plants=base.inv_fanout_plants,
@@ -1291,6 +1327,7 @@ def add_drift_plants(
         failed_transaction_plants=base.failed_transaction_plants,
         stuck_unbundled_plants=base.stuck_unbundled_plants,
         supersession_plants=base.supersession_plants,
+        balance_supersession_plants=base.balance_supersession_plants,
         transfer_template_plants=base.transfer_template_plants,
         rail_firing_plants=base.rail_firing_plants,
         inv_fanout_plants=base.inv_fanout_plants,
@@ -1355,6 +1392,9 @@ def filter_scenario_plants(
         failed_transaction_plants=base.failed_transaction_plants,
         stuck_unbundled_plants=base.stuck_unbundled_plants if "stuck_unbundled" in selected else (),
         supersession_plants=base.supersession_plants if "supersession" in selected else (),
+        balance_supersession_plants=(
+            base.balance_supersession_plants if "supersession" in selected else ()
+        ),
         transfer_template_plants=base.transfer_template_plants,
         rail_firing_plants=base.rail_firing_plants,
         inv_fanout_plants=base.inv_fanout_plants,

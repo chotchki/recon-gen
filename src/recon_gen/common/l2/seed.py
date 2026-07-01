@@ -507,6 +507,30 @@ class SupersessionPlant:
 
 
 @dataclass(frozen=True, slots=True)
+class BalanceSupersessionPlant:
+    """A planted logical-key ``(account_id, business_day_start)`` with
+    multiple ``entry`` versions on ``_daily_balances`` — the balance-side
+    analogue of ``SupersessionPlant``, simulating a TechnicalCorrection
+    restatement of a posted end-of-day balance.
+
+    Surfaces in M.2b.12's Supersession Audit ``Daily Balances Audit``
+    table (DY.7.1). ``account_id`` is a DEDICATED synthetic account (not a
+    scenario invariant target); the generator emits its own posting for
+    ``corrected_money`` so the account's subledger matches the correction
+    → drift 0. ``original_money`` is the superseded (wrong) balance.
+    """
+
+    account_id: Identifier
+    account_name: str
+    account_role: Identifier
+    account_parent_role: Identifier
+    days_ago: int
+    rail_name: Identifier
+    original_money: Decimal
+    corrected_money: Decimal
+
+
+@dataclass(frozen=True, slots=True)
 class TransferTemplatePlant:
     """A planted firing of a declared TransferTemplate.
 
@@ -707,6 +731,7 @@ class ScenarioPlant:
     failed_transaction_plants: tuple[FailedTransactionPlant, ...] = ()
     stuck_unbundled_plants: tuple[StuckUnbundledPlant, ...] = ()
     supersession_plants: tuple[SupersessionPlant, ...] = ()
+    balance_supersession_plants: tuple[BalanceSupersessionPlant, ...] = ()
     transfer_template_plants: tuple[TransferTemplatePlant, ...] = ()
     rail_firing_plants: tuple[RailFiringPlant, ...] = ()
     inv_fanout_plants: tuple[InvFanoutPlant, ...] = ()
