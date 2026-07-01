@@ -1553,6 +1553,30 @@ class App2Driver:
         self._page.wait_for_load_state("networkidle")
         self._sync_nav_from_url()
 
+    def drill_from_row(self, visual_title: str, row_index: int) -> None:
+        # DY.7.1.f — indexed sibling of drill_from_first_row (the primary
+        # DATA_POINT_CLICK drill). Some source tables put a row 0 whose value
+        # isn't valid for the destination — Exception Detail sorts by amount
+        # DESC, so row 0 can be a control/pool account with NO drift, which
+        # drills the L1 Drift sheet empty. A test that must drill a specific
+        # kind aims at that row's index. Same Enter-navigation as the first-
+        # row form; the only change is rows.nth(i). Index-aligned with
+        # table_rows because every Exception Detail row is drillable (the
+        # account_display cell carries the drill on every row).
+        section = self._section(visual_title)
+        rows = section.locator(
+            "table.table-data tbody tr[data-row-drill]",
+        )
+        row = rows.nth(row_index)
+        if row.count() == 0:
+            raise NotImplementedError(
+                f"App2Driver.drill_from_row — table {visual_title!r} has no "
+                f"row-level drill at index {row_index} (no <tr data-row-drill>)"
+            )
+        row.press("Enter")
+        self._page.wait_for_load_state("networkidle")
+        self._sync_nav_from_url()
+
     def drill_from_first_row_via_menu(
         self, visual_title: str, menu_item: str,
     ) -> None:

@@ -114,7 +114,8 @@ def test_min_sigma_slider_shrinks_anomalies_kpi(inv_dashboard_driver: tuple["Das
         "sasquatch_pr (rich chains — verified DY.7.1.c); spec has no "
         "multi-hop data to narrow, so the skip is legit ONLY here."
     ),
-    instances=["spec_example"],
+    instances=["spec_example"],  # typing-smell: ignore[no-inline-production-constants]: L2 yaml stem (gate _EXAMPLE_L2_STEMS), not the DEFAULT_PREFIX table prefix
+
 )
 def test_min_hop_amount_slider_shrinks_money_trail_table(inv_dashboard_driver: tuple["DashboardDriver", str]) -> None:
     """Pushing the "Min hop amount ($)" slider to its max ($1,000) must
@@ -266,7 +267,8 @@ def test_bg4_volume_anomalies_kpi_matches_filtered_matview_and_distribution(
         "the inflows-only-truth KPI check has nothing to assert. Exercised on "
         "sasquatch_pr (fanout plants present); legit-absent ONLY on spec."
     ),
-    instances=["spec_example"],
+    instances=["spec_example"],  # typing-smell: ignore[no-inline-production-constants]: L2 yaml stem (gate _EXAMPLE_L2_STEMS), not the DEFAULT_PREFIX table prefix
+
 )
 def test_bg4_recipient_fanout_kpis_match_inflows_only_truth(
     inv_dashboard_driver: tuple["DashboardDriver", str], cfg: Config,

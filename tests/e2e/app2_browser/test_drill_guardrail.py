@@ -92,19 +92,29 @@ pytestmark = [
 # selector below; the constant now just names the marker for exclusion.
 _PLANT_ERROR_SENTINEL = "_spine_plant"
 
-# The L2FT ``L2 Violation Detail`` source hangs BOTH the Rails and the
-# Chains cross-sheet drill on ONE ``entity_a`` column, and each row's
-# ``check_type`` makes ``entity_a`` valid for at most ONE destination. A
-# blind row-0 drill reads whichever kind sorts highest (the `_spine_plant`
-# 'Unmatched Rail Name' marker) and lands the Chains destination empty (a
-# rail is never a chain parent). Select the row whose ``check_type`` is
-# valid for THIS drill's destination instead. Keyed by ``dst_sheet_id`` →
-# (accepted Title-Case ``check_type`` labels the unified-exceptions SQL
-# CASTs, exclude the `_spine_plant` scaffolding marker?).
+# Some source tables hang a destination-specific drill on a column whose
+# VALID values depend on the row's ``check_type`` — so a blind row-0 drill
+# can read a row whose value lands the destination EMPTY. Select the first
+# row whose ``check_type`` is valid for THIS drill's destination. Keyed by
+# ``(src_visual_title, dst_sheet_id)`` → (accepted ``check_type`` labels,
+# exclude the `_spine_plant` scaffolding marker?). NOTE the label CASE
+# differs by source: L2FT 'L2 Violation Detail' CASTs Title-Case
+# ('Chain Orphans'); L1 'Exception Detail' projects snake_case
+# ('ledger_drift').
 _L2_VIOLATION_DETAIL_TITLE = "L2 Violation Detail"
-_L2FT_EXC_ROW_SELECT: dict[str, tuple[frozenset[str], bool]] = {
-    "l2ft-sheet-rails": (frozenset({"Unmatched Rail Name"}), True),
-    "l2ft-sheet-chains": (frozenset({"Chain Orphans"}), False),
+_ROW_SELECT_BY_SRC_DST: dict[tuple[str, str], tuple[frozenset[str], bool]] = {
+    # L2FT L2 Violation Detail hangs BOTH the Rails + Chains drill on one
+    # entity_a; row 0 (count DESC) is the _spine_plant 'Unmatched Rail Name'
+    # marker, valid only for Rails → the Chains drill lands empty.
+    ("L2 Violation Detail", "l2ft-sheet-rails"): (frozenset({"Unmatched Rail Name"}), True),
+    ("L2 Violation Detail", "l2ft-sheet-chains"): (frozenset({"Chain Orphans"}), False),
+    # L1 Exception Detail → Drift. The 'Narrow Drift' drill's anchor is
+    # 'Parent Account Drift', so target ledger_drift rows (a parent/control
+    # account WITH parent-drift). Row 0 by amount-DESC can be a control
+    # account carrying an overdraft/cadence exception but NO drift (e.g.
+    # spec's North Pool) → the leaf/parent Drift matview has no row for it →
+    # empty destination.
+    ("Exception Detail", "l1-sheet-drift"): (frozenset({"ledger_drift"}), False),
 }
 
 _DST_ANCHOR_FALLBACKS: dict[str, str] = {
@@ -274,30 +284,34 @@ def _select_source_row_index(
 ) -> int | None:
     """Pick the source row index to drill from.
 
-    Default: row 0. For the L2FT ``L2 Violation Detail`` source — which
-    hangs BOTH the Rails and Chains cross-sheet drills on one ``entity_a``
-    column — pick the first row whose ``check_type`` is valid for THIS
-    drill's destination (a rail row for the Rails drill, a Chain Orphans
-    row for the Chains drill). Row 0 is the count-DESC top, always the
-    ``_spine_plant`` 'Unmatched Rail Name' marker, which is valid ONLY for
-    Rails and lands the Chains destination empty.
+    Default: row 0. For a source whose destination-specific drill's valid
+    values depend on the row's ``check_type`` (see ``_ROW_SELECT_BY_SRC_DST``
+    — L2FT 'L2 Violation Detail' → Rails/Chains, L1 'Exception Detail' →
+    Drift), pick the first row whose ``check_type`` is valid for THIS drill's
+    destination instead of the blind sort-order row 0.
 
     Returns ``None`` when no row matches (the source genuinely lacks a
     drillable row for this destination — caller skips as a data gap).
     """
     dst_id = str(site.dst_sheet.sheet_id)
-    spec = _L2FT_EXC_ROW_SELECT.get(dst_id)
-    if spec is None or src_visual_title != _L2_VIOLATION_DETAIL_TITLE:
+    spec = _ROW_SELECT_BY_SRC_DST.get((src_visual_title, dst_id))
+    if spec is None:
         return 0
     accepted, exclude_plant = spec
-    rows = driver.table_rows(
-        src_visual_title, columns=["check_type", "entity_a"],
-    )
+    # entity_a is an L2FT-only column (used only for the plant-marker
+    # exclusion); the L1 Exception Detail source has no such column, so read
+    # it only when the spec actually excludes the plant marker.
+    columns = ["check_type", "entity_a"] if exclude_plant else ["check_type"]
+    rows = driver.table_rows(src_visual_title, columns=columns)
     for idx, row in enumerate(rows):
         ct = row.get("check_type") or row.get("Check Type")
-        ea = row.get("entity_a") or row.get("Entity A") or ""
-        if ct in accepted and not (exclude_plant and _PLANT_ERROR_SENTINEL in ea):
-            return idx
+        if ct not in accepted:
+            continue
+        if exclude_plant:
+            ea = row.get("entity_a") or row.get("Entity A") or ""
+            if _PLANT_ERROR_SENTINEL in ea:
+                continue
+        return idx
     return None
 
 
@@ -557,14 +571,9 @@ def _run_cross_sheet_drill_guardrail(
             )
     else:
         if row_index != 0:
-            pytest.fail(
-                f"DL.2 harness: row-index {row_index} selected for a "
-                f"DATA_POINT_CLICK drill {site.drill.name!r}, but only row "
-                f"0 is reachable via drill_from_first_row (no index-"
-                f"selecting click verb exists). Restrict the selector to "
-                f"MENU drills or build the click verb."
-            )
-        driver.drill_from_first_row(src_visual_title)
+            driver.drill_from_row(src_visual_title, row_index)
+        else:
+            driver.drill_from_first_row(src_visual_title)
 
     # Step 4: wait for the destination's anchor visual to render +
     # assert content.

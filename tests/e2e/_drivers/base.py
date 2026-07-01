@@ -387,6 +387,15 @@ class DashboardDriver(Protocol):
         ``drill_from_first_row_via_menu``.)"""
         ...
 
+    def drill_from_row(self, visual_title: str, row_index: int) -> None:
+        """Indexed form of :meth:`drill_from_first_row` — fire the
+        ``DATA_POINT_CLICK`` primary drill from the row at ``row_index``
+        (zero-based) instead of row 0. Needed when the source table is
+        ordered so that row 0's value isn't valid for the destination (e.g.
+        Exception Detail sorts by amount DESC, so row 0 can be a control
+        account with no drift; the test aims at the first drift-family row)."""
+        ...
+
     def drill_from_first_row_via_menu(
         self, visual_title: str, menu_item: str,
     ) -> None:
