@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Callable
 
+import math
 from decimal import Decimal
 
 import pytest
@@ -156,22 +157,31 @@ def test_min_hop_amount_slider_shrinks_money_trail_table(inv_dashboard_driver: t
             _parse_money(r.get("hop_amount") or r.get("Hop Amount") or "0")
             for r in rows
         })
-        if len(vals) >= 2:
+        # Need ≥2 distinct hops AND an INTEGER dollar threshold that
+        # separates them: pInvMoneyTrailMinAmount is an IntegerParam (the
+        # SQL compares ``hop_amount >= <<$p>> * 100``), so a decimal slider
+        # value is invalid — DuckDB coerces it, PostgreSQL rejects
+        # "270404.48" as integer input (DY.7 PG verify caught this). Require
+        # ``floor(vals[1]) > vals[0]`` so ``floor(vals[1])`` drops the
+        # smallest hop while keeping the next one.
+        if len(vals) >= 2 and math.floor(vals[1]) > vals[0]:
             chosen, hop_vals = root, vals
             break
     if chosen is None:
         pytest.skip(
-            "Money Trail: no offered chain root has ≥2 distinct hop "
-            "amounts to threshold between — the min-hop narrow can't be "
-            "proven on this seed's chain shapes."
+            "Money Trail: no offered chain root has ≥2 distinct hop amounts "
+            "≥1 dollar apart to place an integer min-hop threshold between — "
+            "the narrow can't be proven on this seed's chain shapes."
         )
 
     # table_row_count (not len(table_rows)) — the DOM window caps at ~50,
     # which would compare two saturated 50s and mask a real shrink.
     before = driver.table_row_count("Money Trail — Hop-by-Hop")
-    # Threshold = the second-smallest distinct hop → keeps everything at
-    # or above it, drops every row at the smallest hop → provable shrink.
-    threshold = hop_vals[1]
+    # Threshold = floor(second-smallest distinct hop), an INTEGER dollar
+    # (the slider/param is integer-dollars): keeps everything at or above it,
+    # drops every row at the smallest hop → provable shrink, and binds as a
+    # plain integer so PostgreSQL's strict param typing accepts it.
+    threshold = int(math.floor(hop_vals[1]))
     driver.set_slider("Min hop amount ($)", threshold, None)
     driver.wait_loaded("Money Trail — Hop-by-Hop")
     after = driver.table_row_count("Money Trail — Hop-by-Hop")

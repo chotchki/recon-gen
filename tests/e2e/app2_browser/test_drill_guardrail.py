@@ -115,6 +115,23 @@ _ROW_SELECT_BY_SRC_DST: dict[tuple[str, str], tuple[frozenset[str], bool]] = {
     # spec's North Pool) → the leaf/parent Drift matview has no row for it →
     # empty destination.
     ("Exception Detail", "l1-sheet-drift"): (frozenset({"ledger_drift"}), False),
+    # L1 Exception Detail → Daily Statement. The 'View Daily Statement for
+    # this account-day' drill writes account_display + business_day, so it
+    # needs a PER-ACCOUNT-DAY check row (transfer-keyed checks — chain / XOR
+    # / fan-in — carry a transfer_id + NULL business_day). Exception Detail
+    # sorts by amount DESC; those checks have a NULL amount, and PG sorts
+    # NULLs FIRST (DuckDB sorts them LAST), so on PG row 0 is a transfer-keyed
+    # check with an empty business_day and the drill read skips. Select the
+    # first money/balance check (which has business_day) — the same
+    # highest-amount row DuckDB's NULLS-LAST order lands at row 0.
+    ("Exception Detail", "l1-sheet-daily-statement"): (
+        frozenset({
+            "drift", "ledger_drift", "overdraft", "limit_breach",
+            "expected_eod_balance_breach", "balance_cadence_gap",
+            "stuck_pending", "stuck_unbundled",
+        }),
+        False,
+    ),
 }
 
 _DST_ANCHOR_FALLBACKS: dict[str, str] = {
