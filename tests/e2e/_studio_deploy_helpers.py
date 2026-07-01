@@ -231,7 +231,9 @@ def build_studio_app(
 
 
 @contextlib.contextmanager
-def studio_server(cfg: Config) -> Generator[str, None, None]:
+def studio_server(
+    cfg: Config, *, read_only: bool | None = None,
+) -> Generator[str, None, None]:
     """Spin a uvicorn server in a thread serving the full studio app
     against ``cfg``. Yields the bound base URL.
 
@@ -244,6 +246,14 @@ def studio_server(cfg: Config) -> Generator[str, None, None]:
     Use this for browser-driven tests (Playwright needs a real bound
     port). API tests use ``httpx.AsyncClient(transport=ASGITransport)``
     directly against the in-process app.
+
+    ``read_only`` (DY.6, DuckDB-only): the Studio server WRITES (the
+    session-start DELETE, the v overlay, deploy). A caller serving an
+    ISOLATED per-worker DuckDB file (the trainer dogfood) passes
+    ``read_only=False`` so its pool opens read-write regardless of the
+    runner's shared-base-reader ``RECON_GEN_DB_READ_ONLY`` env — WITHOUT
+    a global env-clear that could leak onto a shared-base reader landing
+    on the same xdist worker. ``None`` keeps the env default.
     """
     import uvicorn
 
@@ -256,7 +266,7 @@ def studio_server(cfg: Config) -> Generator[str, None, None]:
     def _run_server() -> None:
         async def _serve() -> None:
             try:
-                pool = await make_connection_pool(cfg, max_size=4)
+                pool = await make_connection_pool(cfg, max_size=4, read_only=read_only)
             except Exception as e:  # noqa: BLE001
                 startup_error.append(e)
                 server_ready.set()

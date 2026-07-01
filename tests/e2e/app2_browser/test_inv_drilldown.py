@@ -90,13 +90,6 @@ def test_account_network_table_walk_rerenders_table(inv_dashboard_driver: tuple[
     backlog #331's Anchor parameter refetch fix.
     """
     driver, dashboard_arg = inv_dashboard_driver
-    if driver.__class__.__name__ == "App2Driver":
-        import pytest as _pytest  # noqa: PLC0415
-        _pytest.skip(
-            "Backlog #331 — App2 Anchor parameter pick fires setValue + "
-            "change event but no /visuals/*/data refetch lands within 30s "
-            "on CI."
-        )
     driver.open(dashboard_arg, sheet="Account Network")
     # DG.3 — the Anchor control's title is "Anchor account" (per
     # apps/investigation/app.py:1058 ``add_parameter_dropdown(

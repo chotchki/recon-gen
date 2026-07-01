@@ -92,7 +92,7 @@ _TODAY = today_anchor()
 _PERIOD = audit_window(_TODAY)
 
 
-@pytest.fixture(scope="module", params=["postgres", "oracle"])
+@pytest.fixture(scope="module", params=["postgres", "oracle", "duckdb"])
 def dialect_cfg(
     request: pytest.FixtureRequest,
 ) -> "tuple[Config, Path, Dialect]":
@@ -145,7 +145,9 @@ def seeded_db(
 
     cfg, _cfg_path, dialect = dialect_isolated_cfg
     instance = load_instance(l2_yaml_for_test())
-    conn = connect_demo_db(cfg)
+    # DY.2 — read_only=False so the DuckDB seed creates the per-worker
+    # file; the runner's RECON_GEN_DB_READ_ONLY=1 must not bind the seeder.
+    conn = connect_demo_db(cfg, read_only=False)
     try:
         scenario = apply_db_seed(
             conn, instance,
@@ -173,8 +175,23 @@ def audit_pdf(
     Depends on `seeded_db` so the PDF includes the scenario plants;
     the isolated prefix + deployment name thread through to the CLI
     subprocess via env so it queries the same per-worker tables.
+
+    DY.2 — the isolated DB URL threads too. For PG / Oracle isolation
+    is by table-prefix on a shared DB, so the prefix env alone routes
+    the CLI to the right tables; but for DuckDB ``_isolate_cfg`` clones
+    the URL to a per-worker FILE, and the prefix env can't redirect the
+    CLI across files. Without ``RECON_GEN_DEMO_DATABASE_URL`` the audit
+    CLI falls back to the runner's ambient cell DB (demo-seeded), where
+    the per-test l1_invariants plants never landed — the failure mode was
+    ``limit_breach`` pdf_count=0 (its demo-seed breach falls outside the
+    audit window while drift/overdraft/etc. coincidentally don't). Pinning
+    the URL to ``cfg.db.url`` makes the CLI read the SAME store the seed
+    wrote; it's a no-op on PG / Oracle (their isolated url == the shared
+    url).
     """
     cfg, cfg_path, _dialect = dialect_isolated_cfg
+    # seeded_db already opened this url read-write to seed; it's non-None.
+    assert cfg.db.url is not None
 
     out = tmp_path_factory.mktemp("audit-pdf") / "report.pdf"
     cli_runner = CliRunner()
@@ -192,6 +209,7 @@ def audit_pdf(
         env={
             "RECON_GEN_DB_TABLE_PREFIX": cfg.db.table_prefix,
             "RECON_GEN_DEPLOYMENT_NAME": cfg.aws.deployment_name,
+            "RECON_GEN_DEMO_DATABASE_URL": cfg.db.url,
         },
     )
     assert result.exit_code == 0, result.output

@@ -54,20 +54,6 @@ pytestmark = [
 ]
 
 
-@pytest.mark.xfail(
-    reason=(
-        "QS leg: the deployed Stuck Pending Detail table's right-click "
-        "context menu doesn't appear ([role=menu] never shows; the helper "
-        "times out) — pre-existing, surfaced by the X.2.q.3 port, triage "
-        "candidates: stale deployed drill wiring vs. current src / QS-side "
-        "context-menu DOM change / right-click dispatch shape. The App 2 "
-        "leg drives the same verb via the row's '⋯' button + ctxmenu and "
-        "xpasses (strict=False tolerates it) — a clean positive signal "
-        "that the row-drill path works. Re-light the QS leg once the "
-        "context-menu issue is fixed."
-    ),
-    strict=False,
-)
 def test_pending_aging_drill_to_transactions_shows_target(l1_dashboard_driver: tuple["DashboardDriver", str]) -> None:
     """Drill from a Pending Aging row → "View Transactions for this
     transfer" must land on a Transactions sheet that actually shows the

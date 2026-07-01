@@ -71,6 +71,20 @@ class BaseSchemaMissingError(RuntimeError):
         self.base_prefix = base_prefix
 
 
+# DY.6 — every `connect_demo_db` in this module opens read_only=False.
+# v_overlay manages the Studio v-overlay (CREATE/DELETE/INSERT the v_*
+# tables) — it's a WRITER module — and it always runs inside the Studio
+# server process, where the async pool already holds the (isolated,
+# single-writer-owned) DuckDB file OPEN read-write. DuckDB refuses "a
+# connection to same database file with a different configuration than
+# existing connections", so a read-only probe here (which the runner's
+# RECON_GEN_DB_READ_ONLY=1 reader env would otherwise force) throws and
+# gets mis-read as "base schema missing". A second READ-WRITE handle
+# shares the in-process instance cleanly. No-op in the standalone CLI
+# (no env → already read-write) and for PG/Oracle (env ignored).
+# v_overlay is never a shared-base-reader path, so this can't clash with
+# the cross-worker read-only sharing the env exists for.
+# See [[project_duckdb_test_isolation_is_per_file]].
 def _base_schema_exists(cfg: "Config") -> bool:
     """CS.13 — probe for `<base>_transactions` to short-circuit
     Session Start when the operator hasn't applied the base schema.
@@ -84,7 +98,7 @@ def _base_schema_exists(cfg: "Config") -> bool:
     """
     base_prefix = cfg.db.table_prefix
     try:
-        conn = connect_demo_db(cfg)
+        conn = connect_demo_db(cfg, read_only=False)
     except Exception:  # noqa: BLE001 — connection failures are operator-actionable as "schema not applied"
         return False
     try:
@@ -388,7 +402,7 @@ async def session_start(
     step_log: list[tuple[str, dict[str, object]]] = []
 
     def _run() -> None:
-        conn = connect_demo_db(cfg)
+        conn = connect_demo_db(cfg, read_only=False)
         try:
             cur = conn.cursor()
             try:
@@ -501,7 +515,7 @@ async def cleanup(
     base_prefix = cfg.db.table_prefix
 
     def _run() -> None:
-        conn = connect_demo_db(cfg)
+        conn = connect_demo_db(cfg, read_only=False)
         try:
             cur = conn.cursor()
             try:
@@ -626,7 +640,7 @@ async def apply_plants(
     step_log: list[tuple[str, dict[str, object]]] = []
 
     def _run() -> None:
-        conn = connect_demo_db(cfg)
+        conn = connect_demo_db(cfg, read_only=False)
         try:
             cur = conn.cursor()
             try:
@@ -851,7 +865,7 @@ async def read_failed_kinds(cfg: "Config") -> dict[str, str]:
 
     def _run() -> dict[str, str]:
         try:
-            conn = connect_demo_db(cfg)
+            conn = connect_demo_db(cfg, read_only=False)
         except Exception:  # noqa: BLE001
             return {}
         try:
@@ -905,7 +919,7 @@ async def read_last_apply(cfg: "Config") -> dict[str, object] | None:
 
     def _run() -> dict[str, object] | None:
         try:
-            conn = connect_demo_db(cfg)
+            conn = connect_demo_db(cfg, read_only=False)
         except Exception:  # noqa: BLE001
             return None
         try:
@@ -945,7 +959,7 @@ async def read_session_metadata(cfg: "Config") -> dict[str, str]:
 
     def _run() -> dict[str, str]:
         try:
-            conn = connect_demo_db(cfg)
+            conn = connect_demo_db(cfg, read_only=False)
         except Exception:  # noqa: BLE001
             return {}
         try:
@@ -990,7 +1004,7 @@ async def read_applied_state(
 
     def _run() -> dict[str, dict[str, str]]:
         try:
-            conn = connect_demo_db(cfg)
+            conn = connect_demo_db(cfg, read_only=False)
         except Exception:  # noqa: BLE001
             return {}
         try:

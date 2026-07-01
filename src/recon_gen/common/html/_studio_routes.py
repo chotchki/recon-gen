@@ -5452,7 +5452,12 @@ def make_studio_routes(
                     prefix=plant_cfg.db.table_prefix,
                     dialect=plant_cfg.db.dialect,
                 )
-                conn = connect_demo_db(plant_cfg)
+                # DY.7.3 — read_only=False: this plant-apply WRITE runs on
+                # the isolated demo DB while the read-write async pool is
+                # live; on DuckDB the two read-write handles coexist (same
+                # -config instance sharing), and a read-only open (the env
+                # default) would fail the write outright. No-op on PG/Oracle.
+                conn = connect_demo_db(plant_cfg, read_only=False)
                 try:
                     cur = conn.cursor()
                     try:
@@ -5789,7 +5794,14 @@ def make_studio_routes(
         del instance  # closure captures base_prefix; instance unused
         def _probe() -> bool:
             try:
-                conn = _connect(cfg_arg)
+                # DY.7.3 — read_only=False so this existence probe coexists
+                # with the read-write async pool on DuckDB (same-config
+                # instance sharing). The env-default read-only open hit the
+                # "different configuration" ConnectionException, which the
+                # broad except below swallowed → the probe returned False →
+                # the Trainer's Apply button stayed permanently disabled.
+                # No-op on PG/Oracle (MVCC; read_only ignored there).
+                conn = _connect(cfg_arg, read_only=False)
             except Exception:  # noqa: BLE001
                 return False
             try:

@@ -54,7 +54,7 @@ _TODAY = today_anchor()
 _PERIOD = audit_window(_TODAY)
 
 
-@pytest.fixture(scope="module", params=["postgres", "oracle"])
+@pytest.fixture(scope="module", params=["postgres", "oracle", "duckdb"])
 def dialect_cfg(
     request: pytest.FixtureRequest,
 ) -> "tuple[Config, Path, Dialect]":
@@ -91,7 +91,9 @@ def seeded_db(
 
     cfg, _cfg_path, dialect = dialect_isolated_cfg
     instance = load_instance(l2_yaml_for_test())
-    conn = connect_demo_db(cfg)
+    # DY.2 — read_only=False so the DuckDB seed creates the per-worker
+    # file; the runner's RECON_GEN_DB_READ_ONLY=1 must not bind the seeder.
+    conn = connect_demo_db(cfg, read_only=False)
     try:
         scenario = apply_db_seed(
             conn, instance,

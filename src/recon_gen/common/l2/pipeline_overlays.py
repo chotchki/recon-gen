@@ -106,7 +106,11 @@ async def _apply_l1_invariant_plants(ctx: OverlayContext) -> None:
     )
 
     def _run() -> None:
-        conn = connect_demo_db(ctx.cfg)
+        # DY.7.3 — read_only=False: overlay-apply WRITE runs on the demo
+        # DB alongside the read-write async pool; on DuckDB the two
+        # read-write handles coexist (same-config instance sharing) and a
+        # read-only open (env default) would fail the write. No-op on PG/Oracle.
+        conn = connect_demo_db(ctx.cfg, read_only=False)
         try:
             cur = conn.cursor()
             try:
@@ -147,7 +151,11 @@ async def _apply_l2_demo_gap_overlay(ctx: OverlayContext) -> None:
     )
 
     def _run() -> None:
-        conn = connect_demo_db(ctx.cfg)
+        # DY.7.3 — read_only=False: overlay-apply WRITE runs on the demo
+        # DB alongside the read-write async pool; on DuckDB the two
+        # read-write handles coexist (same-config instance sharing) and a
+        # read-only open (env default) would fail the write. No-op on PG/Oracle.
+        conn = connect_demo_db(ctx.cfg, read_only=False)
         try:
             cur = conn.cursor()
             try:

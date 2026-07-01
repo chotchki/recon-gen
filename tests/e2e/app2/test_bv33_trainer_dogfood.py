@@ -272,7 +272,14 @@ def trainer_ready_session(
 
     _seed_demo_db(cfg)
 
-    with studio_server(cfg) as base_url:
+    # DY.6 — read_only=False: the trainer is an ISOLATED WRITER on its own
+    # per-worker file (session-start DELETE + v overlay + deploy). The
+    # runner's RECON_GEN_DB_READ_ONLY env is for shared-base READERS; it
+    # must not bind this writer. Threaded through the server's pool (not a
+    # global env-clear, which could leak onto a shared-base reader sharing
+    # this xdist worker). No-op for PG/Oracle. See
+    # [[project_duckdb_test_isolation_is_per_file]].
+    with studio_server(cfg, read_only=False) as base_url:
         # One-shot driver to drive the initial full Session Start +
         # take the post-Session-Start snapshot. Subsequent tests open
         # their own drivers + call `snapshot_restore()` against the
@@ -305,7 +312,10 @@ def _seed_demo_db(cfg: Config) -> None:
     instance = load_instance(SASQUATCH_YAML)
     scenarios = default_scenario_for(instance).scenario
     base_prefix = cfg.db.table_prefix
-    conn = connect_demo_db(cfg)
+    # DY.2 — read_only=False so the DuckDB seed CREATES the per-worker
+    # file; the runner's RECON_GEN_DB_READ_ONLY=1 must not bind this
+    # seeder (the iso file doesn't exist until this seed writes it).
+    conn = connect_demo_db(cfg, read_only=False)
     try:
         cur = conn.cursor()
         try:
@@ -480,7 +490,11 @@ def _v_matview_signatures(
     in the rendered HTML" haystack for the surface assertion.
     """
     del matview_name  # kept on signature for future per-matview override
-    conn = connect_demo_db(cfg)
+    # DY.7.3 — read_only=False so this direct read of the trainer's
+    # ISOLATED per-worker duck file coexists with the read-write
+    # studio_server pool (DuckDB same-config instance sharing); the arg
+    # is a no-op on PG/Oracle, where MVCC gives concurrent reads for free.
+    conn = connect_demo_db(cfg, read_only=False)
     try:
         cur = conn.cursor()
         try:
@@ -525,7 +539,11 @@ def _diagnose_v_state(
     """Dump v overlay state for triage. Reads the trainer config_kv
     rows + counts the v transactions table so a failed Apply tells
     us what shape the overlay was in when the assertion fired."""
-    conn = connect_demo_db(cfg)
+    # DY.7.3 — read_only=False so this direct read of the trainer's
+    # ISOLATED per-worker duck file coexists with the read-write
+    # studio_server pool (DuckDB same-config instance sharing); the arg
+    # is a no-op on PG/Oracle, where MVCC gives concurrent reads for free.
+    conn = connect_demo_db(cfg, read_only=False)
     try:
         cur = conn.cursor()
         try:
@@ -620,7 +638,11 @@ def _v_matview_account_ids(
     handles transfer-keyed matviews (chain coherence) where
     ``account_id`` isn't the discriminating column.
     """
-    conn = connect_demo_db(cfg)
+    # DY.7.3 — read_only=False so this direct read of the trainer's
+    # ISOLATED per-worker duck file coexists with the read-write
+    # studio_server pool (DuckDB same-config instance sharing); the arg
+    # is a no-op on PG/Oracle, where MVCC gives concurrent reads for free.
+    conn = connect_demo_db(cfg, read_only=False)
     try:
         cur = conn.cursor()
         try:

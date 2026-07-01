@@ -676,7 +676,7 @@ class App2Driver:
             # Click + wait for HTMX swap — the new <table> mounts in
             # place of the old, so re-querying ``table.table-data`` for
             # ``state=visible`` settles on the swapped DOM.
-            next_link.click()
+            self._click(next_link)
             section.locator("table.table-data").first.wait_for(
                 state="visible",
             )
@@ -782,7 +782,7 @@ class App2Driver:
         ).first
         visible.wait_for(state="attached")
         # Open the calendar (flatpickr binds on the input's focus/click).
-        visible.click()
+        self._click(visible)
         # The flatpickr calendar mounts as a sibling .flatpickr-calendar.
         self._page.locator(".flatpickr-calendar.open").first.wait_for(
             state="visible", timeout=10_000,
@@ -1445,7 +1445,7 @@ class App2Driver:
             self._sheet = m.group(2)
 
     def cross_link(self, label: str) -> None:
-        self._page.locator("a", has_text=label).first.click()
+        self._click(self._page.locator("a", has_text=label).first)
         self._page.wait_for_load_state("networkidle")
         self._sync_nav_from_url()
 
@@ -1497,12 +1497,12 @@ class App2Driver:
                 f"{visual_title!r} has no DATA_POINT_MENU row drill "
                 f'(no "⋯" button)'
             )
-        btn.click()
+        self._click(btn)
         item = self._page.locator(
             "ul.ctxmenu li", has_text=menu_item,
         ).first
         item.wait_for(state="visible", timeout=5_000)
-        item.click()
+        self._click(item)
         self._page.wait_for_load_state("networkidle")
         self._sync_nav_from_url()
 
@@ -1532,7 +1532,7 @@ class App2Driver:
                 f"{visual_title!r} row {row_index} has no ⋯ button "
                 f"(metadata_popup not wired?)"
             )
-        btn.click()
+        self._click(btn)
         # The synthetic entry is always prepended at index 0; matching
         # by visible text lets the test signal which item it expects
         # without coupling to position.
@@ -1540,7 +1540,7 @@ class App2Driver:
             "ul.ctxmenu li", has_text="{} View metadata",
         ).first
         item.wait_for(state="visible", timeout=5_000)
-        item.click()
+        self._click(item)
         # ``__sidePanelOpen`` removes ``translate-x-full`` synchronously
         # after the ``htmx.ajax`` promise resolves. Poll the class
         # attribute rather than waiting on a specific selector — the
@@ -1579,7 +1579,7 @@ class App2Driver:
         returning so the caller's subsequent ``metadata_panel_open_details_count``
         sees the post-batch state.
         """
-        self._page.locator("[data-metadata-expand-all]").first.click()
+        self._click(self._page.locator("[data-metadata-expand-all]").first)
         self._page.evaluate(
             "() => new Promise((r) => requestAnimationFrame(() => r()))"
         )
@@ -1587,7 +1587,7 @@ class App2Driver:
     def metadata_panel_collapse_all(self) -> None:
         """Click ``[data-metadata-collapse-all]``. Same empty-state +
         ``requestAnimationFrame`` caveats as ``metadata_panel_expand_all``."""
-        self._page.locator("[data-metadata-collapse-all]").first.click()
+        self._click(self._page.locator("[data-metadata-collapse-all]").first)
         self._page.evaluate(
             "() => new Promise((r) => requestAnimationFrame(() => r()))"
         )
@@ -1650,13 +1650,13 @@ class App2Driver:
         # natively; Dex's form is a plain POST (no JS overlay widget), so
         # no special evaluate() wrapper needed here (unlike pick_filter's
         # TomSelect path).
-        self._page.locator("input[name='login']").fill(email)
-        self._page.locator("input[name='password']").fill(password)
+        self._fill("input[name='login']", email, what="oauth login email")
+        self._fill("input[name='password']", password, what="oauth login password")
 
         # Wait for the navigation to either approval.html or back to the
         # callback. expect_navigation catches whichever Dex emits.
         with self._page.expect_navigation(timeout=15_000):
-            self._page.locator("button#submit-login").click()
+            self._click(self._page.locator("button#submit-login"))
 
         # If approval.html rendered, click Grant Access. We probe by
         # selector visibility (short timeout) — if Dex skipped the
@@ -1666,7 +1666,7 @@ class App2Driver:
         )
         if grant_access.count() > 0 and grant_access.first.is_visible():
             with self._page.expect_navigation(timeout=15_000):
-                grant_access.first.click()
+                self._click(grant_access.first)
 
         # Settle on the post-callback landing page.
         self._page.wait_for_load_state("networkidle", timeout=15_000)
@@ -1842,7 +1842,7 @@ class App2Driver:
         ``timeout_ms`` default is 10 minutes — Oracle Session Start
         can take ~10 min for the /etl/run leg.
         """
-        self._page.click("#training-session-start-btn")
+        self._click("#training-session-start-btn", what="trainer_start_session")
         # Step 2: in-progress banner appears.
         self._page.wait_for_selector(
             "[data-test-training-session-start-banner], "
@@ -1883,14 +1883,18 @@ class App2Driver:
         always check the `open` attribute first and only click when
         we need to open it."""
         self._trainer_ensure_family_open(family)
-        checkbox = self._page.locator(
-            f"[data-test-training-enable-{kind}]"
+        self._check(
+            f"[data-test-training-enable-{kind}]",
+            what=f"trainer_enable_plant(kind={kind!r})",
         )
-        checkbox.check()
         for field_name, value in (form_values or {}).items():
-            self._page.locator(
-                f'[name="form_{kind}_{field_name}"]'
-            ).first.fill(value)
+            self._fill(
+                self._page.locator(
+                    f'[name="form_{kind}_{field_name}"]'
+                ).first,
+                value,
+                what=f"trainer_enable_plant form field {field_name!r} (kind={kind!r})",
+            )
 
     def _trainer_ensure_family_open(self, family: str) -> None:
         """Open the family accordion if it isn't already. Clicking
@@ -1900,7 +1904,69 @@ class App2Driver:
         ).first
         is_open = bool(details.evaluate("el => el.hasAttribute('open')"))
         if not is_open:
-            details.locator("> summary").first.click()
+            self._click(details.locator("> summary").first)
+
+    def _scream_if_disabled(self, loc: Any, label: str) -> None:
+        """Raise LOUDLY + IMMEDIATELY when ``loc`` matches a present-but-
+        DISABLED element, instead of eating the full Playwright click/check
+        timeout ("element is not enabled", retried to the 30s deadline).
+
+        A disabled control is a server-state signal, not a timing flake —
+        e.g. the Trainer's Apply button disables when ``v_overlay_exists``
+        is False / a Session-Start or Apply op is still running. The
+        timeout is the SYMPTOM; this surfaces the actual shape (the
+        element's outerHTML carries the disabled attr + classes) the
+        instant it's detected. A not-yet-present element (count 0) is left
+        to the caller's normal auto-wait so legitimately-late elements
+        aren't cut short."""
+        if loc.count() > 0 and loc.first.is_disabled():
+            outer = loc.first.evaluate("el => el.outerHTML")
+            raise AssertionError(
+                f"{label}: element is present but DISABLED — cannot "
+                f"click/check (server-state signal, not a flake; a bare "
+                f"Playwright 30s timeout would hide it). "
+                f"outerHTML: {str(outer)[:400]}"
+            )
+
+    def _click(self, target: Any, *, what: str | None = None, **kwargs: Any) -> None:
+        """Driver click primitive: SCREAM on a disabled target (see
+        :meth:`_scream_if_disabled`) before delegating to Playwright's
+        click. Driver clicks route through here so a disabled control
+        fails fast + loud everywhere, not only where a caller remembered
+        a pre-check. ``target`` is a selector string or a Locator."""
+        loc = self._page.locator(target) if isinstance(target, str) else target
+        self._scream_if_disabled(
+            loc, what or (target if isinstance(target, str) else "element"),
+        )
+        loc.click(**kwargs)
+
+    def _check(self, target: Any, *, what: str | None = None) -> None:
+        """Checkbox ``.check()`` primitive: SCREAM on a disabled target
+        before delegating. ``.check()`` waits-for-enabled exactly like
+        ``.click()``, so a disabled checkbox would otherwise burn the full
+        30s timeout. ``target`` is a selector string or a Locator."""
+        loc = self._page.locator(target) if isinstance(target, str) else target
+        self._scream_if_disabled(
+            loc, what or (target if isinstance(target, str) else "element"),
+        )
+        loc.check()
+
+    def _fill(self, target: Any, value: str, *, what: str | None = None) -> None:
+        """Input ``.fill()`` primitive: SCREAM on a disabled target before
+        delegating. ``.fill()`` waits-for-editable (a disabled input is not
+        editable), so a disabled field would otherwise burn the full 30s
+        timeout. ``target`` is a selector string or a Locator."""
+        loc = self._page.locator(target) if isinstance(target, str) else target
+        self._scream_if_disabled(
+            loc, what or (target if isinstance(target, str) else "element"),
+        )
+        loc.fill(value)
+
+    def _assert_clickable(self, selector: str, *, what: str) -> None:
+        """Standalone 'scream if disabled' guard, kept per operator request
+        for any interaction that doesn't route through :meth:`_click` /
+        :meth:`_check` / :meth:`_fill` (all three bake the same guard in)."""
+        self._scream_if_disabled(self._page.locator(selector), what)
 
     def trainer_apply(self, timeout_ms: int = 300_000) -> None:
         """Click Apply; wait for the detached task to finish.
@@ -1929,7 +1995,7 @@ class App2Driver:
         don't time out the way they would against the legacy
         green-only `data-test-training-banner` selector.
         """
-        self._page.click("#training-apply-btn")
+        self._click("#training-apply-btn", what="trainer_apply")
         # In-progress banner appears (or page already reloaded for
         # very-fast no-op applies — the last-apply banner is the
         # CF.1 post-reload terminal state).
@@ -1984,7 +2050,7 @@ class App2Driver:
                 f"Violation Tour link missing on the {kind!r} card "
                 f"(data-test-tour-violation-{kind})"
             )
-        tour_link.click()
+        self._click(tour_link)
         self._page.wait_for_load_state("networkidle")
 
     def dashboard_table_inner_html(self) -> str:

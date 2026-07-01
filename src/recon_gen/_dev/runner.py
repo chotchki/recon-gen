@@ -492,19 +492,29 @@ def _layer_command(
         RECON_GEN_RUN_DIR.name: str(run_dir),
         RECON_GEN_LAYER.name: layer,
     }
-    # CA.8 — DuckDB enforces single-writer-per-file across processes;
-    # pytest-xdist workers in the db / app2 / browser tier all need
-    # shared read access without locking each other out. Per the
-    # DuckDB docs (https://duckdb.org/docs/current/clients/python/
-    # dbapi#read_only-connections): "Read-only mode is required if
-    # multiple Python processes want to access the same database file
-    # at the same time." Setting this env tells the pytest workers'
-    # connect_demo_db / _AsyncDuckdbPool to open with read_only=True.
-    # Production CLI invocations (schema/data/seed apply) run before
-    # pytest dispatch under sequential variant-seed steps that don't
-    # see this env; they continue to open read-write. The audit verify
-    # test subprocess inherits the env, which is correct — audit only
-    # SELECTs from the seeded DB to render the PDF.
+    # CA.8 + DY.6 (2026-06-30) — set RECON_GEN_DB_READ_ONLY for duck cells
+    # so the SHARED-BASE-DEMO readers open read-only. DuckDB is
+    # single-writer-per-file across processes; the runner seeds ONE base
+    # `.duckdb` per cell (pre-pytest schema/data apply) that "live demo"
+    # reader tests (`test_dm_cascade_and_day_availability`,
+    # `test_html2_executives_live`) consume via the raw `cfg` — cross-
+    # process shared READ across xdist workers REQUIRES read-only. Per the
+    # DuckDB docs (https://duckdb.org/docs/current/clients/python/dbapi#
+    # read_only-connections): "Read-only mode is required if multiple
+    # Python processes want to access the same database file at the same
+    # time."
+    #
+    # DY.6 nuance (the read-only is NOT vestigial — it's load-bearing for
+    # the shared-base readers, but must NOT bind ISOLATED WRITERS): tests
+    # that `_isolate_cfg` to a per-worker file + WRITE it (the spine /
+    # agreement seeds, the trainer-dogfood Studio server) open read-write
+    # on their OWN file. The seeds pass `read_only=False` explicitly; the
+    # trainer fixture clears this env for its writer scope. Read-write on a
+    # per-worker isolated file is safe (one process owns it); read-only
+    # there BROKE the writer (`InvalidInputException: attached in read-only
+    # mode` on the session-start DELETE). See
+    # [[project_duckdb_test_isolation_is_per_file]]. connect_demo_db
+    # ignores this env for PG/Oracle regardless — it was always duck-only.
     if layer in ("db", "app2", "app2_browser"):
         ve = variant_env or {}
         url = ve.get(RECON_GEN_DEMO_DATABASE_URL.name, "")

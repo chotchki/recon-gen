@@ -46,7 +46,7 @@ from pathlib import Path
 
 from recon_gen.common.db import SyncConnection
 from recon_gen.common.l2.loader import load_instance
-from recon_gen.common.l2.primitives import Account, L2Instance
+from recon_gen.common.l2.primitives import Account, Identifier, L2Instance
 from recon_gen.common.money import Cents
 
 # Default prefix for the in-process test harness shape. Production
@@ -495,6 +495,31 @@ def find_internal_with_role(
         if must_be_leaf and a.parent_role is None:
             continue
         return a
+    # DY.7.2 — fall back to account_templates. Template-driven L2s
+    # (sasquatch_pr) declare their internal-LEAF accounts as templates that
+    # materialize to concrete accounts (cust-NNNN) only at seed time, so
+    # they're absent from ``instance.accounts`` and the loop above misses
+    # them — which used to SKIP the anomaly / money-trail scenarios on
+    # sasquatch entirely. The scenario builders read only ``role`` +
+    # ``parent_role`` off this return (they mint their own synthetic
+    # account_id), so a representative Account synthesized from the template
+    # is sufficient; its id is a real template-materialized id for legibility.
+    for t in instance.account_templates:
+        if t.role != role or t.scope != "internal":
+            continue
+        if must_be_leaf and t.parent_role is None:
+            continue
+        from recon_gen.common.l2.auto_scenario import (  # noqa: PLC0415
+            template_instance_ids,
+        )
+        rep_ids = template_instance_ids(t)
+        rep_id = rep_ids[0] if rep_ids else f"tmpl-{role}"
+        return Account(
+            id=Identifier(rep_id),
+            scope=t.scope,
+            role=t.role,
+            parent_role=t.parent_role,
+        )
     leaf_phrase = " leaf" if must_be_leaf else ""
     raise ValueError(
         f"shape has no {error_kind}-eligible{leaf_phrase} internal "

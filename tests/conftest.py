@@ -17,7 +17,7 @@ import os
 import secrets
 import tempfile
 from pathlib import Path
-from typing import Any, Callable, Final, Generator
+from typing import Any, Callable, Final, Generator, cast
 
 import pytest
 
@@ -347,6 +347,141 @@ def pytest_runtest_teardown(item: Any) -> Generator[None, None, None]:  # typing
         )
 
 
+# ---------------------------------------------------------------------------
+# DY.7.1 — example_l2 skip/xfail gate (REPORT-ONLY mode).
+#
+# On the controlled example L2s (spec_example / sasquatch_pr) a skip or xfail
+# is SUSPECT: it usually hides a coverage GAP, not a legit condition
+# (operator: "finding gaps should be easy"). This hook records every
+# skip/xfail that FIRES on an example-L2 run to a per-run sidecar,
+# CATEGORIZED (suspect | config-absence | infra-import | exempt |
+# invalid-exempt), WITHOUT flipping the outcome. The sidecar IS the operator-
+# review list; the flip to hard-fail lands once the `suspect` entries are
+# triaged (see PLAN DY.7.1). Infra-import + config-absence skips are legit
+# when the runner env lacks the dep, so they get their own categories to keep
+# `suspect` focused. The `example_l2_exempt(reason="fuzz:"|"engine-limit:")`
+# marker is the sanctioned escape hatch; a non-prefixed reason is
+# `invalid-exempt` (still surfaced — no lazy exemptions).
+# ---------------------------------------------------------------------------
+
+_EXAMPLE_L2_STEMS: Final = frozenset({"spec_example", "sasquatch_pr"})
+# Only the per-L2 e2e tiers genuinely run "a spec/sasquatch test" — the
+# runner dispatches one L2 instance per cell there. The `unit` tier runs
+# ONCE (not per-L2); its skips are code/docs/structure conditionals (e.g.
+# "No recon-gen invocations in index.md"), not L2-coverage gaps — gating it
+# floods the review list with noise. (Unit-tier "spec_example lacks chains /
+# limit_schedules" feature-absence skips are a separate L2-fixture-
+# completeness concern, not this gate's e2e-coverage scope.)
+_EXAMPLE_L2_GATED_LAYERS: Final = frozenset(
+    {"db", "app2", "app2_browser", "agreement"},
+)
+_EXAMPLE_L2_EXEMPT_PREFIXES: Final = ("fuzz:", "engine-limit:")
+_EXAMPLE_L2_INFRA_IMPORT_HINTS: Final = (
+    "could not import", "not installed", "no module named",
+)
+_EXAMPLE_L2_CONFIG_ABSENCE_HINTS: Final = (
+    "no cfg", "not configured", "operator-local", "not found at",
+    "cfg.db.url", "auth.oidc", "requires --", "no cfg discoverable", "run/ is",
+)
+
+
+def _example_l2_run(item: Any) -> bool:  # typing-smell: ignore[explicit-any]: pytest Item from late import
+    """True when the active L2 instance is a controlled example
+    (spec_example / sasquatch_pr) — the gate's scope. Fuzz/synth runs are
+    out (operator: 'fuzz is okay'). Env unset ⇒ default_l2_instance() ==
+    spec_example."""
+    callspec = getattr(item, "callspec", None)
+    param = getattr(callspec, "params", {}).get("l2_instance") if callspec else None
+    if param in _EXAMPLE_L2_STEMS:
+        return True
+    if param == "fuzz":
+        return False
+    try:
+        env = RECON_GEN_TEST_L2_INSTANCE.get_or_none()
+    except EnvVarInvalid:
+        return False
+    if not env:
+        # Unset ⇒ not an explicit per-L2 dispatch (the unit prelude runs this
+        # way). Don't treat the spec_example default as a gated example run.
+        return False
+    return Path(str(env)).stem in _EXAMPLE_L2_STEMS
+
+
+def _example_l2_reason_text(report: Any) -> str:  # typing-smell: ignore[explicit-any]: pytest TestReport
+    wx = getattr(report, "wasxfail", None)
+    if wx:
+        return f"xfail: {wx}"
+    # Skip longrepr is typically ``(path, lineno, "Skipped: <reason>")`` —
+    # index [2] is the reason. ``report`` is ``Any``; cast the narrowed
+    # tuple so pyright-strict sees a known element type (not ``Unknown``).
+    lr: object = report.longrepr
+    if isinstance(lr, tuple):
+        parts = cast("tuple[object, ...]", lr)
+        if len(parts) == 3:
+            return f"skip: {parts[2]}"
+    return f"skip: {lr}"
+
+
+def _example_l2_category(item: Any, reason: str) -> str:  # typing-smell: ignore[explicit-any]: pytest Item
+    marker = item.get_closest_marker("example_l2_exempt")
+    if marker is not None:
+        m_reason = str(
+            marker.kwargs.get("reason")
+            or (marker.args[0] if marker.args else "")
+            or "",
+        )
+        return (
+            "exempt"
+            if m_reason.startswith(_EXAMPLE_L2_EXEMPT_PREFIXES)
+            else "invalid-exempt"
+        )
+    low = reason.lower()
+    if any(h in low for h in _EXAMPLE_L2_INFRA_IMPORT_HINTS):
+        return "infra-import"
+    if any(h in low for h in _EXAMPLE_L2_CONFIG_ABSENCE_HINTS):
+        return "config-absence"
+    return "suspect"
+
+
+def _example_l2_gate_report_only(item: Any, report: Any) -> None:  # typing-smell: ignore[explicit-any]: pytest Item + TestReport
+    """REPORT-ONLY: log a categorized sidecar line for any skip/xfail that
+    fires on an example-L2 run. Does NOT flip the outcome (see the block
+    comment above). Sidecar-safe — swallows its own errors so it can never
+    break a test. Requires ``RECON_GEN_RUN_DIR`` (chain runs) — direct
+    ``pytest`` invocations are a no-op."""
+    if not (report.skipped or getattr(report, "wasxfail", False)):
+        return
+    if not _example_l2_run(item):
+        return
+    layer = RECON_GEN_LAYER.get_or_none() or "unknown"
+    if layer not in _EXAMPLE_L2_GATED_LAYERS:
+        return
+    try:
+        run_dir_path = RECON_GEN_RUN_DIR.get_or_none()
+    except EnvVarInvalid:
+        return
+    if not run_dir_path:
+        return
+    reason = _example_l2_reason_text(report)
+    category = _example_l2_category(item, reason)
+    worker_id = os.environ.get("PYTEST_XDIST_WORKER", "")
+    suffix = f"-{worker_id}" if worker_id else ""
+    record = {
+        "nodeid": report.nodeid,
+        "phase": report.when,
+        "category": category,
+        "reason": reason,
+        "layer": layer,
+    }
+    try:
+        gate_dir = Path(str(run_dir_path)) / "example_l2_gate"
+        gate_dir.mkdir(parents=True, exist_ok=True)
+        with (gate_dir / f"{layer}{suffix}.jsonl").open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record) + "\n")
+    except OSError:
+        pass
+
+
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(item: Any, call: Any) -> Generator[None, Any, None]:
     """Y.2.gate.c.2 — write per-test timing JSONL when the runner is driving.
@@ -358,6 +493,9 @@ def pytest_runtest_makereport(item: Any, call: Any) -> Generator[None, Any, None
     """
     outcome = yield
     report = outcome.get_result()
+    # DY.7.1 — report-only skip/xfail gate. BEFORE the call-phase gate below
+    # because a marker-skip (@pytest.mark.skip) reports in the SETUP phase.
+    _example_l2_gate_report_only(item, report)
     if report.when != "call":
         return
 
@@ -454,6 +592,7 @@ _CB_MARK_DOCS = {
     "inputs": "Cross-test artifact dependencies (pytest nodeids of tests whose artifacts this test reads). Collection-time-validated.",
     "serial": "Test must run with `-n 1` (no parallel workers). Carry a reason argument explaining why — usually surfaces a `@writes()`-without-isolation debt entry.",
     "isolation_scope": "Cross-tier isolation key (CB.7 refactor). Args: (scope_value, role) where role is 'producer' or 'consumer'. The `isolated_cfg` fixture uses scope_value as the prefix suffix.",
+    "example_l2_exempt": "DY.7.1 — sanctioned skip/xfail on a controlled example L2 (spec_example / sasquatch_pr). reason= MUST start with 'fuzz:' or 'engine-limit:' — any other prefix is an invalid exemption the gate still flags. A skip/xfail on an example L2 is a coverage GAP by default; this marker is the explicit, reason-tagged escape hatch.",
 }
 
 

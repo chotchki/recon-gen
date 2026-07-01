@@ -85,17 +85,6 @@ def _sql_and_params_for(
     return ds.sql, list(ds.dataset_params)
 
 
-@pytest.mark.xfail(
-    reason=(
-        "Sasquatch L1 dashboard render flake (task backlog #466). The "
-        "Leaf Account Drift table intermittently renders zero rows on the "
-        "first browser-layer run after a fresh deploy even though the drift "
-        "matview + L1 data are present (db smoke + api layer pass) — a "
-        "QS-side render/timing issue, not a data issue. (The app2 leg "
-        "doesn't share the flake; xfail is strict=False so its XPASS is OK.)"
-    ),
-    strict=False,
-)
 def test_date_range_filter_narrows_drift_sheet(l1_dashboard_driver: tuple["DashboardDriver", str]) -> None:
     """Setting the date range to a 2099 future window must empty (or at
     least shrink) the Leaf Account Drift table — no L2 instance plants

@@ -113,19 +113,28 @@ def _pick_internal_leaf_role() -> str:
     internal-leaf account; the role NAME is incidental but a parent_role
     IS NOT NULL leaf MUST exist because the matviews filter on
     `account_parent_role IS NOT NULL`. spec_example's L2 carries
-    `CustomerSubledger` (templated leaves under a parent_role);
-    sasquatch's L2 models only top-level GL accounts with no parents,
-    so anomaly + money_trail are structurally unsupportable there.
-    pytest.skip is the right tool for "L2 doesn't model this invariant
-    shape" — auto-enables when a future L2 grows leaves; until then it
-    keeps the matrix green on shapes that can't carry the assertion.
+    `CustomerSubledger` (templated leaves under a parent_role).
+
+    DY.7.2 — sasquatch DOES model internal-leaf accounts, but as
+    `account_templates` (CustomerDDA / MerchantDDA / ZBASubAccount, each
+    scope=internal with a parent_role) that materialize to concrete
+    `cust-NNNN` accounts only at seed time — so they're absent from
+    `_INSTANCE.accounts`. Scan the templates too (matching
+    `anomaly_pair_for_l2` + the `find_internal_with_role` template
+    fallback) so the anomaly / money_trail producers RUN on sasquatch
+    instead of skipping. The `pytest.skip` now fires only for an L2 that
+    declares NEITHER a leaf account NOR a leaf-shaped template.
     """
     for a in _INSTANCE.accounts:
         if a.scope == SCOPE_INTERNAL and a.parent_role is not None:
             return str(a.role)
+    for t in _INSTANCE.account_templates:
+        if t.scope == SCOPE_INTERNAL and t.parent_role is not None:
+            return str(t.role)
     pytest.skip(
-        "L2 instance has no internal-leaf account (no `parent_role IS NOT NULL` "
-        "rows); anomaly + money_trail matviews require leaf recipients."
+        "L2 instance has no internal-leaf account OR account_template (no "
+        "`parent_role IS NOT NULL` rows); anomaly + money_trail matviews "
+        "require leaf recipients."
     )
 
 
@@ -170,20 +179,14 @@ def seeded_l2_db(isolated_cfg: "Config") -> None:
     """
     from tests.e2e._seed_helpers import apply_db_seed
 
-    # CB.14 followup — clear `RECON_GEN_DB_READ_ONLY` before this
-    # module-scoped fixture's connect_demo_db. The runner sets the env
-    # for du_lo cells per the pre-CB.7 cell-shared-DB model, but this
-    # fixture is itself the seeder; RO mode rejects connect because the
-    # isolated cfg's per-worker DB file doesn't exist until seed runs.
-    # Module-scoped fixture so monkeypatch (function-scoped) doesn't fit
-    # — direct os.environ.pop persists only for the seed; the next
-    # test's reader-shape uses are unaffected.
-    import os
-    # Single pop covers both — the EnvVar registry's legacy_name
-    # fallback handles QS_GEN_DB_READ_ONLY transparently, so the
-    # downstream readers see "unset" iff the canonical name is unset.
-    os.environ.pop("RECON_GEN_DB_READ_ONLY", None)
-    conn = connect_demo_db(isolated_cfg)
+    # DY.2 — this fixture is itself the seeder; the runner sets
+    # RECON_GEN_DB_READ_ONLY=1 for du_lo cells, but RO mode rejects the
+    # connect because the isolated per-worker DuckDB file doesn't exist
+    # until this seed creates it. Explicit read_only=False wins over the
+    # env for THIS connection only — cleaner than the old os.environ.pop,
+    # which mutated the process-wide env for the rest of the worker's
+    # readers (they must stay read-only).
+    conn = connect_demo_db(isolated_cfg, read_only=False)
     try:
         apply_db_seed(
             conn, _INSTANCE,

@@ -1772,7 +1772,7 @@ class _AsyncDuckdbPool:
     parallel requests doesn't pile up handles.
     """
 
-    def __init__(self, path: str, *, max_size: int = 10) -> None:
+    def __init__(self, path: str, *, max_size: int = 10, read_only: bool | None = None) -> None:
         import duckdb  # noqa: PLC0415
         from recon_gen.common.env_keys import RECON_GEN_DB_READ_ONLY  # noqa: PLC0415
 
@@ -1800,7 +1800,19 @@ class _AsyncDuckdbPool:
         # process safety reason `connect_demo_db` does. The runner sets
         # this for the App2 pytest tier's DuckDB cells so xdist workers
         # share read access against the seeded .duckdb file.
-        self._read_only = bool(RECON_GEN_DB_READ_ONLY.get_or_none())
+        #
+        # DY.6 — an explicit `read_only=` arg wins over the env (mirrors
+        # connect_demo_db). An ISOLATED-writer server — the trainer-dogfood
+        # Studio server on its OWN per-worker file — passes read_only=False
+        # so its session-start/deploy WRITES aren't bound by the
+        # shared-base-reader env (which must NOT bind a writer on its own
+        # file). When None, the env default holds so the shared-base
+        # readers still open read-only. See
+        # [[project_duckdb_test_isolation_is_per_file]].
+        self._read_only = (
+            read_only if read_only is not None
+            else bool(RECON_GEN_DB_READ_ONLY.get_or_none())
+        )
         # Open the root eagerly so a bad path / corrupt file surfaces
         # at construction (server startup) rather than first request.
         self._root: Any = duckdb.connect(path, read_only=self._read_only)  # typing-smell: ignore[explicit-any]: duckdb.DuckDBPyConnection has no PEP 561 stubs at strict
@@ -1943,7 +1955,7 @@ class _AsyncDuckdbPool:
 
 
 async def make_connection_pool(
-    cfg: Config, *, max_size: int = 10,
+    cfg: Config, *, max_size: int = 10, read_only: bool | None = None,
 ) -> AsyncConnectionPool:
     """Open an ``AsyncConnectionPool`` against ``cfg.db.url``.
 
@@ -1960,6 +1972,12 @@ async def make_connection_pool(
       max_size: Pool size cap. Defaults to 10 — enough for a typical
         sheet's visuals to fetch concurrently without queueing. Tune
         upward for high-fan-in dashboards or multi-user demo loads.
+      read_only: DuckDB-only override (DY.6). ``None`` = env default
+        (``RECON_GEN_DB_READ_ONLY``); ``False`` forces read-write for an
+        isolated-writer server (the trainer-dogfood Studio server owns
+        its own per-worker file + must WRITE the v overlay). Ignored for
+        PG/Oracle — their pools are always read-write and MVCC handles
+        concurrent access, so there is no read-only mode to select.
 
     Raises:
       ImportError: matching async driver isn't installed
@@ -2018,7 +2036,7 @@ async def make_connection_pool(
             ) from e
         del _duckdb_probe
         return _AsyncDuckdbPool(
-            duckdb_path(cfg.db.url), max_size=max_size,
+            duckdb_path(cfg.db.url), max_size=max_size, read_only=read_only,
         )
     raise ValueError(
         f"Unknown dialect {cfg.db.dialect!r}. "

@@ -84,7 +84,9 @@ def seeded_l2_db(isolated_cfg: "Config") -> None:
     against the per-(module, worker) isolated cfg."""
     from tests.e2e._seed_helpers import apply_db_seed
 
-    conn = connect_demo_db(isolated_cfg)
+    # DY.2 — read_only=False so the DuckDB seed creates the per-worker
+    # file; the runner's RECON_GEN_DB_READ_ONLY=1 must not bind the seeder.
+    conn = connect_demo_db(isolated_cfg, read_only=False)
     try:
         apply_db_seed(
             conn, _INSTANCE,

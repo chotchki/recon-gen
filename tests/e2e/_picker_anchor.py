@@ -41,11 +41,10 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-import psycopg
-
 from recon_gen.common.browser.helpers import record_sql_trace
 from recon_gen.common.config import Config
 from recon_gen.common.dataset_contract import BuiltDataset, DatasetContract
+from recon_gen.common.db import connect_demo_db
 from recon_gen.common.html._sql_executor import apply_dataset_param_defaults
 from recon_gen.common.l2 import L2Instance
 from recon_gen.common.sql.dialect import Dialect
@@ -197,10 +196,12 @@ def fetch_anchor_row(
     Only Postgres + Oracle are wired; the AW-target browser e2e cells
     only run against those two dialects.
     """
-    if cfg.db.dialect not in (Dialect.POSTGRES, Dialect.ORACLE):
+    if cfg.db.dialect not in (
+        Dialect.POSTGRES, Dialect.ORACLE, Dialect.DUCKDB,
+    ):
         raise RuntimeError(
             f"fetch_anchor_row: unsupported dialect {cfg.db.dialect!r} — "
-            f"only Postgres + Oracle wired"
+            f"only Postgres + Oracle + DuckDB wired"
         )
     if not cfg.db.url:
         raise RuntimeError("fetch_anchor_row: cfg.db.url is unset")
@@ -212,7 +213,9 @@ def fetch_anchor_row(
     )
     order_clause = f"ORDER BY {spec.anchor_order} " if spec.anchor_order else ""
     limit_clause = (
-        "LIMIT 1" if cfg.db.dialect is Dialect.POSTGRES else "FETCH FIRST 1 ROWS ONLY"
+        "FETCH FIRST 1 ROWS ONLY"
+        if cfg.db.dialect is Dialect.ORACLE
+        else "LIMIT 1"  # Postgres + DuckDB
     )
     # AA.A.993 — anchor_where_template intersects the anchor universe
     # with a narrower dropdown universe when the dataset's own SQL
@@ -226,11 +229,27 @@ def fetch_anchor_row(
     )
     wrapped = f"SELECT * FROM ({resolved}) sub {where_clause}{order_clause}{limit_clause}"
 
-    with psycopg.connect(cfg.db.url, connect_timeout=60) as conn:
-        with conn.cursor() as cur:
-            cur.execute(wrapped)  # pyright: ignore[reportCallIssue, reportArgumentType]: psycopg.execute overload tolerance
+    # DB-agnostic via connect_demo_db (was hardcoded psycopg → RuntimeError
+    # on DuckDB). This is a SHARED-BASE READER: the app2_browser dashboard
+    # server's pool (make_connection_pool, no read_only override) + sibling
+    # xdist workers all hold the ONE pre-seeded base file read-only, and
+    # DuckDB requires every cross-process handle to agree — so this read
+    # inherits the env-default read-only too (RECON_GEN_DB_READ_ONLY=1 in
+    # app2_browser duck cells), matching dm_cascade. A read_only=False here
+    # would grab a write lock and block the siblings. No-op on PG/Oracle
+    # (MVCC). ``d[0]`` (DB-API name-at-index-0) is portable — psycopg /
+    # oracledb Column carry ``.name`` but DuckDB description rows are tuples.
+    conn = connect_demo_db(cfg)
+    try:
+        cur = conn.cursor()
+        try:
+            cur.execute(wrapped)
             row = cur.fetchone()
-            cols = [d.name for d in cur.description] if cur.description else []
+            cols = [d[0] for d in cur.description] if cur.description else []
+        finally:
+            cur.close()
+    finally:
+        conn.close()
 
     # AA.A.qs-triage.5.followon — record the anchor SQL + result to the
     # failure-capture bundle. Without it, a downstream picker failure

@@ -42,6 +42,7 @@ from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from recon_gen.common.db import (
+    SyncConnection,
     connect_demo_db,
     execute_script,
     fetch_one_required,
@@ -90,6 +91,32 @@ async def _emit(
         await dev_log(stamped)
         return
     await dev_log(payload)
+
+
+def _close_if_owned(
+    conn: SyncConnection, injected_conn: SyncConnection | None,
+) -> None:
+    """Close ``conn`` only when this step opened it (``injected_conn is
+    None``). DY.7.3 — when ``run_deploy_pipeline`` injects one shared
+    read-write connection, IT owns the lifecycle; a step closing an
+    injected conn would yank the handle out from under the next step.
+    Mirrors the open pattern at each step's ``connect_demo_db`` fallback.
+    The injection exists because the sync deploy steps used to each open
+    a fresh ``connect_demo_db(cfg)`` (read-only via the runner env) that
+    conflicted with the Studio server's read-write async pool on DuckDB
+    ("same file, different configuration"); PG/Oracle masked it via MVCC.
+    """
+    if injected_conn is None:
+        conn.close()
+
+
+def _open_deploy_conn(cfg: Config) -> SyncConnection:
+    """Open ``run_deploy_pipeline``'s owned read-write connection (DY.7.3).
+    Read-write so it coexists with the Studio server's read-write async
+    pool on DuckDB (same-config instance sharing) and so the wipe /
+    generator / matview writes succeed. Opened on the threadpool by the
+    caller since a PG/Oracle connect is a blocking network round-trip."""
+    return connect_demo_db(cfg, read_only=False)
 
 
 async def step_1_etl_hook(
@@ -256,6 +283,7 @@ async def step_2_wipe(
     *,
     dev_log: DevLogWriter | None = None,
     synthetic_only: bool = False,
+    injected_conn: SyncConnection | None = None,
 ) -> tuple[int, int]:
     """Empty ``<prefix>_transactions`` + ``<prefix>_daily_balances``.
 
@@ -327,7 +355,7 @@ async def step_2_wipe(
 
     def _run_wipe() -> tuple[int, int]:
         nonlocal schema_emitted, auto_marked
-        conn = connect_demo_db(cfg)
+        conn = injected_conn if injected_conn is not None else connect_demo_db(cfg, read_only=False)
         try:
             cur = conn.cursor()
             try:
@@ -380,7 +408,7 @@ async def step_2_wipe(
             finally:
                 cur.close()
         finally:
-            conn.close()
+            _close_if_owned(conn, injected_conn)
 
     tx_count, bal_count = await asyncio.to_thread(_run_wipe)
     if schema_emitted:
@@ -421,6 +449,7 @@ async def step_3_generator(
     instance: L2Instance,
     *,
     dev_log: DevLogWriter | None = None,
+    injected_conn: SyncConnection | None = None,
 ) -> tuple[int, int]:
     """Run the synthetic-data generator, execute its SQL against the
     demo DB, return per-base-table row counts.
@@ -454,10 +483,10 @@ async def step_3_generator(
         "seed": tg.seed,
     })
 
-    sql = _build_generator_sql(cfg, instance)
+    sql = _build_generator_sql(cfg, instance, injected_conn=injected_conn)
 
     def _run_apply() -> tuple[int, int]:
-        conn = connect_demo_db(cfg)
+        conn = injected_conn if injected_conn is not None else connect_demo_db(cfg, read_only=False)
         try:
             cur = conn.cursor()
             try:
@@ -472,7 +501,7 @@ async def step_3_generator(
             finally:
                 cur.close()
         finally:
-            conn.close()
+            _close_if_owned(conn, injected_conn)
 
     tx, bal = await asyncio.to_thread(_run_apply)
     await _emit(dev_log, {
@@ -483,7 +512,10 @@ async def step_3_generator(
     return tx, bal
 
 
-def _build_generator_sql(cfg: Config, instance: L2Instance) -> str:
+def _build_generator_sql(
+    cfg: Config, instance: L2Instance,
+    *, injected_conn: SyncConnection | None = None,
+) -> str:
     """Pick the SQL builder for ``cfg.test.generator.scope``.
 
     Split out so unit tests can exercise the dispatch + the NotImplemented
@@ -497,7 +529,7 @@ def _build_generator_sql(cfg: Config, instance: L2Instance) -> str:
     + Studio when up_to == window_end) ⇒ no truncation, byte-identical
     to legacy emit.
     """
-    sql = _emit_scope_sql(cfg, instance)
+    sql = _emit_scope_sql(cfg, instance, injected_conn=injected_conn)
     cutoff = cfg.test.generator.cutoff_date
     if cutoff is not None:
         # Trim to date <= cutoff. transactions.posting is TIMESTAMP,
@@ -520,7 +552,10 @@ def _build_generator_sql(cfg: Config, instance: L2Instance) -> str:
     return sql
 
 
-def _emit_scope_sql(cfg: Config, instance: L2Instance) -> str:
+def _emit_scope_sql(
+    cfg: Config, instance: L2Instance,
+    *, injected_conn: SyncConnection | None = None,
+) -> str:
     """Inner dispatch — picks the per-scope SQL emitter without the
     cutoff post-processing. Split from ``_build_generator_sql`` so the
     cutoff truncation lives in exactly one place regardless of scope.
@@ -567,7 +602,7 @@ def _emit_scope_sql(cfg: Config, instance: L2Instance) -> str:
         # No plants in this mode: the operator's data is what they want
         # to see; we just patch the gaps so dashboards aren't empty.
         from recon_gen.common.l2.seed import emit_baseline_seed
-        covered = _covered_rail_names(cfg, instance)
+        covered = _covered_rail_names(cfg, instance, injected_conn=injected_conn)
         return emit_baseline_seed(
             instance,
             prefix=cfg.db.table_prefix,
@@ -655,6 +690,7 @@ def _only_template_rails(
 
 def _covered_rail_names(
     cfg: Config, instance: L2Instance,
+    *, injected_conn: SyncConnection | None = None,
 ) -> frozenset[Identifier]:
     """Return the set of rail names that already have rows in the demo
     DB's ``<prefix>_transactions`` table.
@@ -665,7 +701,7 @@ def _covered_rail_names(
     yet, fill the gap with baseline".
     """
     p = cfg.db.table_prefix  # Z.C — was instance.instance
-    conn = connect_demo_db(cfg)
+    conn = injected_conn if injected_conn is not None else connect_demo_db(cfg, read_only=False)
     try:
         cur = conn.cursor()
         try:
@@ -680,7 +716,7 @@ def _covered_rail_names(
         finally:
             cur.close()
     finally:
-        conn.close()
+        _close_if_owned(conn, injected_conn)
 
 
 # X.4.i.2 — Default account-role set for derive_balances. Control accounts
@@ -698,6 +734,7 @@ async def step_3_5_derive_balances(
     instance: L2Instance,
     *,
     dev_log: DevLogWriter | None = None,
+    injected_conn: SyncConnection | None = None,
 ) -> int:
     """X.4.i.2 — re-derive ``<prefix>_daily_balances`` from
     ``<prefix>_transactions`` for the configured account roles.
@@ -755,7 +792,7 @@ async def step_3_5_derive_balances(
     else:
         bday_end = "CAST(CAST(posting AS DATE) AS TIMESTAMP) + INTERVAL '1 day'"
 
-    conn = connect_demo_db(cfg)
+    conn = injected_conn if injected_conn is not None else connect_demo_db(cfg, read_only=False)
     rows_written = 0
     try:
         cur = conn.cursor()
@@ -814,7 +851,7 @@ async def step_3_5_derive_balances(
         finally:
             cur.close()
     finally:
-        conn.close()
+        _close_if_owned(conn, injected_conn)
 
     await _emit(dev_log, {
         "event": "deploy:step3_5:derive:done",
@@ -832,6 +869,7 @@ async def step_4_matviews(
     instance: L2Instance,
     *,
     dev_log: DevLogWriter | None = None,
+    injected_conn: SyncConnection | None = None,
 ) -> None:
     """Run ``refresh_matviews_sql(instance, dialect=cfg.db.dialect)`` against
     the demo DB.
@@ -855,7 +893,7 @@ async def step_4_matviews(
     })
 
     def _run_refresh() -> None:
-        conn = connect_demo_db(cfg)
+        conn = injected_conn if injected_conn is not None else connect_demo_db(cfg, read_only=False)
         try:
             # BV.6 — PG REFRESH MATERIALIZED VIEW CONCURRENTLY (DL.15)
             # cannot run inside a transaction block; psycopg's default
@@ -885,7 +923,7 @@ async def step_4_matviews(
                 if cfg.db.dialect is Dialect.POSTGRES and prior_autocommit is not None:
                     conn.autocommit = prior_autocommit  # pyright: ignore[reportAttributeAccessIssue]: psycopg-specific attribute restore (per-call autocommit per BV.6-6)
         finally:
-            conn.close()
+            _close_if_owned(conn, injected_conn)
 
     await asyncio.to_thread(_run_refresh)
     await _emit(dev_log, {
@@ -1086,105 +1124,135 @@ async def run_deploy_pipeline(
             ),
         })
 
-    # BS.4: wipe FIRST so etl_hook + generator write into clean state.
-    # CZ.3: ``synthetic_only_wipe`` plumbs the standalone-mode safety gate
-    # through — Trainer reset with ``cfg.app2.etl_hook is None`` passes True so
-    # the wipe narrows to ``metadata.source='training'`` (CZ.2 stamp);
-    # unmarked rows (presumed real customer data) survive. Default False
-    # preserves the ETL-mode full-TRUNCATE semantics.
-    tx_del, bal_del = await step_2_wipe(
-        pipeline_cfg,
-        instance,
-        dev_log=_tee,
-        synthetic_only=synthetic_only_wipe,
+    # DY.7.3 — own ONE read-write connection for the pipeline's in-process
+    # DB steps. Was: each step opened a fresh connect_demo_db(cfg) (read-only
+    # via the runner env), which conflicted with the Studio server's
+    # read-write async pool on DuckDB ("same file, different configuration").
+    # A read-write handle COEXISTS with the read-write pool in-process
+    # (DuckDB shares the same-config instance) and lets the wipe / generator
+    # / matview writes succeed. Threaded through the steps as injected_conn;
+    # released around step_1's subprocess bracket (below) so a real etl_hook
+    # subprocess can take the DuckDB write lock cross-process.
+    deploy_conn: SyncConnection | None = await asyncio.to_thread(
+        _open_deploy_conn, cfg,
     )
-
-    # CO.x — release the dashboards' pool lock around step_1_etl_hook so
-    # the operator's cfg.app2.etl_hook subprocess can acquire the DuckDB
-    # write lock. PG / Oracle pools don't need this (concurrent writers
-    # are fine on those engines); the caller passes None and the bracket
-    # no-ops via nullcontext. The pool's released_for_subprocess context
-    # manager holds its lifecycle lock across the whole window so
-    # concurrent /deploy + /training/reset handlers serialize through
-    # this bracket; the close drains in-flight cursors first; the reopen
-    # ALWAYS fires (even on subprocess failure or CancelledError) so the
-    # pool comes back online for the pipeline's remaining same-process
-    # steps (generator / matview refresh) and subsequent dashboards
-    # queries. Same-process connect_demo_db inside this process doesn't
-    # need the bracket — only the cross-process subprocess does.
-    bracketed = subprocess_lock_bracket is not None
     try:
-        bracket: AbstractAsyncContextManager[None] = (
-            subprocess_lock_bracket() if subprocess_lock_bracket is not None
-            else nullcontext()
+        # BS.4: wipe FIRST so etl_hook + generator write into clean state.
+        # CZ.3: ``synthetic_only_wipe`` plumbs the standalone-mode safety gate
+        # through — Trainer reset with ``cfg.app2.etl_hook is None`` passes True so
+        # the wipe narrows to ``metadata.source='training'`` (CZ.2 stamp);
+        # unmarked rows (presumed real customer data) survive. Default False
+        # preserves the ETL-mode full-TRUNCATE semantics.
+        tx_del, bal_del = await step_2_wipe(
+            pipeline_cfg,
+            instance,
+            dev_log=_tee,
+            synthetic_only=synthetic_only_wipe,
+            injected_conn=deploy_conn,
         )
-        if bracketed:
-            await _emit(_tee, {"event": "deploy:step1:locks_bracket_enter"})
-        async with bracket:
-            rc = await step_1_etl_hook(pipeline_cfg, dev_log=_tee)
-    finally:
-        if bracketed:
-            await _emit(_tee, {"event": "deploy:step1:locks_bracket_exit"})
-    if rc != 0:
-        await _emit(_tee, {
-            "event": "deploy:halt",
-            "reason": (
-                f"etl_hook returned exit_code={rc}; "
-                "demo DB left in partial state (post-wipe + whatever "
-                "the hook wrote before failing)"
-            ),
-        })
+
+        # CO.x — release the dashboards' pool lock around step_1_etl_hook so
+        # the operator's cfg.app2.etl_hook subprocess can acquire the DuckDB
+        # write lock. PG / Oracle pools don't need this (concurrent writers
+        # are fine on those engines); the caller passes None and the bracket
+        # no-ops via nullcontext. The pool's released_for_subprocess context
+        # manager holds its lifecycle lock across the whole window so
+        # concurrent /deploy + /training/reset handlers serialize through
+        # this bracket; the close drains in-flight cursors first; the reopen
+        # ALWAYS fires (even on subprocess failure or CancelledError) so the
+        # pool comes back online for the pipeline's remaining same-process
+        # steps (generator / matview refresh) and subsequent dashboards
+        # queries.
+        # DY.7.3 — the owned deploy connection is ALSO an in-process handle,
+        # so close it before the bracket (and reopen after) for the same
+        # reason: a cross-process etl_hook subprocess needs the DuckDB file
+        # exclusively. Standalone / Trainer skips step_1 (etl_hook is None),
+        # making this a harmless close+reopen round-trip.
+        await asyncio.to_thread(deploy_conn.close)
+        deploy_conn = None
+        bracketed = subprocess_lock_bracket is not None
+        try:
+            bracket: AbstractAsyncContextManager[None] = (
+                subprocess_lock_bracket() if subprocess_lock_bracket is not None
+                else nullcontext()
+            )
+            if bracketed:
+                await _emit(_tee, {"event": "deploy:step1:locks_bracket_enter"})
+            async with bracket:
+                rc = await step_1_etl_hook(pipeline_cfg, dev_log=_tee)
+        finally:
+            if bracketed:
+                await _emit(_tee, {"event": "deploy:step1:locks_bracket_exit"})
+        if rc != 0:
+            await _emit(_tee, {
+                "event": "deploy:halt",
+                "reason": (
+                    f"etl_hook returned exit_code={rc}; "
+                    "demo DB left in partial state (post-wipe + whatever "
+                    "the hook wrote before failing)"
+                ),
+            })
+            # deploy_conn is None here (closed before the bracket, not
+            # reopened) — the finally skips its close, no leak.
+            return DeploySummary(
+                halted=True,
+                halt_reason=(
+                    f"etl_hook returned exit_code={rc}; "
+                    "demo DB left in partial state (post-wipe + whatever "
+                    "the hook wrote before failing)"
+                ),
+                step1_etl_hook_exit_code=rc,
+                step2_wipe_transactions_deleted=tx_del,
+                step2_wipe_daily_balances_deleted=bal_del,
+                events=tuple(captured),
+            )
+
+        # DY.7.3 — past the etl_hook gate: reopen the owned conn for the
+        # remaining in-process write steps (generator / derive / matviews).
+        deploy_conn = await asyncio.to_thread(_open_deploy_conn, cfg)
+        tx_after, bal_after = await step_3_generator(
+            pipeline_cfg, instance, dev_log=_tee, injected_conn=deploy_conn,
+        )
+        derived_rows = await step_3_5_derive_balances(
+            pipeline_cfg, instance, dev_log=_tee, injected_conn=deploy_conn,
+        )
+
+        # BU.1.8 — apply post-pipeline overlay layers (L2_DEMO_GAP_OVERLAY,
+        # future Trainer-mode amplification, etc) BEFORE matview refresh so
+        # the matviews see the overlay'd state.
+        if post_pipeline_overlays:
+            ctx = OverlayContext(
+                cfg=pipeline_cfg, instance=instance, dev_log=_tee,
+            )
+            for layer in post_pipeline_overlays:
+                # cast: post_pipeline_overlays carries OverlayLayer objects
+                # widened to object via the tuple-comprehension narrowing.
+                from recon_gen.common.l2.pipeline_overlays import (  # noqa: PLC0415
+                    OverlayLayer,
+                )
+                assert isinstance(layer, OverlayLayer), (
+                    f"post_pipeline_overlays must hold OverlayLayer, got {type(layer)}"
+                )
+                await layer.apply(ctx)
+
+        await step_4_matviews(
+            pipeline_cfg, instance, dev_log=_tee, injected_conn=deploy_conn,
+        )
+        new_gen_id = await step_5_reload(dev_log=_tee)
+
         return DeploySummary(
-            halted=True,
-            halt_reason=(
-                f"etl_hook returned exit_code={rc}; "
-                "demo DB left in partial state (post-wipe + whatever "
-                "the hook wrote before failing)"
-            ),
+            halted=False,
+            halt_reason=None,
             step1_etl_hook_exit_code=rc,
             step2_wipe_transactions_deleted=tx_del,
             step2_wipe_daily_balances_deleted=bal_del,
+            step3_generator_transactions_after=tx_after,
+            step3_generator_daily_balances_after=bal_after,
+            step3_5_derived_balance_rows=derived_rows,
+            step4_matviews_done=True,
+            step5_data_generation_id=new_gen_id,
             events=tuple(captured),
         )
-
-    tx_after, bal_after = await step_3_generator(
-        pipeline_cfg, instance, dev_log=_tee,
-    )
-    derived_rows = await step_3_5_derive_balances(
-        pipeline_cfg, instance, dev_log=_tee,
-    )
-
-    # BU.1.8 — apply post-pipeline overlay layers (L2_DEMO_GAP_OVERLAY,
-    # future Trainer-mode amplification, etc) BEFORE matview refresh so
-    # the matviews see the overlay'd state.
-    if post_pipeline_overlays:
-        ctx = OverlayContext(
-            cfg=pipeline_cfg, instance=instance, dev_log=_tee,
-        )
-        for layer in post_pipeline_overlays:
-            # cast: post_pipeline_overlays carries OverlayLayer objects
-            # widened to object via the tuple-comprehension narrowing.
-            from recon_gen.common.l2.pipeline_overlays import (  # noqa: PLC0415
-                OverlayLayer,
-            )
-            assert isinstance(layer, OverlayLayer), (
-                f"post_pipeline_overlays must hold OverlayLayer, got {type(layer)}"
-            )
-            await layer.apply(ctx)
-
-    await step_4_matviews(pipeline_cfg, instance, dev_log=_tee)
-    new_gen_id = await step_5_reload(dev_log=_tee)
-
-    return DeploySummary(
-        halted=False,
-        halt_reason=None,
-        step1_etl_hook_exit_code=rc,
-        step2_wipe_transactions_deleted=tx_del,
-        step2_wipe_daily_balances_deleted=bal_del,
-        step3_generator_transactions_after=tx_after,
-        step3_generator_daily_balances_after=bal_after,
-        step3_5_derived_balance_rows=derived_rows,
-        step4_matviews_done=True,
-        step5_data_generation_id=new_gen_id,
-        events=tuple(captured),
-    )
+    finally:
+        if deploy_conn is not None:
+            await asyncio.to_thread(deploy_conn.close)

@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from recon_gen.common.intervals import DateInterval
+from recon_gen.common.l2.primitives import SCOPE_INTERNAL
 from recon_gen.common.sql import Dialect
 
 if TYPE_CHECKING:
@@ -42,31 +43,60 @@ def anomaly_pair_for_l2(instance: "L2Instance") -> tuple[str, str]:
     Pre-CS.12 the tests hardcoded ``("CustomerSubledger",
     "CustomerSubledger")`` — fine on spec_example (which declares that
     role) but broke on sasquatch_pr (whose closest leaf-money role is
-    ``CustomerDDA``). Now the helper walks the instance once + returns
-    the first match from a preference order:
+    ``CustomerDDA``). CS.12 walked the instance for the first of a
+    NAME preference order (``CustomerSubledger`` → ``CustomerDDA``).
 
-    1. ``CustomerSubledger`` — spec_example default
-    2. ``CustomerDDA`` — sasquatch_pr equivalent
+    DY.5 (backlog #239) broadens that to STRUCTURAL discovery with the
+    name-preference kept as a determinism head:
 
-    If neither role exists on the instance the helper skips the test
-    with a clear message naming the candidates, so an integrator with
-    a custom L2 sees the right next step (add ``CustomerSubledger`` or
-    ``CustomerDDA`` to the schema, OR extend this helper's preference
-    list to match their topology).
+    1. If the L2 declares an internal-leaf account under
+       ``CustomerSubledger`` or (failing that) ``CustomerDDA``, return
+       it — the default L2s stay pinned to their known role so nothing
+       about their scenario shifts.
+    2. Otherwise fall back to the FIRST internal-leaf role the L2
+       declares (scope ``internal`` with a non-null ``parent_role``) —
+       mirroring the db tier's structural ``_pick_internal_leaf_role``
+       so a custom L2 with a differently-NAMED leaf-money role no longer
+       skips just because it doesn't use our vocabulary.
+
+    A usable role needs an internal-LEAF account: the recipient / hop
+    leg calls ``find_internal_with_role(..., must_be_leaf=True)`` and the
+    returned ``(role, role)`` self-pair reuses it for the sender leg.
+
+    Only when the L2 declares NO internal-leaf account at all does this
+    skip — a genuine data-conditional (the anomaly / money-trail
+    invariants don't apply to a shape with no leaf-money account), not a
+    coverage gap.
     """
-    candidates = ("CustomerSubledger", "CustomerDDA")
-    declared_roles = {
-        getattr(a, "role", None) for a in instance.accounts
-    }
-    for role in candidates:
-        if role in declared_roles:
+    preferred = ("CustomerSubledger", "CustomerDDA")
+    leaf_roles = [
+        a.role
+        for a in instance.accounts
+        if a.scope == SCOPE_INTERNAL and a.parent_role is not None
+    ]
+    # DY.7.2 — template-driven L2s (sasquatch_pr) declare their internal-LEAF
+    # accounts as account_templates (materialized to cust-NNNN only at seed
+    # time), so they're absent from instance.accounts and the scan above finds
+    # nothing → the pair used to SKIP on sasquatch. Include the template roles
+    # so anomaly / money-trail RUN. `find_internal_with_role` has the matching
+    # template fallback to resolve a representative account for the role.
+    leaf_roles += [
+        t.role
+        for t in instance.account_templates
+        if t.scope == SCOPE_INTERNAL and t.parent_role is not None
+    ]
+    for role in preferred:
+        if role in leaf_roles:
             return role, role
+    if leaf_roles:
+        return leaf_roles[0], leaf_roles[0]
     pytest.skip(
-        f"L2 instance declares no compatible anomaly sender role "
-        f"(checked: {candidates}); add one of those role names to the "
-        f"L2 yaml's accounts list, or extend "
-        f"tests/e2e/_agreement_helpers.py::anomaly_pair_for_l2's "
-        f"preference order to match this L2's topology."
+        "L2 instance declares no internal-leaf account OR account_template "
+        "(scope='internal' with a non-null parent_role) to anchor an anomaly "
+        "/ money-trail scenario — the invariant genuinely doesn't apply to an "
+        f"L2 with no leaf-money account (preferred roles checked: {preferred}). "
+        "This is a data-conditional skip, not a coverage gap (DY.5 / DY.7.2 / "
+        "#239)."
     )
 
 
@@ -103,6 +133,10 @@ def l2_yaml_for_test() -> Path:
 _DIALECT_CONFIG_PATHS: dict[str, Path] = {
     "postgres": Path("run/config.postgres.yaml"),
     "oracle": Path("run/config.oracle.yaml"),
+    # DY.2 — DuckDB joins the agreement matrix. Without this entry the
+    # `_DIALECT_CONFIG_PATHS[dialect_name]` fallback KeyErrors on the
+    # `duckdb` param whenever no env cfg matches.
+    "duckdb": Path("run/config.duckdb.yaml"),
 }
 
 
@@ -166,6 +200,7 @@ def load_dialect_cfg(dialect_name: str) -> "tuple[Config, Path, Dialect]":
         cfg_dialect = (
             "postgres" if "postgres" in low
             else "oracle" if "oracle" in low
+            else "duckdb" if "duckdb" in low
             else None
         )
         if cfg_dialect is not None and cfg_dialect != dialect_name:
@@ -207,9 +242,12 @@ def load_dialect_cfg(dialect_name: str) -> "tuple[Config, Path, Dialect]":
             f"{cfg_path} has no demo_database_url — {dialect_name} "
             f"dialect cell skipped. Agreement tests need a seedable DB."
         )
-    dialect_enum = (
-        Dialect.ORACLE if dialect_name == "oracle" else Dialect.POSTGRES
-    )
+    # DY.2 — THE key bug was `Dialect.ORACLE if ... else Dialect.POSTGRES`,
+    # which silently coerced the `duckdb` param to POSTGRES so every duck
+    # cell walked Postgres tables it never seeded. `Dialect(<name>)` maps
+    # the param string to its enum member for all three dialects (the enum
+    # values ARE "postgres"/"oracle"/"duckdb").
+    dialect_enum = Dialect(dialect_name)
     if loaded.db.dialect is not dialect_enum:
         pytest.skip(
             f"{cfg_path} declares dialect={loaded.db.dialect.value} but "
