@@ -48,7 +48,10 @@ from io import TextIOWrapper
 from dataclasses import dataclass, replace as dataclasses_replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Final, cast
+from typing import TYPE_CHECKING, Any, Final, cast
+
+if TYPE_CHECKING:
+    from recon_gen.common.config import Config
 
 from recon_gen.common.env_keys import (
     RECON_E2E_PAGE_TIMEOUT,
@@ -1940,9 +1943,23 @@ class _DuckdbHandle:
                 pass
 
 
-def _setup_local_duckdb() -> tuple[dict[str, str], object | None]:
+def _setup_local_duckdb(cfg: "Config") -> tuple[dict[str, str], object | None]:
     """Create the per-invocation DuckDB DB file + minimal cfg, return
     the env overrides + handle the variant lifecycle expects.
+
+    DY.7.1.f — ``table_prefix`` + ``deployment_name`` are taken from the
+    INVOKING cfg (``cfg``), NOT hardcoded. They used to be pinned to
+    ``qsgen_duckdb`` / ``qsgen-duckdb``, which silently matched the base
+    ``run/config.duckdb.yaml`` (sasquatch) but DIVERGED from a
+    ``run/config.duckdb.spec.yaml`` run (``qsgen_duckspec``): the thin seed
+    (which shells ``schema/data apply -c <invoking cfg>``) wrote
+    ``qsgen_duckspec_*`` into demo.duckdb, while the pytest layers — reading
+    RECON_GEN_CONFIG = this hardcoded cfg — queried ``qsgen_duckdb_*`` and
+    hit "Table … does not exist". Threading the invoking prefix keeps the
+    thin-container cfg consistent with the seed on every duck cfg (mirrors
+    how the PG/Oracle branches keep the invoking cfg + override only the
+    URL). The db-tier layers still isolate PER-WORKER off this base via
+    ``_isolate_cfg``.
 
     Allocates a tempdir; the cfg slots:
 
@@ -1991,11 +2008,11 @@ def _setup_local_duckdb() -> tuple[dict[str, str], object | None]:
         "aws:\n"
         "  account_id: \"111122223333\"\n"
         "  region: \"us-east-1\"\n"
-        "  deployment_name: \"qsgen-duckdb\"\n"
+        f"  deployment_name: \"{cfg.aws.deployment_name}\"\n"
         "db:\n"
         "  dialect: duckdb\n"
         f"  url: \"duckdb:///{db_path}\"\n"
-        "  table_prefix: \"qsgen_duckdb\"\n"
+        f"  table_prefix: \"{cfg.db.table_prefix}\"\n"
     )
     env: dict[str, str] = {
         RECON_GEN_DEMO_DATABASE_URL.name: f"duckdb:///{db_path}",
@@ -2200,8 +2217,9 @@ def _start_thin_container(
     if peek_cfg.db.dialect is Dialect.DUCKDB:
         # _setup_local_duckdb already sets RECON_GEN_DEMO_DATABASE_URL +
         # RECON_GEN_CONFIG; no `_PG` / `_OR` suffix needed (the container
-        # fixtures only check those).
-        return _setup_local_duckdb()
+        # fixtures only check those). Thread the invoking cfg so the thin
+        # cfg's prefix/deployment match the seed's (DY.7.1.f).
+        return _setup_local_duckdb(peek_cfg)
 
     raise ValueError(
         f"_start_thin_container: unhandled dialect={peek_cfg.db.dialect!r}"
@@ -2243,7 +2261,7 @@ def _sweep_test_prefixes(
     No-op for DuckDB (per-worker fresh `.duckdb` file, no shared
     state). Returns 0.
     """
-    from recon_gen.common.config import Config, load_config
+    from recon_gen.common.config import load_config
 
     sweep_dir = run_dir / "sweep"
     sweep_dir.mkdir(parents=True, exist_ok=True)
