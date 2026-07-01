@@ -422,33 +422,23 @@ def test_l1_additive_pickers_keep_anchor_row(
       operator, wrong format expectation — e.g. AA.E.2's
       ``account_id`` vs ``account_display`` miss).
     """
-    # L1 Exceptions picker timeouts have failed release CI from
-    # v11.22.7 through v11.22.10. Investigation 2026-05-27:
-    # - The L1 Accounts dropdown SQL is fast (0.08s after warm cache;
-    #   192 rows; UNION ALL perf fix shipped in v11.22.10).
-    # - The picker dropdown options endpoint is fast (~0.1s).
-    # - App2 returns ``/visuals/.../data`` responses 200 OK with the
-    #   picked params (captured in test stdout).
-    # - The failure is a Playwright ``expect_response`` race —
-    #   App2's debounce + visual fetch fire BEFORE the test's wait
-    #   sets up its listener, so the wait times out even though the
-    #   response did arrive.
-    # Root cause is in the App2 driver's expect_response wiring +
-    # BL.2's default-filter-narrowed initial render. Other L1 sheets'
-    # pickers pass — only L1 Exceptions hits this race because
-    # it has 5 pickers (densest landscape after Transactions which
-    # also hits it sometimes).
-    # Tracked for a follow-on phase; xfail strict=False so the
-    # picker race doesn't block releases while the BL.1/BL.2 wire
-    # fixes verify on live QS + App2.
-    if spec.sheet_name == _L1_EXCEPTIONS_NAME:
-        pytest.xfail(
-            "App2 picker race on L1 Exceptions sheet: visual "
-            "data responses fire before expect_response sets up its "
-            "listener. SQL is verified fast (0.08s); not a perf "
-            "issue. See test body comment for full investigation."
-        )
-
+    # DY.10 (2026-07-01) — the old ``pytest.xfail("App2 picker race")``
+    # here was WRONG. The instrumentation (App2Driver._record_requests +
+    # _wait_for_refetch scream) proved there is no expect_response race:
+    # the dropdown-search + visual /data requests DO fire and return 200.
+    # The real failure was the ``before_count == 0`` SKIP below — every
+    # date-windowed L1 sheet (Drift / Overdraft / Limit Breach / L1
+    # Exceptions / Transactions) renders EMPTY by default on the browser
+    # harness's per-test isolated seed. That seed is minimal (no
+    # densify/plants: ~30 exceptions vs data-apply's 3229) and its sparse
+    # violations don't reliably land in the now-dynamic 7-day default
+    # window (as_of_frame(window_days=7)) — so before_count is 0 (or
+    # nonzero) depending on the per-run fuzz seed. The seed distribution
+    # and the dynamic as_of window drifted apart (the pre-as_of "old date
+    # range anchor"). FIX in flight: make the seed deterministically plant
+    # a recent violation of every L1 kind inside the default window so
+    # these run instead of skip (PLAN DY.10.1). Until then they skip with
+    # the documented data-conditional reason below.
     driver, dashboard_arg = l1_dashboard_driver
     driver.open(dashboard_arg, sheet=spec.sheet_name)
     driver.wait_loaded(spec.target_visual)
@@ -535,16 +525,6 @@ def test_l1_dropdown_pickers_inverse_excludes_anchor(
     seed-dependent sparse dropdowns. Sliders / dates land as v2 once
     their inversion semantics settle.
     """
-    # Same App2 picker race as the AA.A.6 additive sibling test —
-    # L1 Exceptions hits the ``expect_response`` race; other L1
-    # sheets pass. See sibling for full investigation.
-    if spec.sheet_name == _L1_EXCEPTIONS_NAME:
-        pytest.xfail(
-            "App2 picker race on L1 Exceptions sheet — see "
-            "test_l1_additive_pickers_keep_anchor_row for the "
-            "investigation. xfail strict=False."
-        )
-
     driver, dashboard_arg = l1_dashboard_driver
     driver.open(dashboard_arg, sheet=spec.sheet_name)
     driver.wait_loaded(spec.target_visual)
