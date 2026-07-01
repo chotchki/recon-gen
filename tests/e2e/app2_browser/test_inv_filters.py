@@ -37,6 +37,19 @@ from recon_gen.common.config import Config
 
 
 
+def _parse_money(text: str) -> float:
+    """Lenient dollar-cell → float. Strips ``$``, commas, whitespace;
+    returns 0.0 on an unparseable cell (a blank / sentinel row shouldn't
+    crash the min-hop scan). Deliberately looser than
+    ``parse_currency_kpi`` (which is a strict KPI-format gate) — these are
+    ordinary table cells, not headline KPIs."""
+    cleaned = text.replace("$", "").replace(",", "").strip()
+    try:
+        return float(cleaned)
+    except ValueError:
+        return 0.0
+
+
 if TYPE_CHECKING:
     from recon_gen.common.models import DatasetParameter
     from tests.e2e._drivers import DashboardDriver
@@ -102,24 +115,59 @@ def test_min_hop_amount_slider_shrinks_money_trail_table(inv_dashboard_driver: t
     driver, dashboard_arg = inv_dashboard_driver
     driver.open(dashboard_arg, sheet="Money Trail")
     driver.wait_loaded("Money Trail — Hop-by-Hop")
-    before = len(driver.table_rows("Money Trail — Hop-by-Hop"))
-    if before <= 0:
+
+    # DY.7.1 — the Hop-by-Hop table is empty-on-default (App2 holds the
+    # no-match root sentinel + doesn't auto-pick the first option), so
+    # measuring pre-pick always saw 0 → the test skipped unconditionally
+    # instead of exercising the slider. Pick a real chain root first, THEN
+    # drive the min-hop slider. The roots dropdown is ordered by
+    # SUM(hop_amount) DESC, so the top entries are often ONE dominant hop
+    # (nothing for a fixed $1,000 cut to straddle) — scan for a root whose
+    # hops SPREAD across ≥2 distinct amounts, then set the threshold
+    # between them so the narrow provably drops the smaller hop.
+    roots = driver.filter_options("Chain root transfer")
+    if not roots:
         pytest.skip(
-            "Money Trail — Hop-by-Hop starts empty for the deployed L2 "
-            "(no multi-hop edges seeded — spec_example declares zero "
-            "chains and single-leg templates); the slider-narrowing guard "
-            "has nothing to shrink. The empty-render path is covered by "
-            "the sheet-visuals tests."
+            "Money Trail: the Chain-root-transfer dropdown has no options "
+            "on the deployed L2 (empty money-trail matview — an L2 with "
+            "zero chains). Nothing for the min-hop slider to shrink."
+        )
+    chosen: str | None = None
+    hop_vals: list[float] = []
+    for root in roots[:10]:
+        driver.pick_filter("Chain root transfer", [root])
+        driver.wait_loaded("Money Trail — Hop-by-Hop")
+        rows = driver.table_rows(
+            "Money Trail — Hop-by-Hop", columns=["hop_amount"],
+        )
+        vals = sorted({
+            _parse_money(r.get("hop_amount") or r.get("Hop Amount") or "0")
+            for r in rows
+        })
+        if len(vals) >= 2:
+            chosen, hop_vals = root, vals
+            break
+    if chosen is None:
+        pytest.skip(
+            "Money Trail: no offered chain root has ≥2 distinct hop "
+            "amounts to threshold between — the min-hop narrow can't be "
+            "proven on this seed's chain shapes."
         )
 
-    driver.set_slider("Min hop amount ($)", 1000, None)
+    # table_row_count (not len(table_rows)) — the DOM window caps at ~50,
+    # which would compare two saturated 50s and mask a real shrink.
+    before = driver.table_row_count("Money Trail — Hop-by-Hop")
+    # Threshold = the second-smallest distinct hop → keeps everything at
+    # or above it, drops every row at the smallest hop → provable shrink.
+    threshold = hop_vals[1]
+    driver.set_slider("Min hop amount ($)", threshold, None)
     driver.wait_loaded("Money Trail — Hop-by-Hop")
-    after = len(driver.table_rows("Money Trail — Hop-by-Hop"))
+    after = driver.table_row_count("Money Trail — Hop-by-Hop")
 
     driver.screenshot()
     assert after < before, (
-        f"Hop-by-Hop should shrink at min hop=$1,000; "
-        f"before={before}, after={after}"
+        f"Hop-by-Hop should shrink at min hop=${threshold:,.2f} on root "
+        f"{chosen!r} (hops {hop_vals!r}); before={before}, after={after}"
     )
 
 

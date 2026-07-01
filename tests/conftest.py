@@ -383,6 +383,17 @@ _EXAMPLE_L2_CONFIG_ABSENCE_HINTS: Final = (
     "no cfg", "not configured", "operator-local", "not found at",
     "cfg.db.url", "auth.oidc", "requires --", "no cfg discoverable", "run/ is",
 )
+# DY.7.1 — cross-dialect parametrize deselect. The audit / direct-extract
+# tests parametrize over [duckdb, postgres, oracle] and each cell skips the
+# TWO non-cfg dialects (the runner cfg pins ONE — routing a 'postgres' param
+# through a duckdb cell would hit the wrong DB). That's the parametrize
+# matrix working as designed, NOT an example-L2 coverage gap — the matching-
+# dialect param DOES run + cover the invariant. Own category so these don't
+# drown the `suspect` review list (36 of the 51 first-pass suspects were
+# exactly this).
+_EXAMPLE_L2_DIALECT_DESELECT_HINTS: Final = (
+    "would route to the wrong db", "implies dialect=",
+)
 
 
 def _example_l2_run(item: Any) -> bool:  # typing-smell: ignore[explicit-any]: pytest Item from late import
@@ -436,6 +447,8 @@ def _example_l2_category(item: Any, reason: str) -> str:  # typing-smell: ignore
             else "invalid-exempt"
         )
     low = reason.lower()
+    if any(h in low for h in _EXAMPLE_L2_DIALECT_DESELECT_HINTS):
+        return "dialect-deselect"
     if any(h in low for h in _EXAMPLE_L2_INFRA_IMPORT_HINTS):
         return "infra-import"
     if any(h in low for h in _EXAMPLE_L2_CONFIG_ABSENCE_HINTS):

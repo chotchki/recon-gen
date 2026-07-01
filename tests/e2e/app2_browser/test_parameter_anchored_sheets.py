@@ -78,32 +78,20 @@ def _assert_anchor_present_and_populated(
     assert a filter control labelled like ``anchor_label`` exists and is
     populated with options.
 
-    Skips when the anchor's source dataset is empty for the deployed L2 —
-    e.g. Money Trail's Chain-root-transfer dropdown sources from
-    ``_inv_money_trail_edges`` which is empty for ``spec_example`` (zero
-    chains, single-leg templates only). Same shape as the
-    ``test_min_hop_amount_slider`` skip: the dropdown wouldn't have any
-    options to test against, and asserting on options times out at the
-    QS-side MUI Autocomplete "No options" sentinel rather than failing
-    with a useful message. Tracked via the visual's row count —
-    ``table_row_count == 0`` ⇒ skip with the L2-specific note.
+    DY.7.1 — the invariant is the anchor control's OPTION UNIVERSE, not
+    the anchor-driven table. On App 2 that table is empty-on-default BY
+    DESIGN: the bound analysis param holds a no-match sentinel and App 2
+    does NOT auto-pick the first option the way QS's ``SelectAll=HIDDEN``
+    did. The old ``table_row_count(visual)==0 ⇒ skip`` proxy therefore
+    skipped UNCONDITIONALLY on App2 no matter how full the matview /
+    dropdown were (verified: sasquatch_pr's money-trail matview has 48k
+    edges / 43k roots, Account Network offers 139 anchors — all masked).
+    Assert the dropdown universe directly; skip only when it's genuinely
+    empty (e.g. an L2 that declares zero chains → empty money-trail edges
+    → no roots to offer).
     """
     driver.open(dashboard_arg, sheet=sheet_name)
     driver.wait_loaded(visual_title)
-
-    # AA.H-followon — skip when the anchor's source dataset is empty.
-    # ``table_row_count`` walks every page; the AA.H.8 chain showed the
-    # Money Trail anchor dropdown sits behind ``MuiAutocomplete-noOptions``
-    # when the Hop-by-Hop matview is empty, and the test then times out
-    # waiting for `[role="option"]` instead of surfacing the real cause.
-    if driver.table_row_count(visual_title) == 0:
-        pytest.skip(
-            f"{sheet_name!r}: {visual_title!r} starts empty for the "
-            f"deployed L2 — the anchor dropdown sources the same dataset, "
-            f"so it has no options to test against. Same shape as the "
-            f"Money-Trail min-hop slider skip. Plant the upstream "
-            f"scenario in the demo seed to re-light this."
-        )
 
     labels = driver.filter_labels()
     matched = next((lbl for lbl in labels if anchor_label in lbl), None)
@@ -112,10 +100,13 @@ def _assert_anchor_present_and_populated(
         f"{anchor_label!r} in the filter bar, got {labels!r}"
     )
     opts = driver.filter_options(matched)
-    assert opts, (
-        f"{sheet_name!r}: the {matched!r} control should be populated "
-        f"from its dataset, got an empty option list"
-    )
+    if not opts:
+        pytest.skip(
+            f"{sheet_name!r}: the {matched!r} control has an empty option "
+            f"universe on the deployed L2 — its source dataset is empty "
+            f"(e.g. an L2 declaring zero chains → empty money-trail edges). "
+            f"Nothing to assert present+populated."
+        )
 
 
 @pytest.mark.parametrize(
@@ -173,29 +164,19 @@ def test_money_trail_anchor_pick_narrows_hop_by_hop_table(
     driver.open(dashboard_arg, sheet="Money Trail")
     driver.wait_loaded("Money Trail — Hop-by-Hop")
 
-    # AA.H-followon — skip when the source matview is empty (e.g. the
-    # deployed ``spec_example`` L2 which has zero chains + single-leg
-    # templates only, so ``_inv_money_trail_edges`` ends up empty and
-    # the QS-side MUI Autocomplete dropdown shows "No options"). Same
-    # shape as the min-hop-amount slider skip; without this guard the
-    # ``filter_options`` call times out in ``wait_for_selector`` on the
-    # missing ``[role="option"]`` and surfaces an unhelpful Playwright
-    # timeout instead of the real cause.
-    if driver.table_row_count("Money Trail — Hop-by-Hop") == 0:
-        pytest.skip(
-            "Money Trail — Hop-by-Hop starts empty for the deployed L2 "
-            "(no multi-hop edges seeded — spec_example declares zero "
-            "chains and single-leg templates); the Chain-root-transfer "
-            "dropdown has no options to test against. Plant multi-hop "
-            "chain firings in the demo seed to re-light this."
-        )
-
-    # Discover a real option to target (data-agnostic).
+    # DY.7.1 — the Hop-by-Hop table is empty-on-default BY DESIGN (App 2
+    # holds the no-match root sentinel + doesn't auto-pick the first
+    # option), which is exactly the pre-pick state this test then drives
+    # OUT of. The old ``table_row_count==0 ⇒ skip`` fired on that expected
+    # state before the pick ever ran. The only legit skip is a genuinely
+    # empty root universe — guard on ``filter_options`` instead.
     options = driver.filter_options("Chain root transfer")
-    assert options, (
-        "Chain root transfer dropdown returned no options — "
-        "search-variant lazy-render fix may have regressed"
-    )
+    if not options:
+        pytest.skip(
+            "Money Trail: the Chain-root-transfer dropdown has no options "
+            "on the deployed L2 (empty money-trail matview — an L2 with "
+            "zero chains). Nothing to pick+narrow against."
+        )
     target_value = options[0]
 
     driver.pick_filter("Chain root transfer", [target_value])

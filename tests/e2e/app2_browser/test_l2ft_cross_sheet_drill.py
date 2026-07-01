@@ -59,29 +59,47 @@ pytestmark = [
 # the drill would land on an empty destination (the docstring on
 # ``_populate_l2_exceptions_sheet`` acknowledges this), so this test
 # skips them.
+#
+# DY.7.1 — these MUST be the Title-Case labels the unified-exceptions SQL
+# CASTs into the rendered ``check_type`` cell (``CAST('Chain Orphans' AS
+# VARCHAR(50))`` etc., apps/l2_flow_tracing/datasets.py::build_unified_l2_
+# exceptions_dataset). The old snake_case slugs (from the handbook reverse-
+# slugifier) NEVER appear in a rendered cell, so ``_first_row_with_check_
+# type`` returned None every run and the test skipped unconditionally —
+# regardless of data. ``Dead Rails`` is dropped from the rail set: a dead
+# rail has zero postings by definition, so its drill lands on an empty
+# Rails destination (can't satisfy "populated + narrowed"); ``Unmatched
+# Rail Name`` carries real postings on the default seed.
 _RAIL_CHECK_TYPES = frozenset({
-    "unmatched_rail_name",
-    "dead_rails",
+    "Unmatched Rail Name",
 })
 _CHAIN_CHECK_TYPES = frozenset({
-    "chain_orphans",
+    "Chain Orphans",
 })
 
 
 def _first_row_with_check_type(
     rows: list[dict[str, str]],
     accepted: frozenset[str],
-) -> dict[str, str] | None:
-    """Return the first row whose ``check_type`` value is in ``accepted``.
+) -> tuple[int, dict[str, str]] | None:
+    """Return ``(index, row)`` for the first row whose ``check_type`` value
+    is in ``accepted``, or ``None``.
+
+    DY.7.1 — returns the INDEX too: ``L2 Violation Detail`` is ``ORDER BY
+    count DESC``, so row 0 is always the highest-count kind (the
+    ``Unmatched Rail Name`` marker). A test that wants to drill a specific
+    kind (e.g. the first ``Chain Orphans`` row, which is NOT row 0) has to
+    aim ``drill_from_row_via_menu`` at that row's index — drilling row 0
+    would write the wrong ``entity_a`` and land the destination empty.
 
     Header-cased so both renderers' column-name conventions resolve.
     """
-    for row in rows:
+    for idx, row in enumerate(rows):
         # Both renderers carry check_type — QS as "Check Type", App2 as
         # "check_type". Look up either form.
         ct = row.get("check_type") or row.get("Check Type")
         if ct in accepted:
-            return row
+            return idx, row
     return None
 
 
@@ -105,18 +123,19 @@ def test_l2_exceptions_view_in_rails_narrows_destination(
     rows = driver.table_rows(
         "L2 Violation Detail", columns=["check_type", "entity_a"],
     )
-    target_row = _first_row_with_check_type(rows, _RAIL_CHECK_TYPES)
-    if target_row is None:
+    found = _first_row_with_check_type(rows, _RAIL_CHECK_TYPES)
+    if found is None:
         pytest.skip(
             "L2 Violation Detail has no rail-targeted rows "
             f"(check_type in {sorted(_RAIL_CHECK_TYPES)}) in the seeded "
             "DB — nothing to drill from. (Re-run with the auto-scenario "
             "plants that fire unmatched_rail_name / dead_rails.)"
         )
+    target_index, target_row = found
     drilled_rail = _entity_a(target_row)
 
-    driver.drill_from_first_row_via_menu(
-        "L2 Violation Detail",
+    driver.drill_from_row_via_menu(
+        "L2 Violation Detail", target_index,
         "View in Rails (filter rail_name to entity_a)",
     )
     driver.wait_loaded(_RAILS_TRANSACTIONS_TITLE)
@@ -166,17 +185,18 @@ def test_l2_exceptions_view_in_chains_narrows_destination(
     rows = driver.table_rows(
         "L2 Violation Detail", columns=["check_type", "entity_a"],
     )
-    target_row = _first_row_with_check_type(rows, _CHAIN_CHECK_TYPES)
-    if target_row is None:
+    found = _first_row_with_check_type(rows, _CHAIN_CHECK_TYPES)
+    if found is None:
         pytest.skip(
             "L2 Violation Detail has no chain-targeted rows "
             f"(check_type in {sorted(_CHAIN_CHECK_TYPES)}) in the "
             "seeded DB — nothing to drill from."
         )
+    target_index, target_row = found
     drilled_chain = _entity_a(target_row)
 
-    driver.drill_from_first_row_via_menu(
-        "L2 Violation Detail",
+    driver.drill_from_row_via_menu(
+        "L2 Violation Detail", target_index,
         "View in Chains (filter parent_chain_name to entity_a)",
     )
     driver.wait_loaded("Chain Instances")

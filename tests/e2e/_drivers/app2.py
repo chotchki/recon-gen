@@ -1137,10 +1137,20 @@ class App2Driver:
         Anchor with a prefix-match regex so "Account" matches only the
         label whose visible text STARTS with "Account" — `<label>Account
         <select>...</select></label>` matches; `<label>Role <select>
-        ...ZBASubAccount...</select></label>` doesn't."""
+        ...ZBASubAccount...</select></label>` doesn't.
+
+        DY.7.1 — the trailing `\b` is only appended when the label ENDS in
+        a word char. `\b` matches between a word and non-word char, so a
+        label ending in punctuation (e.g. "Min hop amount ($)") followed
+        by whitespace in the DOM has non-word-then-non-word — `\b` never
+        matches and the control is never found (set_slider then times out
+        resolving the locator). The escaped punctuation is already its own
+        boundary, so the anti-substring guard the `\b` provides isn't
+        needed there."""
         import re
 
-        anchored = re.compile(r"^\s*" + re.escape(label) + r"\b")
+        boundary = r"\b" if label and label[-1].isalnum() else ""
+        anchored = re.compile(r"^\s*" + re.escape(label) + boundary)
         in_label = self._page.locator(
             "#filter-form label", has_text=anchored,
         )
@@ -1558,6 +1568,36 @@ class App2Driver:
                 f"App2Driver.drill_from_first_row_via_menu — table "
                 f"{visual_title!r} has no DATA_POINT_MENU row drill "
                 f'(no "⋯" button)'
+            )
+        self._click(btn)
+        item = self._page.locator(
+            "ul.ctxmenu li", has_text=menu_item,
+        ).first
+        item.wait_for(state="visible", timeout=5_000)
+        self._click(item)
+        self._page.wait_for_load_state("networkidle")
+        self._sync_nav_from_url()
+
+    def drill_from_row_via_menu(
+        self, visual_title: str, row_index: int, menu_item: str,
+    ) -> None:
+        # DY.7.1 — indexed sibling of drill_from_first_row_via_menu. Some
+        # source tables are ORDER BY count DESC, so row 0 is a fixed kind
+        # (e.g. L2 Violation Detail's row 0 is always the highest-count
+        # 'Unmatched Rail Name' marker); a test that wants to drill a
+        # SPECIFIC row (the first 'Chain Orphans' row, say) needs to aim
+        # at that row's index, not row 0. Same ⋯-button → ctxmenu <li>
+        # gesture as the first-row form; the only change is rows.nth(i).
+        section = self._section(visual_title)
+        rows = section.locator("table.table-data tbody tr")
+        row = rows.nth(row_index)
+        row.wait_for(state="visible")
+        btn = row.locator(".row-drill-menu-btn").first
+        if btn.count() == 0:
+            raise NotImplementedError(
+                f"App2Driver.drill_from_row_via_menu — table "
+                f"{visual_title!r} row {row_index} has no DATA_POINT_MENU "
+                f'row drill (no "⋯" button)'
             )
         self._click(btn)
         item = self._page.locator(

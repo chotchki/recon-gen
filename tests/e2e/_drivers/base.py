@@ -398,6 +398,16 @@ class DashboardDriver(Protocol):
         destination's expected visual to lock in the new sheet."""
         ...
 
+    def drill_from_row_via_menu(
+        self, visual_title: str, row_index: int, menu_item: str,
+    ) -> None:
+        """Indexed form of :meth:`drill_from_first_row_via_menu` — fire the
+        ``DATA_POINT_MENU`` drill from the row at ``row_index`` (zero-based)
+        instead of row 0. Needed when the source table is ordered so that
+        row 0 is a fixed kind and the test wants to drill a specific other
+        row (e.g. the first row of a given ``check_type``)."""
+        ...
+
     # -- metadata popup (CY.9) ------------------------------------------
 
     def open_metadata_panel(
