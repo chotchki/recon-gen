@@ -100,6 +100,9 @@ class BalanceRow:
     entry: int
     day: date
     money: Cents
+    #: The fed business_day_end — an institution's day can end intraday
+    #: (a 17:00 cutover). None ⇒ the law defaults to end-of-calendar-day.
+    day_end: datetime | None = None
     expected_eod: Cents | None = None
     account_scope: str = "internal"
     account_role: str | None = None
@@ -176,6 +179,23 @@ def effective_balance(state: ResidualState, account_id: str, day: date) -> Cents
     return None if best is None else best.money
 
 
+def effective_cutoff(state: ResidualState, account_id: str, day: date) -> datetime:
+    """The day's posting cutoff under the carried-cutover rule
+    (operator-decided, DS.3.2): the last loaded balance day's END
+    time-of-day carries forward — a 17:00 cutover stays 17:00 on every
+    quiet day until the next loaded balance row. Defaults to
+    end-of-calendar-day when the anchoring emit carries no day_end (or
+    no emit exists yet)."""
+    anchor: BalanceRow | None = None
+    for row in current_balances(state):
+        if row.account_id == account_id and row.day <= day:
+            if anchor is None or row.day > anchor.day:
+                anchor = row
+    if anchor is None or anchor.day_end is None:
+        return datetime.combine(day + timedelta(days=1), datetime.min.time())
+    return datetime.combine(day, anchor.day_end.time())
+
+
 # -- MONEY family (branch-free; op whitelist lint-enforced) -------------------
 
 
@@ -202,8 +222,9 @@ def drift_residual(state: ResidualState, account_id: str, day: date) -> Cents | 
     ]
     if stored is None or not scope_rows:
         return None
+    cutoff = effective_cutoff(state, account_id, day)
     calculated = Cents(sum(
-        when(leg.status in MONEY_STATUSES and leg.posting.date() <= day, leg.amount.value, 0)
+        when(leg.status in MONEY_STATUSES and leg.posting <= cutoff, leg.amount.value, 0)
         for leg in current_legs(state)
         if leg.account_id == account_id
     ))
@@ -242,8 +263,9 @@ def ledger_drift_residual(state: ResidualState, parent_account_id: str, day: dat
         for child_id in child_ids
         if (stored_child := effective_balance(state, child_id, day)) is not None
     ))
+    cutoff = effective_cutoff(state, parent_account_id, day)
     direct = Cents(sum(
-        when(leg.status in MONEY_STATUSES and leg.posting.date() <= day, leg.amount.value, 0)
+        when(leg.status in MONEY_STATUSES and leg.posting <= cutoff, leg.amount.value, 0)
         for leg in current_legs(state)
         if leg.account_id == parent_account_id
     ))

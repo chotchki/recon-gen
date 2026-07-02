@@ -29,8 +29,104 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0001-snb",
+          "business_day": "2029-12-01",
+          "drift": 15175.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0001-snb",
+          "business_day": "2029-12-02",
+          "drift": -4551.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0001-snb",
+          "business_day": "2029-12-03",
+          "drift": -4551.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0001-snb",
+          "business_day": "2029-12-04",
+          "drift": -4551.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0001-snb",
+          "business_day": "2029-12-05",
+          "drift": -4551.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0001-snb",
+          "business_day": "2029-12-06",
+          "drift": -4551.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0001-snb",
           "business_day": "2029-12-07",
           "drift": -4551.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0001-snb",
+          "business_day": "2029-12-08",
+          "drift": 10449.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0001-snb",
+          "business_day": "2029-12-09",
+          "drift": -9277.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0001-snb",
+          "business_day": "2029-12-10",
+          "drift": -9277.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0001-snb",
+          "business_day": "2029-12-11",
+          "drift": -9277.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0001-snb",
+          "business_day": "2029-12-12",
+          "drift": -9277.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0001-snb",
+          "business_day": "2029-12-13",
+          "drift": -9277.0
         }
       },
       {
@@ -45,8 +141,80 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0001-snb",
+          "business_day": "2029-12-15",
+          "drift": 5723.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0001-snb",
+          "business_day": "2029-12-16",
+          "drift": -14003.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0001-snb",
+          "business_day": "2029-12-17",
+          "drift": -14003.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0001-snb",
+          "business_day": "2029-12-18",
+          "drift": -14003.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0001-snb",
+          "business_day": "2029-12-19",
+          "drift": -14003.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0001-snb",
+          "business_day": "2029-12-20",
+          "drift": -14003.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0001-snb",
           "business_day": "2029-12-21",
           "drift": -14003.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0001-snb",
+          "business_day": "2029-12-22",
+          "drift": 997.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0001-snb",
+          "business_day": "2029-12-23",
+          "drift": -18729.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0001-snb",
+          "business_day": "2029-12-24",
+          "drift": -18729.0
         }
       },
       {
@@ -125,8 +293,104 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0002-snb",
+          "business_day": "2029-11-30",
+          "drift": -6501.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-01",
+          "drift": -6601.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-02",
+          "drift": -6601.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-03",
+          "drift": -6601.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-04",
+          "drift": -6601.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-05",
+          "drift": -26602.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
           "business_day": "2029-12-06",
           "drift": -26602.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-07",
+          "drift": -11602.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-08",
+          "drift": -11602.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-09",
+          "drift": -11602.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-10",
+          "drift": -11602.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-11",
+          "drift": -11602.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-12",
+          "drift": -31603.0
         }
       },
       {
@@ -141,6 +405,54 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0002-snb",
+          "business_day": "2029-12-14",
+          "drift": -16603.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-15",
+          "drift": -16603.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-16",
+          "drift": -16603.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-17",
+          "drift": -16603.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-18",
+          "drift": -16603.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-19",
+          "drift": -36604.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
           "business_day": "2029-12-20",
           "drift": -36604.0
         }
@@ -149,8 +461,96 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "cust-0002-snb",
+          "business_day": "2029-12-21",
+          "drift": -21604.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-22",
+          "drift": -21604.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-23",
+          "drift": -21604.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-24",
+          "drift": -21604.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-25",
+          "drift": -21604.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-26",
+          "drift": -41605.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
           "business_day": "2029-12-27",
           "drift": -41605.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-28",
+          "drift": -26605.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-29",
+          "drift": -26605.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-30",
+          "drift": -26605.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2029-12-31",
+          "drift": -26605.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "cust-0002-snb",
+          "business_day": "2030-01-01",
+          "drift": -27105.0
         }
       }
     ],
@@ -347982,6 +348382,14 @@
       {
         "kind": "rule_violation",
         "identity": {
+          "account_id": "acct-ledger-drift-parent-d2",
+          "business_day": "2030-01-01",
+          "drift": 350.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
           "account_id": "acct-ledger-drift-parent-d3",
           "business_day": "2029-12-30",
           "drift": 400.0
@@ -347990,8 +348398,48 @@
       {
         "kind": "rule_violation",
         "identity": {
+          "account_id": "acct-ledger-drift-parent-d3",
+          "business_day": "2029-12-31",
+          "drift": 400.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "acct-ledger-drift-parent-d3",
+          "business_day": "2030-01-01",
+          "drift": 400.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
           "account_id": "acct-ledger-drift-parent-d4",
           "business_day": "2029-12-29",
+          "drift": 450.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "acct-ledger-drift-parent-d4",
+          "business_day": "2029-12-30",
+          "drift": 450.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "acct-ledger-drift-parent-d4",
+          "business_day": "2029-12-31",
+          "drift": 450.0
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "acct-ledger-drift-parent-d4",
+          "business_day": "2030-01-01",
           "drift": 450.0
         }
       },
@@ -348008,7 +348456,55 @@
         "identity": {
           "account_id": "gl-2010-dda-control",
           "business_day": "2029-11-30",
-          "drift": -2680879.34
+          "drift": -2679379.34
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "gl-2010-dda-control",
+          "business_day": "2029-12-01",
+          "drift": -2679379.34
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "gl-2010-dda-control",
+          "business_day": "2029-12-02",
+          "drift": -2679379.34
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "gl-2010-dda-control",
+          "business_day": "2029-12-03",
+          "drift": -2701207.2
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "gl-2010-dda-control",
+          "business_day": "2029-12-04",
+          "drift": -2675192.33
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "gl-2010-dda-control",
+          "business_day": "2029-12-05",
+          "drift": -2662983.56
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "gl-2010-dda-control",
+          "business_day": "2029-12-06",
+          "drift": -2692410.74
         }
       },
       {
@@ -348016,7 +348512,55 @@
         "identity": {
           "account_id": "gl-2010-dda-control",
           "business_day": "2029-12-07",
-          "drift": -2752379.25
+          "drift": -2750879.25
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "gl-2010-dda-control",
+          "business_day": "2029-12-08",
+          "drift": -2750879.25
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "gl-2010-dda-control",
+          "business_day": "2029-12-09",
+          "drift": -2750879.25
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "gl-2010-dda-control",
+          "business_day": "2029-12-10",
+          "drift": -2780509.61
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "gl-2010-dda-control",
+          "business_day": "2029-12-11",
+          "drift": -2800737.6
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "gl-2010-dda-control",
+          "business_day": "2029-12-12",
+          "drift": -2779204.22
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "gl-2010-dda-control",
+          "business_day": "2029-12-13",
+          "drift": -2770741.89
         }
       },
       {
@@ -348024,7 +348568,55 @@
         "identity": {
           "account_id": "gl-2010-dda-control",
           "business_day": "2029-12-14",
-          "drift": -2873114.32
+          "drift": -2871614.32
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "gl-2010-dda-control",
+          "business_day": "2029-12-15",
+          "drift": -2871614.32
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "gl-2010-dda-control",
+          "business_day": "2029-12-16",
+          "drift": -2871614.32
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "gl-2010-dda-control",
+          "business_day": "2029-12-17",
+          "drift": -2949379.74
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "gl-2010-dda-control",
+          "business_day": "2029-12-18",
+          "drift": -2965927.9
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "gl-2010-dda-control",
+          "business_day": "2029-12-19",
+          "drift": -3039813.7
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "gl-2010-dda-control",
+          "business_day": "2029-12-20",
+          "drift": -3063681.52
         }
       },
       {
@@ -348032,7 +348624,31 @@
         "identity": {
           "account_id": "gl-2010-dda-control",
           "business_day": "2029-12-21",
-          "drift": -3068828.37
+          "drift": -3067328.37
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "gl-2010-dda-control",
+          "business_day": "2029-12-22",
+          "drift": -3067328.37
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "gl-2010-dda-control",
+          "business_day": "2029-12-23",
+          "drift": -3067328.37
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "gl-2010-dda-control",
+          "business_day": "2029-12-24",
+          "drift": -3211335.05
         }
       },
       {
@@ -348040,7 +348656,7 @@
         "identity": {
           "account_id": "gl-2010-dda-control",
           "business_day": "2029-12-25",
-          "drift": -3227218.31
+          "drift": -3225718.31
         }
       },
       {
@@ -348048,7 +348664,7 @@
         "identity": {
           "account_id": "gl-2010-dda-control",
           "business_day": "2029-12-26",
-          "drift": -3213928.68
+          "drift": -3212428.68
         }
       },
       {
@@ -348064,7 +348680,7 @@
         "identity": {
           "account_id": "gl-2010-dda-control",
           "business_day": "2029-12-28",
-          "drift": -3308515.42
+          "drift": -3307015.42
         }
       },
       {
@@ -348072,7 +348688,7 @@
         "identity": {
           "account_id": "gl-2010-dda-control",
           "business_day": "2029-12-29",
-          "drift": -650.0
+          "drift": -3307590.42
         }
       },
       {
@@ -348080,7 +348696,7 @@
         "identity": {
           "account_id": "gl-2010-dda-control",
           "business_day": "2029-12-30",
-          "drift": -125.0
+          "drift": -3307565.42
         }
       },
       {
@@ -348088,7 +348704,7 @@
         "identity": {
           "account_id": "gl-2010-dda-control",
           "business_day": "2029-12-31",
-          "drift": -3248094.58
+          "drift": -3247094.58
         }
       },
       {
@@ -348096,7 +348712,7 @@
         "identity": {
           "account_id": "gl-2010-dda-control",
           "business_day": "2030-01-01",
-          "drift": -3316650.03
+          "drift": -3315650.03
         }
       }
     ],

@@ -73,3 +73,14 @@ Reading the money tables: one row per day; calculated = running Σ of Posted leg
 2. **xor existence predicate defaulted** (C4 above) — DS.3.3 owns the confirm-or-overturn.
 3. **Handbook law-prose gaps fixed in this task**: law 1 gains the carried-day clause, law 2 gains the direct-postings term, law 3 quantifies over the effective (carried) balance — the residuals are now the single home; the prose follows them.
 4. **limit_breach direction matches by sign** (Outbound = amount < 0), equivalent to `amount_direction` by the sign↔direction CHECK constraint — one less state column in the law.
+
+## DS.3.2 addendum — the carried-cutover rule (operator-decided 2026-07-02)
+
+Law refinement landed with the carried-day drift fix: a day's posting cutoff carries the last loaded balance day's END time-of-day — "if on 2/1 business day end is 5pm, it's 5pm until you hit an actual loaded balance day." M4/M5 pin it (running table; d0 emits −200 with a 17:00 end + a matching −200 Posted leg):
+
+| vec | day | legs that day | calculated (running Σ Posted ≤ carried 17:00 cutoff) | reported | residual |
+|---|---|---|---|---|---|
+| M4 | d1 | −100 Posted at 18:00 | −200 (the 18:00 leg is PAST the carried cutover) | −200 (carried) | 0 |
+| M5 | d2 | — | −300 (d1's 18:00 leg lands inside d2's window) | −200 (carried) | **+100** |
+
+Scoping notes, stated rather than buried: limit_breach's flow-day scoping stays calendar-day-granular for now (the full day-model unification is the date-model audit's arc, not DS.3.2's); the ledger rollup's child join stays timestamp-equality on business_day_start, so per-account time-of-day offsets must agree within a parent/child family (pre-existing behavior, preserved — a mixed-offset family silently under-joins, same as before this change).

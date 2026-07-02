@@ -996,9 +996,14 @@ def test_computed_ledger_balance_unions_children_plus_direct_postings() -> None:
     )
     assert body_match is not None
     body = body_match.group(1)
-    # Children sub-balance: SUM(child_db.money) grouped by parent role + day
-    assert "SUM(child_db.money)" in body
+    # Children sub-balance: the CARRIED child position (DS.3.2 keyed
+    # the rollup onto the effective spine — a quiet child still holds
+    # its balance), grouped by parent role + day.
+    assert "SUM(child_db.effective_money)" in body
+    assert "FROM clb_effective_balances child_db" in body
     assert "child_db.account_parent_role" in body
+    # Parent side rides the spine too (carried parent days get a row).
+    assert "FROM clb_effective_balances parent_db" in body
     # Direct postings: SUM(tx.amount_money) per ledger account-day
     assert "SUM(tx.amount_money)" in body
 

@@ -61,11 +61,13 @@ def _leg(d: dict[str, Any]) -> LegRow:
 
 def _bal(d: dict[str, Any]) -> BalanceRow:
     expected_eod = d.get("expected_eod")
+    day_end = d.get("day_end")
     return BalanceRow(
         account_id=d["account_id"],
         entry=d["entry"],  # typing-smell: ignore[no-inline-production-constants]: KAT JSON field key, not the migrate_mark column constant
         day=date.fromisoformat(d["day"]),
         money=Cents(d["money"]),
+        day_end=None if day_end is None else datetime.fromisoformat(day_end),
         expected_eod=None if expected_eod is None else Cents(expected_eod),
         account_scope=d.get("account_scope", "internal"),
         account_role=d.get("account_role"),

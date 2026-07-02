@@ -72,7 +72,11 @@ of the account's balance UNTIL a newer entry supersedes it, so days
 between emits carry the last claim forward and are checked too — a
 posting that lands on a quiet day moves the computed side while the
 carried claim stands still, and that gap is drift the same as on an
-emit day. The disagreement is the *drift*; a non-zero value signals
+emit day. The carried day's cutoff keeps the last loaded balance
+day's END time: an account whose business day ends 17:00 keeps a
+17:00 cutover on every quiet day until the next loaded balance row
+(a leg posting after the carried cutover belongs to the next day's
+check). The disagreement is the *drift*; a non-zero value signals
 the feed diverged from the underlying ledger. The computed side sums
 from account origin (no opening-balance term) — see Schema v6's
 zero-start precondition for what that demands of a mid-history

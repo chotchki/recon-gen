@@ -146,6 +146,98 @@
     "day": "2030-01-02"
    },
    "expected": 100
+  },
+  {
+   "name": "M4-carried-cutover-excludes-post-cutoff-leg",
+   "comment": "operator rule: the last loaded balance day's 17:00 end carries; an 18:00 leg on the carried day belongs to the NEXT cell",
+   "state": {
+    "legs": [
+     {
+      "id": "l1",
+      "entry": 1,
+      "account_id": "acct-m",
+      "amount": -200,
+      "status": "Posted",
+      "posting": "2030-01-01T12:00:00",
+      "transfer_id": "t1",
+      "account_parent_role": "ParentGL",
+      "account_role": "CustomerDDA"
+     },
+     {
+      "id": "l2",
+      "entry": 1,
+      "account_id": "acct-m",
+      "amount": -100,
+      "status": "Posted",
+      "posting": "2030-01-02T18:00:00",
+      "transfer_id": "t2",
+      "account_parent_role": "ParentGL",
+      "account_role": "CustomerDDA"
+     }
+    ],
+    "balances": [
+     {
+      "account_id": "acct-m",
+      "entry": 1,
+      "day": "2030-01-01",
+      "money": -200,
+      "day_end": "2030-01-01T17:00:00",
+      "account_parent_role": "ParentGL",
+      "account_role": "CustomerDDA"
+     }
+    ]
+   },
+   "cell": {
+    "account_id": "acct-m",
+    "day": "2030-01-02"
+   },
+   "expected": 0
+  },
+  {
+   "name": "M5-carried-cutover-includes-it-next-day",
+   "comment": "the same 18:00 leg lands inside d2's carried 17:00 window: claim -200 vs evidence -300",
+   "state": {
+    "legs": [
+     {
+      "id": "l1",
+      "entry": 1,
+      "account_id": "acct-m",
+      "amount": -200,
+      "status": "Posted",
+      "posting": "2030-01-01T12:00:00",
+      "transfer_id": "t1",
+      "account_parent_role": "ParentGL",
+      "account_role": "CustomerDDA"
+     },
+     {
+      "id": "l2",
+      "entry": 1,
+      "account_id": "acct-m",
+      "amount": -100,
+      "status": "Posted",
+      "posting": "2030-01-02T18:00:00",
+      "transfer_id": "t2",
+      "account_parent_role": "ParentGL",
+      "account_role": "CustomerDDA"
+     }
+    ],
+    "balances": [
+     {
+      "account_id": "acct-m",
+      "entry": 1,
+      "day": "2030-01-01",
+      "money": -200,
+      "day_end": "2030-01-01T17:00:00",
+      "account_parent_role": "ParentGL",
+      "account_role": "CustomerDDA"
+     }
+    ]
+   },
+   "cell": {
+    "account_id": "acct-m",
+    "day": "2030-01-03"
+   },
+   "expected": 100
   }
  ],
  "invariant": "drift"

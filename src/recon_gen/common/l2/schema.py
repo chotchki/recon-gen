@@ -371,9 +371,6 @@ def refresh_matviews_sql(
         # Leaves: reads from base tables only.
         f"{p}_current_transactions",
         f"{p}_current_daily_balances",
-        # Helpers: read from current_*.
-        f"{p}_computed_subledger_balance",
-        f"{p}_computed_ledger_balance",
         # CL.5 — carry-forward effective balance: every (account, day)
         # in scope, with sparse-day gaps filled via LAST_VALUE IGNORE
         # NULLS window. Drift / ledger_drift / overdraft now read this
@@ -381,6 +378,11 @@ def refresh_matviews_sql(
         # (not just emitted rows). Reads from current_daily_balances +
         # current_transactions; refresh after those two.
         f"{p}_effective_balances",
+        # Helpers: read from current_* + the carry-forward spine
+        # (DS.3.2 keyed them onto effective_balances so carried days
+        # get a computed side — refresh AFTER it).
+        f"{p}_computed_subledger_balance",
+        f"{p}_computed_ledger_balance",
         # DK.1 — data_anchor singleton matview: GREATEST over MAX(
         # transactions.posting) and MAX(daily_balances.business_day_end
         # WHERE account_scope='internal'). Read by dashboards at
@@ -548,10 +550,11 @@ def _emit_table_based_matview_refresh(
     names = [
         f"{p}_current_transactions",
         f"{p}_current_daily_balances",
-        f"{p}_computed_subledger_balance",
-        f"{p}_computed_ledger_balance",
         # CL.5 — carry-forward source for drift / ledger_drift / overdraft.
         f"{p}_effective_balances",
+        # DS.3.2 — the two computed_* helpers read the spine now.
+        f"{p}_computed_subledger_balance",
+        f"{p}_computed_ledger_balance",
         # DK.1 — data_anchor singleton matview (DuckDB table-based refresh
         # path; mirrors the PG/Oracle list above).
         f"{p}_data_anchor",
@@ -712,7 +715,11 @@ def _render_computed_subledger_balance_section(
         f"          AND tx.status = 'Posted'\n"
         f"          AND tx.posting <= sb.business_day_end\n"
         f"    ), 0) AS computed_balance\n"
-        f"FROM {p}_current_daily_balances sb\n"
+        f"-- DS.3.2 -- keyed on the carry-forward spine, so carried days\n"
+        f"-- get a computed side (business_day_end on a carried row is\n"
+        f"-- this day at the carried end time-of-day). Reads\n"
+        f"-- effective_balances: create + refresh AFTER it.\n"
+        f"FROM {p}_effective_balances sb\n"
         f"WHERE sb.account_scope = 'internal'\n"
         f"  AND sb.account_parent_role IS NOT NULL;\n"
         f"{matview_index}"
@@ -2239,15 +2246,17 @@ _L1_INVARIANT_DROP_NAMES: tuple[str, ...] = (
     "drift_summary",
     "ledger_drift",
     "drift",
-    # CL.5 — effective_balances is a carry-forward source for the 3
-    # invariants above; drop after them.
+    # DS.3.2 — the two computed_* helpers read effective_balances now;
+    # drop them BEFORE it or PG refuses with "dependent objects".
+    "computed_ledger_balance",
+    "computed_subledger_balance",
+    # CL.5 — effective_balances is the carry-forward source for the
+    # invariants + helpers above; drop after them all.
     "effective_balances",
     # DK.1 — data_anchor is a leaf (reads only from current_*); no
     # downstream matview depends on it (consumers query at app-build).
     # Drops alongside effective_balances as another leaf helper.
     "data_anchor",
-    "computed_ledger_balance",
-    "computed_subledger_balance",
 )
 
 
@@ -2688,55 +2697,6 @@ _L1_INVARIANT_VIEWS_TEMPLATE = """\
 -- (DROPs moved to the top of the script so they run before the base
 -- DROPs that would otherwise hit "dependent objects still exist".)
 
-{computed_subledger_balance_section}
-
--- ---------------------------------------------------------------------
--- Helper view: ComputedBalance theorem for parent (ledger) accounts.
--- Per SPEC's LedgerDrift: stored ledger balance should equal
---   Σ child sub-ledger stored balances + Σ direct ledger postings.
--- A "parent" account is one whose role appears as account_parent_role
--- on at least one other account (resolved via subquery).
--- ---------------------------------------------------------------------
-{matview_create_kw} {p}_computed_ledger_balance{matview_options} AS
-SELECT
-    parent_db.account_id,
-    parent_db.account_role,
-    parent_db.business_day_start,
-    parent_db.business_day_end,
-    COALESCE(child_totals.child_balance, 0)
-        + COALESCE((
-            SELECT SUM(tx.amount_money)
-            FROM {p}_current_transactions tx
-            WHERE tx.account_id = parent_db.account_id
-              AND tx.status = 'Posted'
-              AND tx.posting <= parent_db.business_day_end
-        ), 0) AS computed_balance
-FROM {p}_current_daily_balances parent_db
-LEFT JOIN (
-    SELECT
-        child_db.account_parent_role AS parent_role,
-        child_db.business_day_start,
-        SUM(child_db.money) AS child_balance
-    FROM {p}_current_daily_balances child_db
-    WHERE child_db.account_parent_role IS NOT NULL
-    GROUP BY child_db.account_parent_role, child_db.business_day_start
-) child_totals
-    ON child_totals.parent_role = parent_db.account_role
-   AND child_totals.business_day_start = parent_db.business_day_start
-WHERE parent_db.account_scope = 'internal'
-  AND parent_db.account_role IS NOT NULL
-  -- Only emit for accounts whose role IS a parent role to some child.
-  AND EXISTS (
-      SELECT 1 FROM {p}_current_daily_balances child2
-      WHERE child2.account_parent_role = parent_db.account_role
-  );
--- JOIN key with current_daily_balances + ledger_drift's WHERE filter.
--- BV.6 — promoted to UNIQUE: computed_ledger_balance projects one row
--- per (account_id, business_day_start) by construction (FROM
--- current_daily_balances parent_db, no GROUP BY that fans out). UNIQUE
--- unlocks PG REFRESH … CONCURRENTLY.
-CREATE UNIQUE INDEX idx_{p}_clb_account_day
-    ON {p}_computed_ledger_balance (account_id, business_day_start);
 
 -- ---------------------------------------------------------------------
 -- CL.5 — Carry-forward effective balance per (account, business_day).
@@ -2846,7 +2806,20 @@ spine_joined AS (
         CASE WHEN db.money IS NOT NULL
              THEN db.business_day_start
                   - CAST({to_date_db_start} AS TIMESTAMP) END
-            AS emit_tod_marker
+            AS emit_tod_marker,
+        -- emit_end_tod_marker: the emit's END time-of-day, carried
+        -- the same way (DS.3.2, operator-decided): the last loaded
+        -- balance day's end carries forward — a 17:00 cutover stays
+        -- 17:00 on every quiet day until the next loaded balance row.
+        -- Same per-account-constant assumption carried_tod already
+        -- makes (MAX picks the largest tod ever seen, which equals
+        -- the most recent only because an account's offset doesn't
+        -- move; stored timestamps are LOCAL, so a wall-clock cutover
+        -- is constant across DST too).
+        CASE WHEN db.money IS NOT NULL
+             THEN db.business_day_end
+                  - CAST({to_date_db_start} AS TIMESTAMP) END
+            AS emit_end_tod_marker
     FROM all_internal_accounts a
     CROSS JOIN in_scope_calendar_days d
     LEFT JOIN {p}_current_daily_balances db
@@ -2871,7 +2844,12 @@ carried AS (
             PARTITION BY sj.account_id
             ORDER BY sj.calendar_day
             ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-        ) AS carried_tod
+        ) AS carried_tod,
+        MAX(sj.emit_end_tod_marker) OVER (
+            PARTITION BY sj.account_id
+            ORDER BY sj.calendar_day
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) AS carried_end_tod
     FROM spine_joined sj
 )
 SELECT
@@ -2895,7 +2873,13 @@ SELECT
     -- carried_from_day = emitted_business_day_start and the JOIN
     -- self-matches; when carried, carried_from_day points at the
     -- prior emit row.
-    COALESCE(c.emitted_day_end, db2.business_day_end)
+    -- DS.3.2 — carried days previously inherited the prior emit's
+    -- ABSOLUTE end (a cutoff on the wrong DATE — the same bug shape
+    -- the business_day_start fix above closed for starts). Now: this
+    -- day at the carried end time-of-day, per the operator's rule —
+    -- the last loaded balance day's end carries until the next load.
+    COALESCE(c.emitted_day_end,
+             CAST(c.calendar_day AS TIMESTAMP) + c.carried_end_tod)
         AS business_day_end,
     c.emitted_money,
     COALESCE(c.emitted_money, db2.money) AS effective_money,
@@ -2931,6 +2915,66 @@ WHERE c.carried_tod IS NOT NULL;
 -- to keep the invariant). UNIQUE unlocks PG REFRESH … CONCURRENTLY.
 CREATE UNIQUE INDEX idx_{p}_eff_balances_account_day
     ON {p}_effective_balances (account_id, business_day_start);
+
+-- DS.3.2 — computed_subledger_balance + computed_ledger_balance are
+-- keyed on the carry-forward spine (they read effective_balances),
+-- so their CREATEs live AFTER it. Moving them back above the CL.5
+-- block breaks schema apply with a missing-relation error.
+{computed_subledger_balance_section}
+
+-- ---------------------------------------------------------------------
+-- Helper view: ComputedBalance theorem for parent (ledger) accounts.
+-- Per SPEC's LedgerDrift: stored ledger balance should equal
+--   Σ child sub-ledger stored balances + Σ direct ledger postings.
+-- A "parent" account is one whose role appears as account_parent_role
+-- on at least one other account (resolved via subquery).
+-- ---------------------------------------------------------------------
+-- DS.3.2 — keyed on the carry-forward spine: parents AND children
+-- carry between loads (a quiet child still holds its position), so
+-- carried days get a computed side and ledger_drift can fire on them.
+-- The child join stays timestamp-equality on business_day_start —
+-- per-account time-of-day offsets must agree within a parent/child
+-- family (pre-existing behavior, unchanged here).
+{matview_create_kw} {p}_computed_ledger_balance{matview_options} AS
+SELECT
+    parent_db.account_id,
+    parent_db.account_role,
+    parent_db.business_day_start,
+    parent_db.business_day_end,
+    COALESCE(child_totals.child_balance, 0)
+        + COALESCE((
+            SELECT SUM(tx.amount_money)
+            FROM {p}_current_transactions tx
+            WHERE tx.account_id = parent_db.account_id
+              AND tx.status = 'Posted'
+              AND tx.posting <= parent_db.business_day_end
+        ), 0) AS computed_balance
+FROM {p}_effective_balances parent_db
+LEFT JOIN (
+    SELECT
+        child_db.account_parent_role AS parent_role,
+        child_db.business_day_start,
+        SUM(child_db.effective_money) AS child_balance
+    FROM {p}_effective_balances child_db
+    WHERE child_db.account_parent_role IS NOT NULL
+    GROUP BY child_db.account_parent_role, child_db.business_day_start
+) child_totals
+    ON child_totals.parent_role = parent_db.account_role
+   AND child_totals.business_day_start = parent_db.business_day_start
+WHERE parent_db.account_scope = 'internal'
+  AND parent_db.account_role IS NOT NULL
+  -- Only emit for accounts whose role IS a parent role to some child.
+  AND EXISTS (
+      SELECT 1 FROM {p}_current_daily_balances child2
+      WHERE child2.account_parent_role = parent_db.account_role
+  );
+-- JOIN key with current_daily_balances + ledger_drift's WHERE filter.
+-- BV.6 — promoted to UNIQUE: computed_ledger_balance projects one row
+-- per (account_id, business_day_start) by construction (FROM
+-- current_daily_balances parent_db, no GROUP BY that fans out). UNIQUE
+-- unlocks PG REFRESH … CONCURRENTLY.
+CREATE UNIQUE INDEX idx_{p}_clb_account_day
+    ON {p}_computed_ledger_balance (account_id, business_day_start);
 
 -- ---------------------------------------------------------------------
 -- DK.1 — Data anchor (singleton matview).
