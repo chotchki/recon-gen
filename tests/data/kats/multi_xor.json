@@ -1,0 +1,177 @@
+{
+ "kind": "CARDINALITY",
+ "vectors": [
+  {
+   "name": "MX1-exactly-one-sibling",
+   "state": {
+    "legs": [
+     {
+      "id": "lp",
+      "entry": 1,
+      "account_id": "a",
+      "amount": -100,
+      "status": "Posted",
+      "posting": "2030-01-01T10:00:00",
+      "transfer_id": "t-p",
+      "rail_name": "BulkAccrualSettlement"
+     },
+     {
+      "id": "lc",
+      "entry": 1,
+      "account_id": "b",
+      "amount": 100,
+      "status": "Posted",
+      "posting": "2030-01-01T11:00:00",
+      "transfer_id": "t-c1",
+      "transfer_parent_id": "t-p",
+      "rail_name": "BulkAccrualSettleACH"
+     }
+    ],
+    "balances": []
+   },
+   "cell": {
+    "parent_transfer_id": "t-p",
+    "parent_name": "BulkAccrualSettlement"
+   },
+   "params": {
+    "child_names": [
+     "BulkAccrualSettleACH",
+     "BulkAccrualSettleWire"
+    ]
+   },
+   "expected": 0
+  },
+  {
+   "name": "MX2-missed",
+   "state": {
+    "legs": [
+     {
+      "id": "lp",
+      "entry": 1,
+      "account_id": "a",
+      "amount": -100,
+      "status": "Posted",
+      "posting": "2030-01-01T10:00:00",
+      "transfer_id": "t-p",
+      "rail_name": "BulkAccrualSettlement"
+     }
+    ],
+    "balances": []
+   },
+   "cell": {
+    "parent_transfer_id": "t-p",
+    "parent_name": "BulkAccrualSettlement"
+   },
+   "params": {
+    "child_names": [
+     "BulkAccrualSettleACH",
+     "BulkAccrualSettleWire"
+    ]
+   },
+   "expected": -1
+  },
+  {
+   "name": "MX3-overlap",
+   "state": {
+    "legs": [
+     {
+      "id": "lp",
+      "entry": 1,
+      "account_id": "a",
+      "amount": -100,
+      "status": "Posted",
+      "posting": "2030-01-01T10:00:00",
+      "transfer_id": "t-p",
+      "rail_name": "BulkAccrualSettlement"
+     },
+     {
+      "id": "lc1",
+      "entry": 1,
+      "account_id": "b",
+      "amount": 100,
+      "status": "Posted",
+      "posting": "2030-01-01T11:00:00",
+      "transfer_id": "t-c1",
+      "transfer_parent_id": "t-p",
+      "rail_name": "BulkAccrualSettleACH"
+     },
+     {
+      "id": "lc2",
+      "entry": 1,
+      "account_id": "c",
+      "amount": 100,
+      "status": "Posted",
+      "posting": "2030-01-01T11:30:00",
+      "transfer_id": "t-c2",
+      "transfer_parent_id": "t-p",
+      "rail_name": "BulkAccrualSettleWire"
+     }
+    ],
+    "balances": []
+   },
+   "cell": {
+    "parent_transfer_id": "t-p",
+    "parent_name": "BulkAccrualSettlement"
+   },
+   "params": {
+    "child_names": [
+     "BulkAccrualSettleACH",
+     "BulkAccrualSettleWire"
+    ]
+   },
+   "expected": 1
+  },
+  {
+   "name": "MX4-multi-day-parent-single-child-BORN-DIVERGENT",
+   "comment": "pins DS.3.3a: names count ONCE however many posting days; today's SQL reads this cell as ('overlap', 2)",
+   "state": {
+    "legs": [
+     {
+      "id": "lp1",
+      "entry": 1,
+      "account_id": "a",
+      "amount": -100,
+      "status": "Posted",
+      "posting": "2030-01-01T23:50:00",
+      "transfer_id": "t-p",
+      "rail_name": "BulkAccrualSettlement"
+     },
+     {
+      "id": "lp2",
+      "entry": 1,
+      "account_id": "a",
+      "amount": -100,
+      "status": "Posted",
+      "posting": "2030-01-02T00:10:00",
+      "transfer_id": "t-p",
+      "rail_name": "BulkAccrualSettlement"
+     },
+     {
+      "id": "lc",
+      "entry": 1,
+      "account_id": "b",
+      "amount": 100,
+      "status": "Posted",
+      "posting": "2030-01-02T01:00:00",
+      "transfer_id": "t-c1",
+      "transfer_parent_id": "t-p",
+      "rail_name": "BulkAccrualSettleACH"
+     }
+    ],
+    "balances": []
+   },
+   "cell": {
+    "parent_transfer_id": "t-p",
+    "parent_name": "BulkAccrualSettlement"
+   },
+   "params": {
+    "child_names": [
+     "BulkAccrualSettleACH",
+     "BulkAccrualSettleWire"
+    ]
+   },
+   "expected": 0
+  }
+ ],
+ "invariant": "multi_xor"
+}

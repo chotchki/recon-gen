@@ -1,0 +1,158 @@
+{
+ "kind": "DERIVATION",
+ "vectors": [
+  {
+   "name": "D1-root-and-child",
+   "state": {
+    "legs": [
+     {
+      "id": "r1",
+      "entry": 1,
+      "account_id": "A",
+      "amount": -100,
+      "status": "Posted",
+      "posting": "2030-01-01T10:00:00",
+      "transfer_id": "R"
+     },
+     {
+      "id": "r2",
+      "entry": 1,
+      "account_id": "B",
+      "amount": 100,
+      "status": "Posted",
+      "posting": "2030-01-01T10:00:00",
+      "transfer_id": "R"
+     },
+     {
+      "id": "c1",
+      "entry": 1,
+      "account_id": "B",
+      "amount": -100,
+      "status": "Posted",
+      "posting": "2030-01-01T11:00:00",
+      "transfer_id": "C",
+      "transfer_parent_id": "R"
+     },
+     {
+      "id": "c2",
+      "entry": 1,
+      "account_id": "C1",
+      "amount": 100,
+      "status": "Posted",
+      "posting": "2030-01-01T11:00:00",
+      "transfer_id": "C",
+      "transfer_parent_id": "R"
+     }
+    ],
+    "balances": []
+   },
+   "emitted": [
+    [
+     "R",
+     "A",
+     "B",
+     0
+    ],
+    [
+     "R",
+     "B",
+     "C1",
+     1
+    ]
+   ],
+   "expected": []
+  },
+  {
+   "name": "D2-two-sources-cross-product",
+   "state": {
+    "legs": [
+     {
+      "id": "r1",
+      "entry": 1,
+      "account_id": "A1",
+      "amount": -60,
+      "status": "Posted",
+      "posting": "2030-01-01T10:00:00",
+      "transfer_id": "R2"
+     },
+     {
+      "id": "r2",
+      "entry": 1,
+      "account_id": "A2",
+      "amount": -40,
+      "status": "Posted",
+      "posting": "2030-01-01T10:00:00",
+      "transfer_id": "R2"
+     },
+     {
+      "id": "r3",
+      "entry": 1,
+      "account_id": "B",
+      "amount": 100,
+      "status": "Posted",
+      "posting": "2030-01-01T10:00:00",
+      "transfer_id": "R2"
+     }
+    ],
+    "balances": []
+   },
+   "emitted": [
+    [
+     "R2",
+     "A1",
+     "B",
+     0
+    ],
+    [
+     "R2",
+     "A2",
+     "B",
+     0
+    ]
+   ],
+   "expected": []
+  },
+  {
+   "name": "D3-cycle-silently-omitted-CURRENT-SEMANTICS",
+   "comment": "flips WITH DS.3.1 when silence becomes a loud pre-refresh failure",
+   "state": {
+    "legs": [
+     {
+      "id": "p1",
+      "entry": 1,
+      "account_id": "X",
+      "amount": -100,
+      "status": "Posted",
+      "posting": "2030-01-01T10:00:00",
+      "transfer_id": "P",
+      "transfer_parent_id": "Q"
+     },
+     {
+      "id": "p2",
+      "entry": 1,
+      "account_id": "Y",
+      "amount": 100,
+      "status": "Posted",
+      "posting": "2030-01-01T10:00:00",
+      "transfer_id": "P",
+      "transfer_parent_id": "Q"
+     },
+     {
+      "id": "q1",
+      "entry": 1,
+      "account_id": "Y",
+      "amount": -100,
+      "status": "Posted",
+      "posting": "2030-01-01T11:00:00",
+      "transfer_id": "Q",
+      "transfer_parent_id": "P"
+     }
+    ],
+    "balances": []
+   },
+   "emitted": [],
+   "expected": []
+  }
+ ],
+ "invariant": "money_trail"
+}

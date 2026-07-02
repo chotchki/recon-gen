@@ -1,0 +1,290 @@
+{
+ "kind": "CARDINALITY",
+ "vectors": [
+  {
+   "name": "F1-expected-met",
+   "state": {
+    "legs": [
+     {
+      "id": "l0",
+      "entry": 1,
+      "account_id": "a",
+      "amount": 100,
+      "status": "Posted",
+      "posting": "2030-01-01T10:00:00",
+      "transfer_id": "t-f",
+      "transfer_parent_id": "p-0",
+      "rail_name": "r"
+     },
+     {
+      "id": "l1",
+      "entry": 1,
+      "account_id": "a",
+      "amount": 100,
+      "status": "Posted",
+      "posting": "2030-01-01T10:00:00",
+      "transfer_id": "t-f",
+      "transfer_parent_id": "p-1",
+      "rail_name": "r"
+     },
+     {
+      "id": "l2",
+      "entry": 1,
+      "account_id": "a",
+      "amount": 100,
+      "status": "Posted",
+      "posting": "2030-01-01T10:00:00",
+      "transfer_id": "t-f",
+      "transfer_parent_id": "p-2",
+      "rail_name": "r"
+     },
+     {
+      "id": "l3",
+      "entry": 1,
+      "account_id": "a",
+      "amount": 100,
+      "status": "Posted",
+      "posting": "2030-01-01T10:00:00",
+      "transfer_id": "t-f",
+      "transfer_parent_id": "p-3",
+      "rail_name": "r"
+     },
+     {
+      "id": "l4",
+      "entry": 1,
+      "account_id": "a",
+      "amount": 100,
+      "status": "Posted",
+      "posting": "2030-01-01T10:00:00",
+      "transfer_id": "t-f",
+      "transfer_parent_id": "p-4",
+      "rail_name": "r"
+     }
+    ],
+    "balances": []
+   },
+   "cell": {
+    "child_transfer_id": "t-f"
+   },
+   "params": {
+    "expected_parent_count": 5
+   },
+   "expected": 0
+  },
+  {
+   "name": "F2-missing-parent",
+   "state": {
+    "legs": [
+     {
+      "id": "l0",
+      "entry": 1,
+      "account_id": "a",
+      "amount": 100,
+      "status": "Posted",
+      "posting": "2030-01-01T10:00:00",
+      "transfer_id": "t-f",
+      "transfer_parent_id": "p-0",
+      "rail_name": "r"
+     },
+     {
+      "id": "l1",
+      "entry": 1,
+      "account_id": "a",
+      "amount": 100,
+      "status": "Posted",
+      "posting": "2030-01-01T10:00:00",
+      "transfer_id": "t-f",
+      "transfer_parent_id": "p-1",
+      "rail_name": "r"
+     },
+     {
+      "id": "l2",
+      "entry": 1,
+      "account_id": "a",
+      "amount": 100,
+      "status": "Posted",
+      "posting": "2030-01-01T10:00:00",
+      "transfer_id": "t-f",
+      "transfer_parent_id": "p-2",
+      "rail_name": "r"
+     },
+     {
+      "id": "l3",
+      "entry": 1,
+      "account_id": "a",
+      "amount": 100,
+      "status": "Posted",
+      "posting": "2030-01-01T10:00:00",
+      "transfer_id": "t-f",
+      "transfer_parent_id": "p-3",
+      "rail_name": "r"
+     }
+    ],
+    "balances": []
+   },
+   "cell": {
+    "child_transfer_id": "t-f"
+   },
+   "params": {
+    "expected_parent_count": 5
+   },
+   "expected": -1
+  },
+  {
+   "name": "F3-extra-parent",
+   "state": {
+    "legs": [
+     {
+      "id": "l0",
+      "entry": 1,
+      "account_id": "a",
+      "amount": 100,
+      "status": "Posted",
+      "posting": "2030-01-01T10:00:00",
+      "transfer_id": "t-f",
+      "transfer_parent_id": "p-0",
+      "rail_name": "r"
+     },
+     {
+      "id": "l1",
+      "entry": 1,
+      "account_id": "a",
+      "amount": 100,
+      "status": "Posted",
+      "posting": "2030-01-01T10:00:00",
+      "transfer_id": "t-f",
+      "transfer_parent_id": "p-1",
+      "rail_name": "r"
+     },
+     {
+      "id": "l2",
+      "entry": 1,
+      "account_id": "a",
+      "amount": 100,
+      "status": "Posted",
+      "posting": "2030-01-01T10:00:00",
+      "transfer_id": "t-f",
+      "transfer_parent_id": "p-2",
+      "rail_name": "r"
+     },
+     {
+      "id": "l3",
+      "entry": 1,
+      "account_id": "a",
+      "amount": 100,
+      "status": "Posted",
+      "posting": "2030-01-01T10:00:00",
+      "transfer_id": "t-f",
+      "transfer_parent_id": "p-3",
+      "rail_name": "r"
+     },
+     {
+      "id": "l4",
+      "entry": 1,
+      "account_id": "a",
+      "amount": 100,
+      "status": "Posted",
+      "posting": "2030-01-01T10:00:00",
+      "transfer_id": "t-f",
+      "transfer_parent_id": "p-4",
+      "rail_name": "r"
+     },
+     {
+      "id": "l5",
+      "entry": 1,
+      "account_id": "a",
+      "amount": 100,
+      "status": "Posted",
+      "posting": "2030-01-01T10:00:00",
+      "transfer_id": "t-f",
+      "transfer_parent_id": "p-5",
+      "rail_name": "r"
+     }
+    ],
+    "balances": []
+   },
+   "cell": {
+    "child_transfer_id": "t-f"
+   },
+   "params": {
+    "expected_parent_count": 5
+   },
+   "expected": 1
+  },
+  {
+   "name": "F4-orphan-under-unset-expectation",
+   "state": {
+    "legs": [
+     {
+      "id": "l0",
+      "entry": 1,
+      "account_id": "a",
+      "amount": 100,
+      "status": "Posted",
+      "posting": "2030-01-01T10:00:00",
+      "transfer_id": "t-f",
+      "transfer_parent_id": "p-0",
+      "rail_name": "r"
+     }
+    ],
+    "balances": []
+   },
+   "cell": {
+    "child_transfer_id": "t-f"
+   },
+   "params": {
+    "expected_parent_count": null
+   },
+   "expected": -1
+  },
+  {
+   "name": "F5-unset-expectation-satisfied-by-3",
+   "state": {
+    "legs": [
+     {
+      "id": "l0",
+      "entry": 1,
+      "account_id": "a",
+      "amount": 100,
+      "status": "Posted",
+      "posting": "2030-01-01T10:00:00",
+      "transfer_id": "t-f",
+      "transfer_parent_id": "p-0",
+      "rail_name": "r"
+     },
+     {
+      "id": "l1",
+      "entry": 1,
+      "account_id": "a",
+      "amount": 100,
+      "status": "Posted",
+      "posting": "2030-01-01T10:00:00",
+      "transfer_id": "t-f",
+      "transfer_parent_id": "p-1",
+      "rail_name": "r"
+     },
+     {
+      "id": "l2",
+      "entry": 1,
+      "account_id": "a",
+      "amount": 100,
+      "status": "Posted",
+      "posting": "2030-01-01T10:00:00",
+      "transfer_id": "t-f",
+      "transfer_parent_id": "p-2",
+      "rail_name": "r"
+     }
+    ],
+    "balances": []
+   },
+   "cell": {
+    "child_transfer_id": "t-f"
+   },
+   "params": {
+    "expected_parent_count": null
+   },
+   "expected": 0
+  }
+ ],
+ "invariant": "fan_in"
+}

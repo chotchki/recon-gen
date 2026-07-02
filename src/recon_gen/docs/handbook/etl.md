@@ -50,6 +50,18 @@ failure modes, metadata catalog and ETL examples:
   source-of-truth document. Read the *Getting Started for Data
   Teams* preamble first.
 
+**One precondition that WILL bite a mid-history cutover:** the drift
+check computes each account's balance as the sum of every Posted leg
+you have ever fed — there is no opening-balance column. Feed
+transactions from a cutover date without the prior history and every
+account that existed before that date reports drift (its stored
+balance reflects real history your feed doesn't carry). Two ways to
+onboard: feed the full history from account origin, or seed each
+pre-existing account with ONE synthetic opening transaction equal to
+its balance at cutover plus the matching balance row — sums-from-zero
+then reconcile from day one. Details in
+[Schema v6's sign-convention section](../Schema_v6.md#sign-convention).
+
 ### Optional: `expected_complete_at` (lateness)
 
 `transactions` carries an optional `expected_complete_at TIMESTAMP`

@@ -1,0 +1,152 @@
+{
+ "kind": "MONEY",
+ "vectors": [
+  {
+   "name": "M1-clean-day",
+   "comment": "Pending excluded: money moves on Posted only",
+   "state": {
+    "legs": [
+     {
+      "id": "l1",
+      "entry": 1,
+      "account_id": "acct-m",
+      "amount": 300,
+      "status": "Posted",
+      "posting": "2030-01-01T12:00:00",
+      "transfer_id": "t1",
+      "account_parent_role": "ParentGL",
+      "account_role": "CustomerDDA"
+     },
+     {
+      "id": "l2",
+      "entry": 1,
+      "account_id": "acct-m",
+      "amount": 200,
+      "status": "Posted",
+      "posting": "2030-01-01T12:30:00",
+      "transfer_id": "t2",
+      "account_parent_role": "ParentGL",
+      "account_role": "CustomerDDA"
+     },
+     {
+      "id": "l3",
+      "entry": 1,
+      "account_id": "acct-m",
+      "amount": 50,
+      "status": "Pending",
+      "posting": "2030-01-01T13:00:00",
+      "transfer_id": "t3",
+      "account_parent_role": "ParentGL",
+      "account_role": "CustomerDDA"
+     }
+    ],
+    "balances": [
+     {
+      "account_id": "acct-m",
+      "entry": 1,
+      "day": "2030-01-01",
+      "money": 500,
+      "account_parent_role": "ParentGL",
+      "account_role": "CustomerDDA"
+     }
+    ]
+   },
+   "cell": {
+    "account_id": "acct-m",
+    "day": "2030-01-01"
+   },
+   "expected": 0
+  },
+  {
+   "name": "M2-claim-lower-than-evidence",
+   "comment": "reported -200 vs calculated -100 -> -100 (claims 100c less than legs explain)",
+   "state": {
+    "legs": [
+     {
+      "id": "l1",
+      "entry": 1,
+      "account_id": "acct-m",
+      "amount": -100,
+      "status": "Posted",
+      "posting": "2030-01-01T12:00:00",
+      "transfer_id": "t1",
+      "account_parent_role": "ParentGL",
+      "account_role": "CustomerDDA"
+     },
+     {
+      "id": "l2",
+      "entry": 1,
+      "account_id": "acct-m",
+      "amount": -50,
+      "status": "Pending",
+      "posting": "2030-01-01T12:30:00",
+      "transfer_id": "t2",
+      "account_parent_role": "ParentGL",
+      "account_role": "CustomerDDA"
+     }
+    ],
+    "balances": [
+     {
+      "account_id": "acct-m",
+      "entry": 1,
+      "day": "2030-01-01",
+      "money": -200,
+      "account_parent_role": "ParentGL",
+      "account_role": "CustomerDDA"
+     }
+    ]
+   },
+   "cell": {
+    "account_id": "acct-m",
+    "day": "2030-01-01"
+   },
+   "expected": -100
+  },
+  {
+   "name": "M3-carried-day-violation-BORN-FAILING",
+   "comment": "the E1c witness: d1 has no emit, claim carries at -200, evidence walks to -300; pins DS.3.2",
+   "state": {
+    "legs": [
+     {
+      "id": "l1",
+      "entry": 1,
+      "account_id": "acct-m",
+      "amount": -200,
+      "status": "Posted",
+      "posting": "2030-01-01T12:00:00",
+      "transfer_id": "t1",
+      "account_parent_role": "ParentGL",
+      "account_role": "CustomerDDA"
+     },
+     {
+      "id": "l2",
+      "entry": 1,
+      "account_id": "acct-m",
+      "amount": -100,
+      "status": "Posted",
+      "posting": "2030-01-02T12:00:00",
+      "transfer_id": "t2",
+      "account_parent_role": "ParentGL",
+      "account_role": "CustomerDDA"
+     }
+    ],
+    "balances": [
+     {
+      "account_id": "acct-m",
+      "entry": 1,
+      "day": "2030-01-01",
+      "money": -200,
+      "account_parent_role": "ParentGL",
+      "account_role": "CustomerDDA"
+     }
+    ]
+   },
+   "cell": {
+    "account_id": "acct-m",
+    "day": "2030-01-02"
+   },
+   "expected": 100
+  }
+ ],
+ "invariant": "drift"
+}

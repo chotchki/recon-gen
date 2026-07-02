@@ -1,0 +1,71 @@
+{
+ "kind": "MONEY",
+ "vectors": [
+  {
+   "name": "E1-on-target",
+   "state": {
+    "legs": [],
+    "balances": [
+     {
+      "account_id": "acct-e",
+      "entry": 1,
+      "day": "2030-01-01",
+      "money": 100,
+      "expected_eod": 100,
+      "account_parent_role": "ParentGL",
+      "account_role": "CustomerDDA"
+     }
+    ]
+   },
+   "cell": {
+    "account_id": "acct-e",
+    "day": "2030-01-01"
+   },
+   "expected": 0
+  },
+  {
+   "name": "E2-over-target",
+   "state": {
+    "legs": [],
+    "balances": [
+     {
+      "account_id": "acct-e",
+      "entry": 1,
+      "day": "2030-01-01",
+      "money": 120,
+      "expected_eod": 100,
+      "account_parent_role": "ParentGL",
+      "account_role": "CustomerDDA"
+     }
+    ]
+   },
+   "cell": {
+    "account_id": "acct-e",
+    "day": "2030-01-01"
+   },
+   "expected": 20
+  },
+  {
+   "name": "E3-no-expectation-no-cell",
+   "state": {
+    "legs": [],
+    "balances": [
+     {
+      "account_id": "acct-e",
+      "entry": 1,
+      "day": "2030-01-01",
+      "money": 120,
+      "account_parent_role": "ParentGL",
+      "account_role": "CustomerDDA"
+     }
+    ]
+   },
+   "cell": {
+    "account_id": "acct-e",
+    "day": "2030-01-01"
+   },
+   "expected": null
+  }
+ ],
+ "invariant": "expected_eod"
+}

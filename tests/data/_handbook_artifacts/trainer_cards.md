@@ -24,7 +24,7 @@ Row count: **26** kinds.
 
 ## drift
 
-**Short statement:** For every CurrentStoredBalance where `Account.Scope = Internal` and `¬IsParent(Account)`, `Drift(Account, BusinessDay)` SHOULD equal 0.
+**Short statement:** For every internal leaf Account, on EVERY business day — emitted or carried — `Drift(Account, BusinessDay)` SHOULD equal 0.
 
 **What to do:** Diff the day's transactions for `account_id` against the stored balance — the gap is missing or duplicated postings on that account-day. Re-load the source feed for the account-day and refresh matviews.
 
@@ -36,7 +36,7 @@ Row count: **26** kinds.
 
 ## overdraft
 
-**Short statement:** For every CurrentStoredBalance, `money` SHOULD be ≥ 0.
+**Short statement:** For every internal Account, on every business day — emitted or carried — the effective balance SHOULD be ≥ 0.
 
 **What to do:** Trace `account_id`'s posting sequence on `business_day_end` to find the over-debit — usually a missing inbound credit or an over-issued debit. Reconcile against the source system and post a correction.
 

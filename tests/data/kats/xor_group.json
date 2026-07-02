@@ -1,0 +1,172 @@
+{
+ "kind": "CARDINALITY",
+ "vectors": [
+  {
+   "name": "C1-exactly-one",
+   "state": {
+    "legs": [
+     {
+      "id": "l1",
+      "entry": 1,
+      "account_id": "a",
+      "amount": -100,
+      "status": "Posted",
+      "posting": "2030-01-01T10:00:00",
+      "transfer_id": "t1",
+      "template_name": "SettlementTimingCycle",
+      "rail_name": "SettlementAuto"
+     }
+    ],
+    "balances": []
+   },
+   "cell": {
+    "transfer_id": "t1",
+    "template_name": "SettlementTimingCycle"
+   },
+   "params": {
+    "member_rails": [
+     "SettlementAuto",
+     "SettlementStandard"
+    ]
+   },
+   "expected": 0
+  },
+  {
+   "name": "C2-pending-keeps-in-flight-standing",
+   "state": {
+    "legs": [
+     {
+      "id": "l1",
+      "entry": 1,
+      "account_id": "a",
+      "amount": -100,
+      "status": "Posted",
+      "posting": "2030-01-01T10:00:00",
+      "transfer_id": "t2",
+      "template_name": "SettlementTimingCycle",
+      "rail_name": "SettlementAuto"
+     },
+     {
+      "id": "l2",
+      "entry": 1,
+      "account_id": "a",
+      "amount": -100,
+      "status": "Pending",
+      "posting": "2030-01-01T10:01:00",
+      "transfer_id": "t2",
+      "template_name": "SettlementTimingCycle",
+      "rail_name": "SettlementStandard"
+     }
+    ],
+    "balances": []
+   },
+   "cell": {
+    "transfer_id": "t2",
+    "template_name": "SettlementTimingCycle"
+   },
+   "params": {
+    "member_rails": [
+     "SettlementAuto",
+     "SettlementStandard"
+    ]
+   },
+   "expected": 1
+  },
+  {
+   "name": "C3-unknown-lands-failed-side-BORN-DIVERGENT",
+   "comment": "today's SQL counts the Zq9x leg via <> 'Failed'; the law voids it; pins DS.3.3",
+   "state": {
+    "legs": [
+     {
+      "id": "l1",
+      "entry": 1,
+      "account_id": "a",
+      "amount": -100,
+      "status": "Posted",
+      "posting": "2030-01-01T10:00:00",
+      "transfer_id": "t3",
+      "template_name": "SettlementTimingCycle",
+      "rail_name": "SettlementSlow"
+     },
+     {
+      "id": "l2",
+      "entry": 1,
+      "account_id": "a",
+      "amount": -100,
+      "status": "Failed",
+      "posting": "2030-01-01T10:01:00",
+      "transfer_id": "t3",
+      "template_name": "SettlementTimingCycle",
+      "rail_name": "SettlementAuto"
+     },
+     {
+      "id": "l3",
+      "entry": 1,
+      "account_id": "a",
+      "amount": -100,
+      "status": "Zq9x",
+      "posting": "2030-01-01T10:02:00",
+      "transfer_id": "t3",
+      "template_name": "SettlementTimingCycle",
+      "rail_name": "SettlementStandard"
+     }
+    ],
+    "balances": []
+   },
+   "cell": {
+    "transfer_id": "t3",
+    "template_name": "SettlementTimingCycle"
+   },
+   "params": {
+    "member_rails": [
+     "SettlementAuto",
+     "SettlementStandard"
+    ]
+   },
+   "expected": -1
+  },
+  {
+   "name": "C4-existence-pin-all-void-transfer-invisible",
+   "comment": "DEFAULT-AND-FLAG for DS.3.3: no firing-status leg -> no cell; the law change moves all-void transfers from alarmed to invisible",
+   "state": {
+    "legs": [
+     {
+      "id": "l1",
+      "entry": 1,
+      "account_id": "a",
+      "amount": -100,
+      "status": "Failed",
+      "posting": "2030-01-01T10:00:00",
+      "transfer_id": "t4",
+      "template_name": "SettlementTimingCycle",
+      "rail_name": "SettlementAuto"
+     },
+     {
+      "id": "l2",
+      "entry": 1,
+      "account_id": "a",
+      "amount": -100,
+      "status": "Zq9x",
+      "posting": "2030-01-01T10:01:00",
+      "transfer_id": "t4",
+      "template_name": "SettlementTimingCycle",
+      "rail_name": "SettlementStandard"
+     }
+    ],
+    "balances": []
+   },
+   "cell": {
+    "transfer_id": "t4",
+    "template_name": "SettlementTimingCycle"
+   },
+   "params": {
+    "member_rails": [
+     "SettlementAuto",
+     "SettlementStandard"
+    ]
+   },
+   "expected": null
+  }
+ ],
+ "invariant": "xor_group"
+}

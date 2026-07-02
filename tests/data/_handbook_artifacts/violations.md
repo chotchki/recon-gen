@@ -81,7 +81,7 @@ Either fix the ETL hook to emit the missing key on every posting tagged with tha
 
 ### Short statement
 
-For every CurrentStoredBalance where `Account.Scope = Internal` and `¬IsParent(Account)`, `Drift(Account, BusinessDay)` SHOULD equal 0.
+For every internal leaf Account, on EVERY business day — emitted or carried — `Drift(Account, BusinessDay)` SHOULD equal 0.
 
 ### What to do
 
@@ -109,7 +109,7 @@ Sum the child accounts of `account_id` on `business_day_start` and compare to th
 
 ### Short statement
 
-For every CurrentStoredBalance, `money` SHOULD be ≥ 0.
+For every internal Account, on every business day — emitted or carried — the effective balance SHOULD be ≥ 0.
 
 ### What to do
 

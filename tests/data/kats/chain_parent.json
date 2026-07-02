@@ -1,0 +1,118 @@
+{
+ "kind": "CARDINALITY",
+ "vectors": [
+  {
+   "name": "CP1-agree",
+   "state": {
+    "legs": [
+     {
+      "id": "l1",
+      "entry": 1,
+      "account_id": "a",
+      "amount": -100,
+      "status": "Posted",
+      "posting": "2030-01-01T10:00:00",
+      "transfer_id": "t-cp",
+      "transfer_parent_id": "p-1",
+      "template_name": "ChildTmpl",
+      "rail_name": "r1"
+     },
+     {
+      "id": "l2",
+      "entry": 1,
+      "account_id": "b",
+      "amount": 100,
+      "status": "Posted",
+      "posting": "2030-01-01T10:00:00",
+      "transfer_id": "t-cp",
+      "transfer_parent_id": "p-1",
+      "template_name": "ChildTmpl",
+      "rail_name": "r2"
+     }
+    ],
+    "balances": []
+   },
+   "cell": {
+    "transfer_id": "t-cp",
+    "template_name": "ChildTmpl"
+   },
+   "expected": 0
+  },
+  {
+   "name": "CP2-two-parents-claimed",
+   "state": {
+    "legs": [
+     {
+      "id": "l1",
+      "entry": 1,
+      "account_id": "a",
+      "amount": -100,
+      "status": "Posted",
+      "posting": "2030-01-01T10:00:00",
+      "transfer_id": "t-cp",
+      "transfer_parent_id": "p-1",
+      "template_name": "ChildTmpl",
+      "rail_name": "r1"
+     },
+     {
+      "id": "l2",
+      "entry": 1,
+      "account_id": "b",
+      "amount": 100,
+      "status": "Posted",
+      "posting": "2030-01-01T10:00:00",
+      "transfer_id": "t-cp",
+      "transfer_parent_id": "p-2",
+      "template_name": "ChildTmpl",
+      "rail_name": "r2"
+     }
+    ],
+    "balances": []
+   },
+   "cell": {
+    "transfer_id": "t-cp",
+    "template_name": "ChildTmpl"
+   },
+   "expected": 1
+  },
+  {
+   "name": "CP3-failed-leg-claim-ignored",
+   "comment": "metadata unreliable on failures \u2014 the Failed leg's parent claim does not count",
+   "state": {
+    "legs": [
+     {
+      "id": "l1",
+      "entry": 1,
+      "account_id": "a",
+      "amount": -100,
+      "status": "Posted",
+      "posting": "2030-01-01T10:00:00",
+      "transfer_id": "t-cp",
+      "transfer_parent_id": "p-1",
+      "template_name": "ChildTmpl",
+      "rail_name": "r1"
+     },
+     {
+      "id": "l2",
+      "entry": 1,
+      "account_id": "b",
+      "amount": 100,
+      "status": "Failed",
+      "posting": "2030-01-01T10:00:00",
+      "transfer_id": "t-cp",
+      "transfer_parent_id": "p-2",
+      "template_name": "ChildTmpl",
+      "rail_name": "r2"
+     }
+    ],
+    "balances": []
+   },
+   "cell": {
+    "transfer_id": "t-cp",
+    "template_name": "ChildTmpl"
+   },
+   "expected": 0
+  }
+ ],
+ "invariant": "chain_parent"
+}

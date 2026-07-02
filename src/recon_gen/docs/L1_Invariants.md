@@ -62,15 +62,21 @@ L1 invariants third, dashboard-shape last.
 
 ### 1. `{{ l2_instance_name }}_drift` — Sub-ledger drift
 
-> For every CurrentStoredBalance where `Account.Scope = Internal`
-> and `¬IsParent(Account)`,
-> `Drift(Account, BusinessDay)` SHOULD equal 0.
+> For every internal leaf Account, on EVERY business day — emitted
+> or carried — `Drift(Account, BusinessDay)` SHOULD equal 0.
 
-Each leaf-account day where the stored balance disagrees with the
-cumulative net of every Posted Money record posted to that account
-through the BusinessDay's end. The disagreement is the *drift*; a
-non-zero value signals the feed diverged from the underlying
-ledger.
+Each leaf-account day where the effective stored balance disagrees
+with the cumulative net of every Posted Money record posted to that
+account through the BusinessDay's end. A balance entry is the source
+of the account's balance UNTIL a newer entry supersedes it, so days
+between emits carry the last claim forward and are checked too — a
+posting that lands on a quiet day moves the computed side while the
+carried claim stands still, and that gap is drift the same as on an
+emit day. The disagreement is the *drift*; a non-zero value signals
+the feed diverged from the underlying ledger. The computed side sums
+from account origin (no opening-balance term) — see Schema v6's
+zero-start precondition for what that demands of a mid-history
+cutover.
 
 **Columns:** `account_id`, `account_name`, `account_role`,
 `account_parent_role`, `business_day_start`, `business_day_end`,
@@ -93,8 +99,12 @@ account-day and refresh matviews.
 > `LedgerDrift(Account, BusinessDay)` SHOULD equal 0.
 
 Each parent-account day where the stored balance disagrees with
-the sum of its child accounts' stored balances. Surfaces a child
-posting that didn't roll up correctly to its parent.
+the sum of its child accounts' stored balances PLUS the parent's
+own direct Posted postings (a parent GL can carry activity of its
+own; those legs count toward its expected position alongside the
+child roll-up). Surfaces a child posting that didn't roll up
+correctly to its parent — or a direct parent posting the stored
+balance never absorbed.
 
 **Columns:** same as `_drift` minus `account_parent_role`
 (parents ARE the parents).
@@ -107,10 +117,13 @@ re-load, refresh.
 
 ### 3. `{{ l2_instance_name }}_overdraft` — Non-negative balance
 
-> For every CurrentStoredBalance,
-> `money` SHOULD be ≥ 0.
+> For every internal Account, on every business day — emitted or
+> carried — the effective balance SHOULD be ≥ 0.
 
-Each internal account day where the stored balance is negative.
+Each internal account day where the effective stored balance is
+negative — including carried days: a sparse account whose last
+emitted balance was negative stays overdrawn on every quiet day
+until an emit says otherwise.
 External counterparties are excluded by construction (the
 asymmetry is intentional: banks may legitimately overdraft *us*;
 we MUST NOT overdraft *them*).

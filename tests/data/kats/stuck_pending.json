@@ -1,0 +1,67 @@
+{
+ "kind": "THRESHOLD",
+ "vectors": [
+  {
+   "name": "T1-two-days-past-one-day-cap",
+   "leg": {
+    "id": "l1",
+    "entry": 1,
+    "account_id": "acct-t",
+    "amount": -100,
+    "status": "Pending",
+    "posting": "2030-01-01T12:00:00",
+    "transfer_id": "t1",
+    "rail_name": "ACH",
+    "account_parent_role": "ParentGL",
+    "account_role": "CustomerDDA"
+   },
+   "params": {
+    "cap_seconds": 86400,
+    "as_of": "2030-01-03T12:00:00"
+   },
+   "expected": 86400
+  },
+  {
+   "name": "T2-exactly-at-cap-not-stuck",
+   "comment": "strict >: the boundary witness noon-only domains never produce",
+   "leg": {
+    "id": "l1",
+    "entry": 1,
+    "account_id": "acct-t",
+    "amount": -100,
+    "status": "Pending",
+    "posting": "2030-01-02T12:00:00",
+    "transfer_id": "t1",
+    "rail_name": "ACH",
+    "account_parent_role": "ParentGL",
+    "account_role": "CustomerDDA"
+   },
+   "params": {
+    "cap_seconds": 86400,
+    "as_of": "2030-01-03T12:00:00"
+   },
+   "expected": 0
+  },
+  {
+   "name": "T3-no-cap-never-stuck",
+   "leg": {
+    "id": "l1",
+    "entry": 1,
+    "account_id": "acct-t",
+    "amount": -100,
+    "status": "Pending",
+    "posting": "2030-01-01T12:00:00",
+    "transfer_id": "t1",
+    "rail_name": "ACH",
+    "account_parent_role": "ParentGL",
+    "account_role": "CustomerDDA"
+   },
+   "params": {
+    "cap_seconds": null,
+    "as_of": "2030-01-03T12:00:00"
+   },
+   "expected": null
+  }
+ ],
+ "invariant": "stuck_pending"
+}

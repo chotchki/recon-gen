@@ -1,0 +1,176 @@
+{
+ "kind": "MONEY",
+ "vectors": [
+  {
+   "name": "LB1-under-cap",
+   "state": {
+    "legs": [
+     {
+      "id": "l1",
+      "entry": 1,
+      "account_id": "acct-l",
+      "amount": -3000,
+      "status": "Posted",
+      "posting": "2030-01-01T10:00:00",
+      "transfer_id": "t1",
+      "rail_name": "WireOut",
+      "account_parent_role": "ParentGL",
+      "account_role": "CustomerDDA"
+     },
+     {
+      "id": "l2",
+      "entry": 1,
+      "account_id": "acct-l",
+      "amount": -2000,
+      "status": "Posted",
+      "posting": "2030-01-01T11:00:00",
+      "transfer_id": "t2",
+      "rail_name": "WireOut",
+      "account_parent_role": "ParentGL",
+      "account_role": "CustomerDDA"
+     }
+    ],
+    "balances": []
+   },
+   "cell": {
+    "account_id": "acct-l",
+    "day": "2030-01-01",
+    "rail_name": "WireOut",
+    "direction": "Outbound"
+   },
+   "params": {
+    "cap": 10000
+   },
+   "expected": 0
+  },
+  {
+   "name": "LB2-outbound-breach",
+   "comment": "flow 22000 over cap 10000 -> +12000",
+   "state": {
+    "legs": [
+     {
+      "id": "l1",
+      "entry": 1,
+      "account_id": "acct-l",
+      "amount": -15000,
+      "status": "Posted",
+      "posting": "2030-01-01T10:00:00",
+      "transfer_id": "t1",
+      "rail_name": "WireOut",
+      "account_parent_role": "ParentGL",
+      "account_role": "CustomerDDA"
+     },
+     {
+      "id": "l2",
+      "entry": 1,
+      "account_id": "acct-l",
+      "amount": -7000,
+      "status": "Posted",
+      "posting": "2030-01-01T11:00:00",
+      "transfer_id": "t2",
+      "rail_name": "WireOut",
+      "account_parent_role": "ParentGL",
+      "account_role": "CustomerDDA"
+     }
+    ],
+    "balances": []
+   },
+   "cell": {
+    "account_id": "acct-l",
+    "day": "2030-01-01",
+    "rail_name": "WireOut",
+    "direction": "Outbound"
+   },
+   "params": {
+    "cap": 10000
+   },
+   "expected": 12000
+  },
+  {
+   "name": "LB3-inbound-counts-credits-only",
+   "comment": "outbound legs invisible to the Inbound cap; +4000 in vs cap 3000 -> +1000",
+   "state": {
+    "legs": [
+     {
+      "id": "l1",
+      "entry": 1,
+      "account_id": "acct-l",
+      "amount": -15000,
+      "status": "Posted",
+      "posting": "2030-01-01T10:00:00",
+      "transfer_id": "t1",
+      "rail_name": "WireOut",
+      "account_parent_role": "ParentGL",
+      "account_role": "CustomerDDA"
+     },
+     {
+      "id": "l2",
+      "entry": 1,
+      "account_id": "acct-l",
+      "amount": 4000,
+      "status": "Posted",
+      "posting": "2030-01-01T11:00:00",
+      "transfer_id": "t2",
+      "rail_name": "WireOut",
+      "account_parent_role": "ParentGL",
+      "account_role": "CustomerDDA"
+     }
+    ],
+    "balances": []
+   },
+   "cell": {
+    "account_id": "acct-l",
+    "day": "2030-01-01",
+    "rail_name": "WireOut",
+    "direction": "Inbound"
+   },
+   "params": {
+    "cap": 3000
+   },
+   "expected": 1000
+  },
+  {
+   "name": "LB4-pending-does-not-flow",
+   "state": {
+    "legs": [
+     {
+      "id": "l1",
+      "entry": 1,
+      "account_id": "acct-l",
+      "amount": -15000,
+      "status": "Pending",
+      "posting": "2030-01-01T10:00:00",
+      "transfer_id": "t1",
+      "rail_name": "WireOut",
+      "account_parent_role": "ParentGL",
+      "account_role": "CustomerDDA"
+     },
+     {
+      "id": "l2",
+      "entry": 1,
+      "account_id": "acct-l",
+      "amount": -2000,
+      "status": "Posted",
+      "posting": "2030-01-01T11:00:00",
+      "transfer_id": "t2",
+      "rail_name": "WireOut",
+      "account_parent_role": "ParentGL",
+      "account_role": "CustomerDDA"
+     }
+    ],
+    "balances": []
+   },
+   "cell": {
+    "account_id": "acct-l",
+    "day": "2030-01-01",
+    "rail_name": "WireOut",
+    "direction": "Outbound"
+   },
+   "params": {
+    "cap": 10000
+   },
+   "expected": 0
+  }
+ ],
+ "invariant": "limit_breach"
+}

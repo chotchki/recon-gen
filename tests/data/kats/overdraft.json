@@ -1,0 +1,70 @@
+{
+ "kind": "MONEY",
+ "vectors": [
+  {
+   "name": "O1-positive",
+   "state": {
+    "legs": [],
+    "balances": [
+     {
+      "account_id": "acct-o",
+      "entry": 1,
+      "day": "2030-01-01",
+      "money": 100,
+      "account_parent_role": "ParentGL",
+      "account_role": "CustomerDDA"
+     }
+    ]
+   },
+   "cell": {
+    "account_id": "acct-o",
+    "day": "2030-01-01"
+   },
+   "expected": 0
+  },
+  {
+   "name": "O2-emitted-negative",
+   "state": {
+    "legs": [],
+    "balances": [
+     {
+      "account_id": "acct-o",
+      "entry": 1,
+      "day": "2030-01-01",
+      "money": -150,
+      "account_parent_role": "ParentGL",
+      "account_role": "CustomerDDA"
+     }
+    ]
+   },
+   "cell": {
+    "account_id": "acct-o",
+    "day": "2030-01-01"
+   },
+   "expected": -150
+  },
+  {
+   "name": "O3-carried-negative",
+   "comment": "carried day fires too \u2014 a sparse account whose last emit was negative is still overdrawn",
+   "state": {
+    "legs": [],
+    "balances": [
+     {
+      "account_id": "acct-o",
+      "entry": 1,
+      "day": "2030-01-01",
+      "money": -150,
+      "account_parent_role": "ParentGL",
+      "account_role": "CustomerDDA"
+     }
+    ]
+   },
+   "cell": {
+    "account_id": "acct-o",
+    "day": "2030-01-02"
+   },
+   "expected": -150
+  }
+ ],
+ "invariant": "overdraft"
+}

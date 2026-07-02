@@ -234,6 +234,21 @@ CREATE INDEX idx_{{ l2_instance_name }}_daily_balances_business_day
 - `daily_balances.money` = `Σ amount_money` over the account's history
   (the drift-check invariant)
 
+**The zero-start precondition — read this before a mid-history
+cutover.** The drift check's computed side sums every Posted leg from
+the beginning of the fed history; there is NO opening-balance
+mechanism. That means the feed must carry each account's transaction
+history complete from account origin — an institution cutting over on
+some date and feeding transactions forward from there will
+false-positive drift on EVERY account that existed before the cutover
+(the stored balances reflect history the feed doesn't carry). The
+clean workaround: at cutover, seed each pre-existing account with one
+synthetic opening transaction whose `amount_money` equals the
+account's balance at cutover, plus the matching `daily_balances` row —
+sums-from-zero then reconcile from the first fed day. Give the
+synthetic leg a dedicated `rail_name` (e.g. `CutoverOpeningBalance`)
+so it's visibly synthetic in every drill-down.
+
 Same rule for every `account_scope`. A leg posted to a customer DDA
 with `amount_money = +25000, amount_direction = 'Credit'` (i.e.
 +$250.00 in cents — see next section) means the customer's balance

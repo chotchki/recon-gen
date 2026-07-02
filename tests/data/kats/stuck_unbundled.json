@@ -1,0 +1,68 @@
+{
+ "kind": "THRESHOLD",
+ "vectors": [
+  {
+   "name": "U1-35-days-past-31-day-cap",
+   "comment": "age 3024000s - cap 2678400s = +345600",
+   "leg": {
+    "id": "l1",
+    "entry": 1,
+    "account_id": "acct-u",
+    "amount": -100,
+    "status": "Posted",
+    "posting": "2030-01-01T00:00:00",
+    "transfer_id": "t1",
+    "rail_name": "FeeAccrual",
+    "account_parent_role": "ParentGL",
+    "account_role": "CustomerDDA"
+   },
+   "params": {
+    "cap_seconds": 2678400,
+    "as_of": "2030-02-05T00:00:00"
+   },
+   "expected": 345600
+  },
+  {
+   "name": "U2-bundled-no-cell",
+   "leg": {
+    "id": "l1",
+    "entry": 1,
+    "account_id": "acct-u",
+    "amount": -100,
+    "status": "Posted",
+    "posting": "2030-01-01T00:00:00",
+    "transfer_id": "t1",
+    "rail_name": "FeeAccrual",
+    "bundle_id": "b1",
+    "account_parent_role": "ParentGL",
+    "account_role": "CustomerDDA"
+   },
+   "params": {
+    "cap_seconds": 2678400,
+    "as_of": "2030-02-05T00:00:00"
+   },
+   "expected": null
+  },
+  {
+   "name": "U3-exactly-at-cap-not-stuck",
+   "leg": {
+    "id": "l1",
+    "entry": 1,
+    "account_id": "acct-u",
+    "amount": -100,
+    "status": "Posted",
+    "posting": "2030-01-01T00:00:00",
+    "transfer_id": "t1",
+    "rail_name": "FeeAccrual",
+    "account_parent_role": "ParentGL",
+    "account_role": "CustomerDDA"
+   },
+   "params": {
+    "cap_seconds": 86400,
+    "as_of": "2030-01-02T00:00:00"
+   },
+   "expected": 0
+  }
+ ],
+ "invariant": "stuck_unbundled"
+}

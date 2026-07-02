@@ -1,0 +1,119 @@
+{
+ "kind": "MONEY",
+ "vectors": [
+  {
+   "name": "L1-children-roll-up-clean",
+   "state": {
+    "legs": [],
+    "balances": [
+     {
+      "account_id": "gl-parent",
+      "entry": 1,
+      "day": "2030-01-01",
+      "money": 700,
+      "account_role": "ParentGL"
+     },
+     {
+      "account_id": "c1",
+      "entry": 1,
+      "day": "2030-01-01",
+      "money": 300,
+      "account_parent_role": "ParentGL",
+      "account_role": "CustomerDDA"
+     },
+     {
+      "account_id": "c2",
+      "entry": 1,
+      "day": "2030-01-01",
+      "money": 400,
+      "account_parent_role": "ParentGL",
+      "account_role": "CustomerDDA"
+     }
+    ]
+   },
+   "cell": {
+    "parent_account_id": "gl-parent",
+    "day": "2030-01-01"
+   },
+   "expected": 0
+  },
+  {
+   "name": "L2-parent-short-of-children",
+   "comment": "parent claims 500, children hold 700 -> -200",
+   "state": {
+    "legs": [],
+    "balances": [
+     {
+      "account_id": "gl-parent",
+      "entry": 1,
+      "day": "2030-01-01",
+      "money": 500,
+      "account_role": "ParentGL"
+     },
+     {
+      "account_id": "c1",
+      "entry": 1,
+      "day": "2030-01-01",
+      "money": 300,
+      "account_parent_role": "ParentGL",
+      "account_role": "CustomerDDA"
+     },
+     {
+      "account_id": "c2",
+      "entry": 1,
+      "day": "2030-01-01",
+      "money": 400,
+      "account_parent_role": "ParentGL",
+      "account_role": "CustomerDDA"
+     }
+    ]
+   },
+   "cell": {
+    "parent_account_id": "gl-parent",
+    "day": "2030-01-01"
+   },
+   "expected": -200
+  },
+  {
+   "name": "L3-direct-parent-postings-term",
+   "comment": "pins the signed law's direct-postings term the handbook prose omits: 500 = child 300 + parent direct +200",
+   "state": {
+    "legs": [
+     {
+      "id": "l1",
+      "entry": 1,
+      "account_id": "gl-parent",
+      "amount": 200,
+      "status": "Posted",
+      "posting": "2030-01-01T12:00:00",
+      "transfer_id": "t1",
+      "account_role": "ParentGL"
+     }
+    ],
+    "balances": [
+     {
+      "account_id": "gl-parent",
+      "entry": 1,
+      "day": "2030-01-01",
+      "money": 500,
+      "account_role": "ParentGL"
+     },
+     {
+      "account_id": "c1",
+      "entry": 1,
+      "day": "2030-01-01",
+      "money": 300,
+      "account_parent_role": "ParentGL",
+      "account_role": "CustomerDDA"
+     }
+    ]
+   },
+   "cell": {
+    "parent_account_id": "gl-parent",
+    "day": "2030-01-01"
+   },
+   "expected": 0
+  }
+ ],
+ "invariant": "ledger_drift"
+}
