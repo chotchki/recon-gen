@@ -44,7 +44,13 @@ from recon_gen.common.spine._emit_helpers import (
     load_spec_example,
     to_date,
 )
-from recon_gen.common.spine.violation import RuleViolation, Violation
+from recon_gen.common.spine.residuals import (
+    BalanceRow,
+    ResidualState,
+    drift_residual,
+    expected_eod_residual,
+)
+from recon_gen.common.spine.violation import RuleViolation, Violation, identity_dollars
 
 
 @dataclass(frozen=True)
@@ -141,35 +147,60 @@ class ExpectedEodBalanceGenerator:
     # AY.4.d — production callers thread cfg.db.table_prefix here.
     prefix: str = "spec_example"
 
+    def _planned_balance(self) -> BalanceRow:
+        """The one row this plant emits, projected into the residual
+        domain — the SINGLE plan both ``emit()`` and ``intended`` read
+        (DS.2: a separately-written expectation is the calibration-drift
+        disease with a new name). Cents conversion mirrors the insert
+        boundary's ``Cents.from_dollars(str(value))`` exactly."""
+        return BalanceRow(
+            account_id=self.account_id,
+            entry=0,
+            day=self.anchor_day,
+            money=Cents.from_dollars(str(self.expected + self.variance)),
+            expected_eod=Cents.from_dollars(str(self.expected)),
+            account_role=self.account_role,
+            account_parent_role=self.account_parent_role,
+        )
+
     @property
     def intended(self) -> RuleViolation:
-        # The matview's variance column = money − expected_eod_balance =
-        # variance. Identity carries the variance directly (matches the
-        # detect projection).
+        # DS.2 — the magnitude comes from the RESIDUAL evaluated over
+        # the planned row, not hand-inlined arithmetic: if the law
+        # moves, this expectation moves with it.
+        state = ResidualState(balances=(self._planned_balance(),))
+        residual = expected_eod_residual(state, self.account_id, self.anchor_day)
+        assert residual is not None  # the plant always sets an expectation
         return RuleViolation.of(
             "expected_eod_balance_breach",
             account_id=self.account_id,
             business_day=self.anchor_day,
-            variance=round(self.variance, 2),
+            variance=identity_dollars(residual),
         )
 
     @property
     def also_trips_drift(self) -> RuleViolation | None:
         """The empirical AU.0-style edge: drift fires on the same
         account/day when the planted account is a LEAF (account_parent_
-        role is set). Drift magnitude = stored − Σ legs = (expected +
-        variance) − 0 = expected + variance.
+        role is set) — zero transactions means the drift law's computed
+        side is 0 and the planted stored balance IS the drift. Derived
+        from ``drift_residual`` over the same planned row, so the edge's
+        magnitude tracks the drift law (including the DS.3.2 carried-day
+        change) automatically.
 
-        Returns `None` when the planted account is NOT a leaf — drift's
-        matview filter excludes parent-role rows.
+        Returns `None` when the planted account is NOT a leaf — the
+        drift law scopes to internal leaf accounts.
         """
         if self.account_parent_role is None:
             return None
+        state = ResidualState(balances=(self._planned_balance(),))
+        residual = drift_residual(state, self.account_id, self.anchor_day)
+        assert residual is not None  # leaf + emitted day ⇒ the cell exists
         return RuleViolation.of(
             "drift",
             account_id=self.account_id,
             business_day=self.anchor_day,
-            drift=round(self.expected + self.variance, 2),
+            drift=identity_dollars(residual),
         )
 
     @property
@@ -189,18 +220,21 @@ class ExpectedEodBalanceGenerator:
             scenario_id, generator="ExpectedEodBalanceGenerator",
         )
         start, end = day_bounds(self.anchor_day)
+        plan = self._planned_balance()
+        expected_eod = plan.expected_eod
+        assert expected_eod is not None  # the plant always sets an expectation
         insert_balance(
             conn,
             prefix=self.prefix,
-            account_id=self.account_id,
+            account_id=plan.account_id,
             account_name=f"EOD Acct ({self.account_role})",
             account_role=self.account_role,
             account_scope="internal",
-            account_parent_role=self.account_parent_role,
-            expected_eod_balance=self.expected,
+            account_parent_role=plan.account_parent_role,
+            expected_eod_balance=float(expected_eod.to_dollars()),
             business_day_start=start,
             business_day_end=end,
-            money=self.expected + self.variance,
+            money=float(plan.money.to_dollars()),
             metadata=metadata,
         )
 

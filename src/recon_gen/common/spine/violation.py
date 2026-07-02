@@ -50,6 +50,10 @@ layered into subtypes by AY.2.a.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from recon_gen.common.money import Cents
 
 
 @dataclass(frozen=True)
@@ -151,3 +155,15 @@ class AuditFixture(Violation):
         return cls(
             invariant=invariant, identity=frozenset(identity.items()),
         )
+
+
+def identity_dollars(cents: "Cents") -> float:
+    """Project a Cents residual into the Violation-identity currency —
+    rounded float dollars, matching the detect-side projection every
+    ``detect()`` uses when reading matview magnitudes. DS.7 upgrades
+    the identity currency to exact cents; until then this is the ONE
+    place the projection lives (DS.2: generators derive identity
+    magnitudes from residuals, so the rounding must match detect's
+    exactly or the set-equality gates chase phantom deltas).
+    """
+    return round(float(cents.to_dollars()), 2)
