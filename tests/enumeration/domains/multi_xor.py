@@ -150,6 +150,61 @@ def cells(profile: BoundaryProfile) -> list[PackedCell]:
                             expected={"multi_xor": expected},
                         ))
                         index += 1
+    out.extend(_pending_child_cells(index))
+    return out
+
+
+def _pending_child_cells(start_index: int) -> list[PackedCell]:
+    """Pending-CHILD witnesses (DS.3.8 domain widening, explicit).
+
+    The grid's child-status axis carries no Pending — a gap the
+    mutation gate exposed: narrowing the child join's firing-status
+    filter to Posted-only was EQUIVALENT on the grid (a surviving
+    mutant), even though the decided status law says an in-flight
+    child still represents a rail choice. Two shapes per chain kind:
+
+    - a lone Pending child (fired-name count 1 — no violation; the
+      narrowed detector would alarm 'missed');
+    - a Pending child beside a Posted sibling (an overlap the
+      narrowed detector would stop seeing).
+    """
+    out: list[PackedCell] = []
+    index = start_index
+    for kind in _KINDS:
+        for child_statuses in (
+            ("Pending", None), ("Pending", POSTED_STATUS),
+        ):
+            prefix = f"mx{index:06d}"
+            account = f"{prefix}a"
+            b = CellBuilder()
+            b.leg(
+                id=f"{prefix}pL0", account=account, amount=0,
+                status=POSTED_STATUS, posting=_posting(0), transfer=prefix,
+                rail=kind.parent_rail, template=kind.parent_template,
+                parent_role=None,
+            )
+            for slot, status in enumerate(child_statuses):
+                if status is None:
+                    continue
+                child = f"{prefix}c{slot}0"
+                b.leg(
+                    id=f"{child}L0", account=account, amount=0,
+                    status=status, posting=_posting(0), transfer=child,
+                    parent=prefix, rail=kind.siblings[slot],
+                    parent_role=None,
+                )
+            residual = multi_xor_residual(
+                b.state(), prefix, kind.parent_name,
+                frozenset(kind.siblings),
+            )
+            expected: ViolationMap = {}
+            if residual is not None and residual != 0:
+                expected[(prefix, kind.parent_name)] = residual
+            out.append(PackedCell(
+                *b.rows(), prefixes=(prefix,),
+                expected={"multi_xor": expected},
+            ))
+            index += 1
     return out
 
 

@@ -416,6 +416,46 @@ class EnumerationDB:
         if bal:
             self._bulk_insert(f"{self.prefix}_daily_balances", DB_COLS, bal)
 
+    def insert_with_entries(
+        self,
+        tx_rows: Iterable[tuple[TxRow, int]],
+        bal_rows: Iterable[tuple[BalRow, int]],
+    ) -> None:
+        """Bulk load with EXPLICIT ``entry`` values, bypassing the
+        sequence default. The DS.3.6 permutation laws need this: pin
+        the supersession winners by entry, then permute ONLY the
+        physical insert order (the DS.0 correction — under
+        sequence-assigned entries a permutation CHANGES the winners,
+        which is a semantics change, not an invariance). Never mix
+        explicit and sequence entries in one table: a later sequence
+        value can collide with a pinned one on the composite PK."""
+        tx = [r.as_tuple() + (entry,) for r, entry in tx_rows]
+        bal = [r.as_tuple() + (entry,) for r, entry in bal_rows]
+        if tx:
+            self._bulk_insert(
+                f"{self.prefix}_transactions",
+                TX_COLS + ("entry",),  # typing-smell: ignore[no-inline-production-constants]: the base-table column name, same contract as TX_COLS' inline names — migrate_mark's _ROW_ID_COLUMN is an unrelated concern that happens to share the spelling
+                tx,
+            )
+        if bal:
+            self._bulk_insert(
+                f"{self.prefix}_daily_balances",
+                DB_COLS + ("entry",),  # typing-smell: ignore[no-inline-production-constants]: same as above — the DDL column name, not migrate_mark's marker constant
+                bal,
+            )
+
+    def execute_statements(
+        self, label: str, statements: Iterable[str],
+    ) -> None:
+        """Run raw statements one-by-one under the timeout guard.
+        The DS.3.8 mutation harness's seam: DROP + mutated CREATE +
+        index re-creates against an already-loaded packed DB."""
+        for i, stmt in enumerate(statements):
+            self._guarded(
+                f"{label} [{i}]",
+                lambda s=stmt: self._conn.execute(s),
+            )
+
     def _bulk_insert(
         self, table: str, cols: tuple[str, ...],
         rows: list[tuple[object, ...]],

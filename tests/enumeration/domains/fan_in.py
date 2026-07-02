@@ -129,16 +129,6 @@ def _build_cell(
     )
 
 
-def _firing_parent_claims(parent_count: int, pattern: str) -> int:
-    """Parent-claim legs that survive the firing-status law — the
-    engine can only see the cell when this is >= 1."""
-    if pattern == "all_zq9x":
-        return 0
-    if pattern == "first_failed":
-        return max(0, parent_count - 1)
-    return parent_count
-
-
 def cells(profile: BoundaryProfile) -> list[PackedCell]:
     expected_count = profile.fan_in_expected.get(
         (SPEC_CHAIN_PARENT, SPEC_CHILD_TEMPLATE),
@@ -154,14 +144,15 @@ def cells(profile: BoundaryProfile) -> list[PackedCell]:
     ):
         for pattern in _PATTERNS:
             for anchor in (False, True):
-                if anchor and not _firing_parent_claims(
-                    parent_count, pattern,
-                ):
-                    # The zero-parent blind-spot class (module
-                    # docstring): the law gives these a cell, the
-                    # engine structurally cannot. Excluded here;
-                    # pinned loud in the gate's finding test.
-                    continue
+                # DS.3.8 re-admission: the anchored zero-firing-claim
+                # shapes (a fired child whose claims are ALL void) were
+                # excluded while the engine structurally couldn't
+                # represent them; DS.3.3c reseeded the count spine from
+                # the child template's own firings, so parent_count 0
+                # materializes and the cells enumerate like any other
+                # count — and they are the packed witnesses that kill
+                # the LEFT-JOIN-drop / claim-status mutants in the
+                # DS.3.8 battery.
                 out.append(_build_cell(
                     f"fi{index:04d}",
                     parent_count=parent_count, pattern=pattern,
