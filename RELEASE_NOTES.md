@@ -12,6 +12,54 @@
 > `--help`) against the code. The v14.6.0 → v13.14.4 entries below predate that
 > pass and are left as written.
 
+## v16.0.2 — the test chain runs DuckDB end-to-end + screenshots are back
+
+Patch. Almost entirely under the hood — the payoff is confidence, not new
+surface — with one restored tool you actually touch.
+
+DuckDB has been the local-iteration default since Phase CB, but the test
+chain still leaned PG/Oracle for the layers that matter most: the
+cross-renderer agreement check and the db tier. Phase DY parameterized both
+over DuckDB with per-worker file isolation, so the SAME `./run_tests.sh
+up_to=agreement` you run locally now exercises DuckDB across every layer,
+both bundled example institutions, green end-to-end. The path you iterate on
+IS the path CI gates — no "passes on my duck, fails on their postgres" gap
+left in the test surface.
+
+`recon-gen docs screenshot` works again. It went dark when QuickSight was
+removed (the old capture drove a QS embed URL); it's rebuilt against the
+self-hosted stack — it spins the real `recon-gen dashboards` server on a
+scratch port and walks each sheet in a headless browser, one full-page PNG
+per sheet, against any L2.
+
+And a batch of tests that had quietly stopped pulling their weight — parked
+behind skips or xfails since the QuickSight removal — are fixed and running
+for real again, guarded so they can't silently fall back out of the run.
+
+### Added
+
+- `recon-gen docs screenshot` self-hosted capture engine (a placeholder
+  since the QuickSight removal). Spins the dashboards server on an ephemeral
+  port, drives headless WebKit sheet-by-sheet, writes one PNG per sheet.
+
+### Changed
+
+- The `agreement` + `db` test tiers run on DuckDB (per-worker file
+  isolation) — `up_to=agreement` is green on DuckDB and PostgreSQL for both
+  bundled example L2s. The local default is now first-class across the chain.
+- A coverage gate + a per-instance skip/xfail gate make "a test that runs
+  nowhere" and "a silent skip on the example institutions" build failures.
+
+### Fixed
+
+- A cross-sheet "narrow to this account" drill on the L1 dashboard that
+  didn't actually narrow (it wrote to a filter the self-hosted renderer
+  ignores).
+- The L1 Limit Breach sheet could render empty in the default date window (a
+  seed densifier collision that silently dropped the planted breaches).
+
+---
+
 ## v16.0.1 — author credit (white-label-able) + the handbook live on the demos
 
 Patch. My name was on NONE of the outputs; now it's on all of them, and
