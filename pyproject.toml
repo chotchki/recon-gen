@@ -150,6 +150,14 @@ prod = [
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
+    # DS.3.7 — the sampled tail beyond the enumeration domains:
+    # int64 magnitudes, cardinalities above domain bounds, the
+    # random_l2_yaml topology axis. Runs DERANDOMIZED with the
+    # example database disabled (tests/conftest.py registers the
+    # profile) so a failing example reproduces bit-identically on
+    # any machine — POLICY 1 by construction, no .hypothesis dir
+    # divergence between local and CI.
+    "hypothesis>=6.100",
     # The runner uses `pytest -n auto` on every layer. The app2 layer
     # additionally passes `--dist=loadgroup` (see
     # src/recon_gen/_dev/runner.py::_layer_command app2 branch) so the

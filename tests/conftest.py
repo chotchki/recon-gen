@@ -37,6 +37,27 @@ from recon_gen.common.env_keys import (
 )
 
 
+# DS.3.7 — the Hypothesis profile: derandomized (examples derive from
+# the test function, bit-identical on every machine) with the example
+# database DISABLED (a .hypothesis dir remembering locally-shrunk
+# failures is exactly the local!=CI divergence POLICY 1 outlaws).
+# Import-guarded: hypothesis lives in the dev extra, and the release
+# wheel-smoke runs pytest without it — the conftest must not crash
+# collection there (same rule as the _dev import guards).
+try:
+    from hypothesis import settings as _hyp_settings
+
+    _hyp_settings.register_profile(
+        "recon",
+        derandomize=True,
+        database=None,
+        deadline=None,
+    )
+    _hyp_settings.load_profile("recon")
+except ImportError:  # dev extra absent (wheel smoke) — no property tests collected
+    pass
+
+
 def pytest_configure(config: Any) -> None:
     """Pin a session-stable fuzz seed + redirect runner.RUNS_DIR to a
     session tmp dir so tests don't pollute the real ``runs/``.
