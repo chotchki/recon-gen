@@ -4126,8 +4126,12 @@ WITH pair_legs AS (
         {recipient_posting_to_date}       AS posted_day,
         recipient.transfer_id,
         recipient.amount_money        AS amount
-    FROM {p}_transactions recipient
-    JOIN {p}_transactions sender
+    -- DS.3.3b (operator-ruled BUG): Investigation reads go through
+    -- supersession — a corrected leg's stale version must not flow.
+    -- The audit PDF alone keeps raw-row access (correction history
+    -- reproducibility is its job).
+    FROM {p}_current_transactions recipient
+    JOIN {p}_current_transactions sender
       ON sender.transfer_id = recipient.transfer_id
      AND sender.amount_money < 0
     WHERE recipient.amount_money > 0
@@ -4307,8 +4311,10 @@ distinct_transfers AS (
     -- carries the parent linkage in ``transfer_parent_id`` (v6 column).
     -- The legacy global matview read ``parent_transfer_id`` from the
     -- v5 base table.
+    -- DS.3.3b: the walk follows CURRENT rows — a superseded leg's
+    -- stale parent claim must not seed chain membership.
     SELECT DISTINCT transfer_id, transfer_parent_id
-    FROM {p}_transactions
+    FROM {p}_current_transactions
 ),
 -- Oracle 19c requires recursive CTEs to declare their column alias
 -- list inline (ORA-32039). Postgres accepts the same syntax — both
@@ -4374,11 +4380,11 @@ SELECT
         ORDER BY tgt.id, src.id
     )                        AS edge_seq
 FROM chain c
-JOIN {p}_transactions tgt
+JOIN {p}_current_transactions tgt
   ON tgt.transfer_id = c.transfer_id
  AND tgt.amount_money > 0
  AND tgt.status = 'Posted'
-JOIN {p}_transactions src
+JOIN {p}_current_transactions src
   ON src.transfer_id = c.transfer_id
  AND src.amount_money < 0
  AND src.status = 'Posted';

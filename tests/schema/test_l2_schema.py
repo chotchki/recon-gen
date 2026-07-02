@@ -1663,8 +1663,8 @@ def test_inv_pair_rolling_anomalies_uses_prefixed_transactions() -> None:
     assert body_match is not None
     body = body_match.group(1)
     # Positive: prefixed refs present (the recipient + sender CTEs).
-    assert "FROM ipra_transactions recipient" in body
-    assert "JOIN ipra_transactions sender" in body
+    assert "FROM ipra_current_transactions recipient" in body
+    assert "JOIN ipra_current_transactions sender" in body
     # Negative: NO flat ``transactions`` ref survived.
     assert "FROM transactions" not in body
     assert "JOIN transactions" not in body
@@ -1684,9 +1684,9 @@ def test_inv_money_trail_edges_uses_prefixed_transactions() -> None:
     assert body_match is not None
     body = body_match.group(1)
     # Positive: prefixed refs present.
-    assert "FROM imte_transactions" in body  # distinct_transfers CTE
-    assert "JOIN imte_transactions tgt" in body
-    assert "JOIN imte_transactions src" in body
+    assert "FROM imte_current_transactions" in body  # distinct_transfers CTE
+    assert "JOIN imte_current_transactions tgt" in body
+    assert "JOIN imte_current_transactions src" in body
     # v6 column name (legacy was parent_transfer_id).
     assert "transfer_parent_id" in body
     # Negative: no flat refs.
