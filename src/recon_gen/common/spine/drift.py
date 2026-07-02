@@ -29,7 +29,7 @@ from __future__ import annotations
 import random
 from recon_gen.common.db import SyncConnection
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date
 from typing import ClassVar
 
 from recon_gen.common.l2.primitives import (
@@ -45,8 +45,8 @@ from recon_gen.common.spine._emit_helpers import (
     insert_balance,
     insert_tx,
     load_spec_example,
+    posting_dt,
     to_date,
-    ts,
 )
 from recon_gen.common.spine.residuals import (
     BalanceRow,
@@ -61,14 +61,6 @@ from recon_gen.common.spine.violation import (
     Violation,
     identity_dollars,
 )
-
-
-def _posting_dt(day: date) -> datetime:
-    """The residual-domain projection of ``ts(day)`` — parse the exact
-    string the insert boundary writes, so the planned ``LegRow.posting``
-    tracks the emit-side timestamp convention (noon default) by
-    construction rather than by a copied constant."""
-    return datetime.strptime(ts(day), "%Y-%m-%d %H:%M:%S")
 
 
 @dataclass(frozen=True)
@@ -235,7 +227,7 @@ class DriftGenerator:
             account_id=self.child_account_id,
             amount=Cents.from_dollars(str(self.leg_amount)),
             status=POSTED_STATUS,
-            posting=_posting_dt(self.anchor_day),
+            posting=posting_dt(self.anchor_day),
             transfer_id=(
                 f"xfer-drift-{self.child_role}-{self.child_account_id}-1"
             ),
@@ -255,7 +247,7 @@ class DriftGenerator:
             account_id=self.child_account_id,
             amount=Cents.from_dollars(str(0.0)),
             status=POSTED_STATUS,
-            posting=_posting_dt(self.anchor_day),
+            posting=posting_dt(self.anchor_day),
             transfer_id=(
                 f"xfer-drift-marker-child-{self.child_account_id}-{day_slug}"
             ),
@@ -292,7 +284,7 @@ class DriftGenerator:
             account_id=self.parent_account_id,
             amount=Cents.from_dollars(str(0.0)),
             status=POSTED_STATUS,
-            posting=_posting_dt(self.anchor_day),
+            posting=posting_dt(self.anchor_day),
             transfer_id=(
                 f"xfer-drift-marker-parent-{self.parent_account_id}-{day_slug}"
             ),
@@ -573,7 +565,7 @@ class LedgerDriftGenerator:
             account_id=self.child_account_id,
             amount=Cents.from_dollars(str(self.leg_amount)),
             status=POSTED_STATUS,
-            posting=_posting_dt(self.anchor_day),
+            posting=posting_dt(self.anchor_day),
             transfer_id=f"xfer-ledger-drift-{self.parent_role}-1",
             rail_name="_spine_plant",
             account_role=self.child_role,
@@ -605,7 +597,7 @@ class LedgerDriftGenerator:
             account_id=self.parent_account_id,
             amount=Cents.from_dollars(str(0.0)),
             status=POSTED_STATUS,
-            posting=_posting_dt(self.anchor_day),
+            posting=posting_dt(self.anchor_day),
             transfer_id=(
                 f"xfer-ledger-drift-marker-parent-"
                 f"{self.parent_account_id}-{day_slug}"

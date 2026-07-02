@@ -42,17 +42,34 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import ClassVar
 
-from recon_gen.common.l2.primitives import L2Instance
+from recon_gen.common.l2.primitives import (
+    ORIGIN_INTERNAL_INITIATED,
+    POSTED_STATUS,
+    L2Instance,
+)
 from recon_gen.common.money import Cents
 from recon_gen.common.spine._db import fetch_all
 from recon_gen.common.spine._emit_helpers import (
     day_bounds,
     find_internal_with_role,
     insert_balance,
+    insert_tx,
     load_spec_example,
+    posting_dt,
     to_date,
 )
-from recon_gen.common.spine.violation import RuleViolation, Violation
+from recon_gen.common.spine.residuals import (
+    BalanceRow,
+    LegRow,
+    ResidualState,
+    drift_residual,
+    overdraft_residual,
+)
+from recon_gen.common.spine.violation import (
+    RuleViolation,
+    Violation,
+    identity_dollars,
+)
 
 
 @dataclass(frozen=True)
@@ -174,16 +191,107 @@ class OverdraftGenerator:
     # the DL.3.1 single-marker behavior — that's what the unit tests use.
     as_of_day: date | None = None
 
+    def _planned_balance(self) -> BalanceRow:
+        """The one balance row this plant emits, projected into the
+        residual domain — the SINGLE plan both ``emit()`` and the
+        intended/edge properties read (DS.2: a separately-written
+        expectation is the calibration-drift disease with a new name).
+        Cents conversion mirrors the insert boundary's
+        ``Cents.from_dollars(str(value))`` exactly."""
+        return BalanceRow(
+            account_id=self.account_id,
+            entry=0,
+            day=self.anchor_day,
+            money=Cents.from_dollars(str(-self.magnitude)),
+            account_role=self.account_role,
+            account_parent_role=self.account_parent_role,
+        )
+
+    def _planned_markers(self) -> tuple[LegRow, ...]:
+        """The DL.3.1/DL.3.7 zero-amount drilldown marker sweep — one
+        LegRow per coverage day from ``anchor_day`` through ``as_of_day``
+        (inclusive); ``as_of_day=None`` is the single-marker unit-test
+        shape. ``emit()`` writes exactly these rows. Zero amount is
+        load-bearing: it keeps the drift residual's Σ legs at exactly 0
+        (see emit()'s rationale comment).
+
+        Id shape per coverage day (DL.3.7): the windowed form carries
+        BOTH the plant anchor day AND the coverage day so overlapping
+        plants on one account never PK-collide; the ``as_of_day=None``
+        form preserves the DL.3.1 id byte-identically (unit tests pin
+        the ``tx-overdraft-marker-<role>-<account>-<day>`` prefix +
+        ``count == 1``)."""
+        anchor_slug = self.anchor_day.isoformat()
+        end_day = self.as_of_day if self.as_of_day is not None else self.anchor_day
+        # Guard against ``as_of_day < anchor_day`` (degenerate input —
+        # the plant is later than the audit window's end). Treat as
+        # single-day emit so we don't silently skip the marker.
+        if end_day < self.anchor_day:
+            end_day = self.anchor_day
+        markers: list[LegRow] = []
+        cursor = self.anchor_day
+        while cursor <= end_day:
+            coverage_slug = cursor.isoformat()
+            if self.as_of_day is None:
+                tx_id = (
+                    f"tx-overdraft-marker-{self.account_role}-"
+                    f"{self.account_id}-{coverage_slug}"
+                )
+                xfer_id = (
+                    f"xfer-overdraft-marker-{self.account_role}-"
+                    f"{self.account_id}-{coverage_slug}"
+                )
+            else:
+                tx_id = (
+                    f"tx-overdraft-marker-{self.account_role}-"
+                    f"{self.account_id}-anchor-{anchor_slug}-"
+                    f"day-{coverage_slug}"
+                )
+                xfer_id = (
+                    f"xfer-overdraft-marker-{self.account_role}-"
+                    f"{self.account_id}-anchor-{anchor_slug}-"
+                    f"day-{coverage_slug}"
+                )
+            markers.append(LegRow(
+                id=tx_id,
+                entry=0,
+                account_id=self.account_id,
+                amount=Cents.from_dollars(str(0.0)),
+                status=POSTED_STATUS,
+                posting=posting_dt(cursor),
+                transfer_id=xfer_id,
+                rail_name="_spine_plant",
+                account_role=self.account_role,
+                account_parent_role=self.account_parent_role,
+            ))
+            cursor = cursor + timedelta(days=1)
+        return tuple(markers)
+
+    def _plan(self) -> ResidualState:
+        """Every row ``emit()`` writes, in the residual domain."""
+        return ResidualState(
+            legs=self._planned_markers(),
+            balances=(self._planned_balance(),),
+        )
+
     @property
     def intended(self) -> RuleViolation:
-        # `stored_balance` is the actual matview value (negative).
-        # `magnitude` is caller-facing positive; the identity carries the
-        # negative form so it round-trips against `detect()`.
+        # DS.2 — the magnitude comes from the overdraft RESIDUAL
+        # evaluated over the planned rows, not hand-inlined
+        # `round(-magnitude, 2)`: if the law moves, this expectation
+        # moves with it. The residual already carries the matview's
+        # negative form (`min(effective, 0)`), so it round-trips
+        # against `detect()` while `magnitude` stays caller-facing
+        # positive.
+        residual = overdraft_residual(
+            self._plan(), self.account_id, self.anchor_day,
+        )
+        assert residual is not None  # planted internal row ⇒ cell exists
         return RuleViolation.of(
             "overdraft",
             account_id=self.account_id,
             business_day=self.anchor_day,
-            stored_balance=round(-self.magnitude, 2),
+            stored_balance=identity_dollars(residual),
         )
 
     @property
@@ -193,16 +301,22 @@ class OverdraftGenerator:
         Returns `None` when the planted account is NOT a leaf (drift's
         `parent_role IS NOT NULL` filter excludes it).
 
-        Magnitude sign: drift = stored − Σ legs = −magnitude − 0 =
-        −magnitude.
+        DS.2 — derived from ``drift_residual`` over the same planned
+        rows emit() writes (zero-amount markers ⇒ Σ legs = 0, so the
+        planted stored IS the drift: −magnitude). The edge's magnitude
+        now tracks the drift law automatically.
         """
         if self.account_parent_role is None:
             return None
+        residual = drift_residual(
+            self._plan(), self.account_id, self.anchor_day,
+        )
+        assert residual is not None  # leaf + emitted day ⇒ cell exists
         return RuleViolation.of(
             "drift",
             account_id=self.account_id,
             business_day=self.anchor_day,
-            drift=round(-self.magnitude, 2),
+            drift=identity_dollars(residual),
         )
 
     @property
@@ -217,27 +331,25 @@ class OverdraftGenerator:
         scenario_id: str | None = None,
     ) -> None:
         from recon_gen.common.spine.scenario_context import scenario_metadata
-        from recon_gen.common.spine._emit_helpers import insert_tx, ts
-        from recon_gen.common.l2.primitives import (
-            ORIGIN_INTERNAL_INITIATED,
-            POSTED_STATUS,
-        )
         # CZ.2: unconditional source='training' stamp.
         metadata = scenario_metadata(
             scenario_id, generator="OverdraftGenerator",
         )
         start, end = day_bounds(self.anchor_day)
+        # DS.2 — every money value + row id below reads off the SAME
+        # plan the intended/edge properties evaluate residuals over.
+        balance = self._planned_balance()
         insert_balance(
             conn,
             prefix=self.prefix,
-            account_id=self.account_id,
+            account_id=balance.account_id,
             account_name=f"Overdraft Acct ({self.account_role})",
             account_role=self.account_role,
             account_scope="internal",
-            account_parent_role=self.account_parent_role,
+            account_parent_role=balance.account_parent_role,
             business_day_start=start,
             business_day_end=end,
-            money=-self.magnitude,
+            money=float(balance.money.to_dollars()),
             metadata=metadata,
         )
         # DL.3.1 — zero-amount drilldown marker tx so the `Overdraft
@@ -268,69 +380,27 @@ class OverdraftGenerator:
         # ``_adapt_overdraft``), sweep one zero-amount marker per day
         # from ``anchor_day`` through ``as_of_day`` inclusive. ``None``
         # (default; unit-test path) preserves the single-marker
-        # byte-identity. Each marker's id includes BOTH the plant anchor
-        # day AND the coverage day to keep ids unique across multiple
-        # OverdraftGenerators on the same account whose carry windows
-        # overlap (densified plants land at e.g. days_ago=6,13,20,27,34
-        # all on cust-0002-snb; without the anchor-day prefix, plant A's
-        # marker on plant B's emit day would PK-collide on
-        # ``_current_transactions.id``).
-        anchor_slug = self.anchor_day.isoformat()
-        end_day = self.as_of_day if self.as_of_day is not None else self.anchor_day
-        # Guard against ``as_of_day < anchor_day`` (degenerate input —
-        # the plant is later than the audit window's end). Treat as
-        # single-day emit so we don't silently skip the marker.
-        if end_day < self.anchor_day:
-            end_day = self.anchor_day
-        cursor = self.anchor_day
-        while cursor <= end_day:
-            coverage_slug = cursor.isoformat()
-            if self.as_of_day is None:
-                # Preserve the DL.3.1 id shape byte-identically when the
-                # caller (the in-process unit-test harness) didn't ask
-                # for window-spanning markers. Test pins on the
-                # ``tx-overdraft-marker-<role>-<account>-<day>`` prefix +
-                # ``count == 1``; the DL.3.7 window-extended id below
-                # would still match the prefix but the count assertion
-                # would tighten unhelpfully.
-                tx_id = (
-                    f"tx-overdraft-marker-{self.account_role}-"
-                    f"{self.account_id}-{coverage_slug}"
-                )
-                xfer_id = (
-                    f"xfer-overdraft-marker-{self.account_role}-"
-                    f"{self.account_id}-{coverage_slug}"
-                )
-            else:
-                tx_id = (
-                    f"tx-overdraft-marker-{self.account_role}-"
-                    f"{self.account_id}-anchor-{anchor_slug}-"
-                    f"day-{coverage_slug}"
-                )
-                xfer_id = (
-                    f"xfer-overdraft-marker-{self.account_role}-"
-                    f"{self.account_id}-anchor-{anchor_slug}-"
-                    f"day-{coverage_slug}"
-                )
+        # byte-identity. The sweep + per-day id shapes live in
+        # ``_planned_markers`` (DS.2 — same plan the residuals read).
+        for marker in self._planned_markers():
             insert_tx(
                 conn,
                 prefix=self.prefix,
-                id=tx_id,
-                account_id=self.account_id,
+                id=marker.id,
+                account_id=marker.account_id,
                 account_name=f"Overdraft Acct ({self.account_role})",
                 account_role=self.account_role,
                 account_scope="internal",
-                account_parent_role=self.account_parent_role,
-                amount_money=0.0,
+                account_parent_role=marker.account_parent_role,
+                amount_money=float(marker.amount.to_dollars()),
                 amount_direction="Debit",
                 status=POSTED_STATUS,
-                posting=ts(cursor),
-                transfer_id=xfer_id,
+                posting=marker.posting.strftime("%Y-%m-%d %H:%M:%S"),
+                transfer_id=marker.transfer_id,
                 rail_name="_spine_plant",
                 origin=ORIGIN_INTERNAL_INITIATED,
                 metadata=metadata,
             )
-            cursor = cursor + timedelta(days=1)
 
 
 # Phase AU.3.d (2026-05-23): local helpers hoisted to

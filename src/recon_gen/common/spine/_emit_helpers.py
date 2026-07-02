@@ -472,6 +472,16 @@ def to_date(bd: object) -> date:
     return datetime.strptime(str(bd)[:10], "%Y-%m-%d").date()
 
 
+def posting_dt(day: date) -> datetime:
+    """The residual-domain projection of ``ts(day)`` — parse the exact
+    string the insert boundary writes, so a planned ``LegRow.posting``
+    tracks the emit-side timestamp convention (noon default) by
+    construction rather than by a copied constant. DS.2's plan builders
+    (drift / overdraft) read this; hoisted here per the AU.3.d
+    shared-helper precedent."""
+    return datetime.strptime(ts(day), "%Y-%m-%d %H:%M:%S")
+
+
 def load_spec_example() -> L2Instance:
     """Load the bundled ``tests/l2/spec_example.yaml`` — the in-process
     harness shape that the L1 spine generators default to. Production
