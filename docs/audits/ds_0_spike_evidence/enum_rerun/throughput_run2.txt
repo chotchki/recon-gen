@@ -1,0 +1,15 @@
+[domain A/CI] day_opts=196 cells=38416
+rows: tx=131712 bal=65856 total=197568
+insert: 0.45s
+refresh (full 20+ matview chain, real emitter): 0.82s
+python residual: 0.08s  comparator read: 0.03s
+violation counts py: drift=46592 over=23520 eod=21952
+BASELINE disagreements: NONE — engine == residual on all cells
+MUTANT A (drop status='Posted'): refresh 0.83s -> CAUGHT {'drift': (6804, 10416)}
+  sample counterexample cells: py-only=[('en000030', datetime.date(2030, 1, 2)), ('en000042', datetime.date(2030, 1, 2)), ('en000043', datetime.date(2030, 1, 2))] eng-only=[('en000036', datetime.date(2030, 1, 2)), ('en000040', datetime.date(2030, 1, 2)), ('en000064', datetime.date(2030, 1, 2))]
+MUTANT B (<= -> < on day boundary) on noon-only domain: refresh 0.80s -> MISSED (postings never AT day_end — boundary absent from domain)
+[domain A-boundary] day_opts=60 cells=3600
+  baseline on boundary domain: clean
+  MUTANT B on boundary domain: CAUGHT {'drift': (784, 472)}
+[supersession lemma domain] cells=48 baseline clean
+  MUTANT C: refresh CRASHED on real engine (also detection): ConstraintException: Constraint Error: Data contains duplicates on indexed column(s)

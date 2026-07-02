@@ -1,0 +1,127 @@
+========================================================================
+EXPERIMENT 1 — bounded equivalence: spec residual vs faithful detector
+========================================================================
+[equiv k=6,m=4] unsat in 0.036s (expected unsat) OK
+
+EXPERIMENT 1b — theorem: drift never emits a 'carried'-source row
+[no-carried-drift-rows] unsat in 0.000s (expected unsat) OK
+
+EXPERIMENT 1c — intent gap: CL.5 'real position every day' spec vs detector
+[locf-intent-gap] sat in 0.070s (expected sat) OK
+  transactions (current* = survives max-entry-per-id):
+   * id=1 entry=-2 acct=0 day=0 amt=-1 status=Posted
+   * id=3 entry=1 acct=1 day=0 amt=0 status=Posted
+   * id=0 entry=-1 acct=0 day=1 amt=-1 status=Posted
+   * id=2 entry=0 acct=0 day=0 amt=-1 status=Posted
+  daily_balances (current* = survives max-entry-per-(acct,day)):
+   * acct=0 day=0 money=-2 entry=-1
+   * acct=1 day=3 money=-1 entry=0
+     acct=0 day=0 money=0 entry=-2
+   * acct=0 day=3 money=-3 entry=1
+  accounts: a0(internal=True,leaf=True), a1(internal=True,leaf=True)
+  -> cell (acct=0, day=1): spec_flag=True detector_flag=False
+  -> cell (acct=0, day=2): spec_flag=True detector_flag=False
+
+========================================================================
+EXPERIMENT 3 — mutation sensitivity (each must yield a witness DB)
+========================================================================
+[M1 '<>' -> '<'] sat in 0.018s (expected sat) OK
+  transactions (current* = survives max-entry-per-id):
+   * id=3 entry=0 acct=0 day=0 amt=-1 status=Posted
+   * id=1 entry=1 acct=0 day=0 amt=-1 status=Posted
+   * id=2 entry=2 acct=0 day=0 amt=-1 status=Posted
+   * id=0 entry=3 acct=1 day=0 amt=1 status=Posted
+  daily_balances (current* = survives max-entry-per-(acct,day)):
+   * acct=0 day=0 money=-1 entry=0
+   * acct=0 day=1 money=-1 entry=1
+   * acct=0 day=2 money=-1 entry=-1
+  accounts: a0(internal=True,leaf=True), a1(internal=True,leaf=True)
+  -> cell (acct=0, day=0): spec_flag=True detector_flag=False
+  -> cell (acct=0, day=1): spec_flag=True detector_flag=False
+  -> cell (acct=0, day=2): spec_flag=True detector_flag=False
+
+[M2 posting <= day -> <] sat in 0.021s (expected sat) OK
+  transactions (current* = survives max-entry-per-id):
+   * id=0 entry=-3 acct=1 day=0 amt=-1 status=Posted
+   * id=3 entry=-2 acct=1 day=0 amt=-1 status=Posted
+   * id=1 entry=-1 acct=1 day=0 amt=-1 status=Posted
+   * id=2 entry=0 acct=1 day=0 amt=-1 status=Posted
+  daily_balances (current* = survives max-entry-per-(acct,day)):
+   * acct=0 day=0 money=0 entry=-2
+     acct=1 day=0 money=0 entry=-1
+   * acct=1 day=0 money=-4 entry=0
+  accounts: a0(internal=True,leaf=True), a1(internal=True,leaf=True)
+  -> cell (acct=1, day=0): spec_flag=False detector_flag=True
+
+[M3 dropped status='Posted' filter] sat in 0.021s (expected sat) OK
+  transactions (current* = survives max-entry-per-id):
+   * id=1 entry=-2 acct=0 day=0 amt=-1 status=Posted
+   * id=2 entry=-1 acct=0 day=0 amt=-1 status=Pending
+   * id=3 entry=0 acct=0 day=0 amt=-1 status=Posted
+   * id=0 entry=1 acct=0 day=0 amt=-1 status=Posted
+  daily_balances (current* = survives max-entry-per-(acct,day)):
+   * acct=0 day=1 money=-3 entry=1
+   * acct=0 day=2 money=-4 entry=0
+   * acct=0 day=0 money=-4 entry=2
+  accounts: a0(internal=True,leaf=True), a1(internal=True,leaf=True)
+  -> cell (acct=0, day=0): spec_flag=True detector_flag=False
+  -> cell (acct=0, day=1): spec_flag=False detector_flag=True
+  -> cell (acct=0, day=2): spec_flag=True detector_flag=False
+
+[M4 sign-flipped SUM] sat in 0.020s (expected sat) OK
+  transactions (current* = survives max-entry-per-id):
+   * id=1 entry=-2 acct=1 day=0 amt=1 status=Posted
+   * id=3 entry=-1 acct=1 day=1 amt=-2 status=Posted
+   * id=2 entry=0 acct=1 day=0 amt=1 status=Posted
+   * id=0 entry=1 acct=1 day=0 amt=1 status=Posted
+  daily_balances (current* = survives max-entry-per-(acct,day)):
+   * acct=1 day=2 money=-1 entry=0
+   * acct=0 day=2 money=0 entry=-2
+   * acct=1 day=3 money=-1 entry=-1
+  accounts: a0(internal=True,leaf=True), a1(internal=True,leaf=True)
+  -> cell (acct=1, day=2): spec_flag=True detector_flag=False
+  -> cell (acct=1, day=3): spec_flag=True detector_flag=False
+
+[M5 supersession dropped (all rows, not max-entry)] sat in 0.020s (expected sat) OK
+  transactions (current* = survives max-entry-per-id):
+     id=0 entry=-2 acct=0 day=0 amt=-1 status=Posted
+     id=0 entry=-1 acct=0 day=1 amt=-1 status=Posted
+     id=0 entry=0 acct=0 day=2 amt=-1 status=Posted
+   * id=0 entry=1 acct=0 day=0 amt=-1 status=Posted
+  daily_balances (current* = survives max-entry-per-(acct,day)):
+   * acct=1 day=0 money=1 entry=1
+   * acct=0 day=2 money=0 entry=0
+   * acct=0 day=0 money=-2 entry=-1
+  accounts: a0(internal=True,leaf=True), a1(internal=True,leaf=True)
+  -> cell (acct=0, day=0): spec_flag=True detector_flag=False
+
+========================================================================
+EXPERIMENT 5 — timing: equivalence check, growing k (and one big cell)
+========================================================================
+[equiv k=2,m=2,A=2,D=4] unsat in 0.010s (expected unsat) OK
+[equiv k=4,m=2,A=2,D=4] unsat in 0.011s (expected unsat) OK
+[equiv k=6,m=3,A=2,D=4] unsat in 0.022s (expected unsat) OK
+[equiv k=8,m=4,A=2,D=4] unsat in 0.038s (expected unsat) OK
+[equiv k=12,m=6,A=2,D=4] unsat in 0.086s (expected unsat) OK
+[equiv k=16,m=8,A=2,D=4] unsat in 0.143s (expected unsat) OK
+[equiv k=24,m=12,A=2,D=4] unsat in 0.212s (expected unsat) OK
+[equiv k=32,m=16,A=2,D=4] unsat in 0.321s (expected unsat) OK
+[equiv k=16,m=8,A=4,D=8] unsat in 0.925s (expected unsat) OK
+[equiv k=24,m=12,A=4,D=10] unsat in 4.427s (expected unsat) OK
+
+ config                  solve_s
+ k=2,m=2,A=2,D=4         0.010
+ k=4,m=2,A=2,D=4         0.011
+ k=6,m=3,A=2,D=4         0.022
+ k=8,m=4,A=2,D=4         0.038
+ k=12,m=6,A=2,D=4        0.086
+ k=16,m=8,A=2,D=4        0.143
+ k=24,m=12,A=2,D=4       0.212
+ k=32,m=16,A=2,D=4       0.321
+ k=16,m=8,A=4,D=8        0.925
+ k=24,m=12,A=4,D=10      4.427
+
+Determinism: 3 identical runs at k=6
+[determinism run 1] unsat in 0.033s (expected unsat) OK
+[determinism run 2] unsat in 0.034s (expected unsat) OK
+[determinism run 3] unsat in 0.034s (expected unsat) OK

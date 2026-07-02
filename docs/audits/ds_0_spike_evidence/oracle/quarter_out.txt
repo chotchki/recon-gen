@@ -1,0 +1,22 @@
+[domain A quarter-slice] day_opts=196 cells=9604 (full=38416)
+rows: tx=31556 bal=16464 total=48020
+schema apply: 0.76s (168 stmts)
+config populate: 0.01s
+bulk insert via execute_script (DPL fast path): 1.20s (40081 rows/s)
+refresh matviews: 40.18s (48 stmts)
+SELECT drift: 0.022s (11592 violations)
+SELECT overdraft: 0.013s (5880 violations)
+SELECT expected_eod_balance_breach: 0.012s (5488 violations)
+violation counts py: drift=11592 over=5880 eod=5488  agreement: CLEAN
+bulk insert via INSERT-ALL batching: 129.31s (split 0.90s + batch 0.07s + exec 128.34s, 7123 round-trips, 371 rows/s)
+
+== TIMING TABLE (seconds) ==
+            schema_apply:     0.76
+         config_populate:     0.01
+        insert_real_path:     1.20
+        refresh_matviews:    40.18
+            select_drift:     0.02
+        select_overdraft:     0.01
+select_expected_eod_balance_breach:     0.01
+   insert_insertall_path:   129.31
+  end-to-end (real path):    42.19

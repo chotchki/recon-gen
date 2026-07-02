@@ -1,0 +1,21 @@
+[domain A FULL] day_opts=196 cells=38416
+rows: tx=131712 bal=65856 total=197568
+schema apply: 0.80s
+bulk insert (DPL): 4.94s (39982 rows/s)
+refresh matviews: 679.40s (48 stmts)
+top-10 refresh statements:
+   429.18s  BEGIN DBMS_MVIEW.REFRESH('ds0probe_computed_subledger_balance', method => 'C'); END;
+   244.32s  BEGIN DBMS_MVIEW.REFRESH('ds0probe_current_daily_balances', method => 'C'); END;
+     1.96s  BEGIN DBMS_MVIEW.REFRESH('ds0probe_current_transactions', method => 'C'); END;
+     0.70s  BEGIN DBMS_STATS.GATHER_TABLE_STATS(USER, 'ds0probe_current_transactions'); END;
+     0.39s  BEGIN DBMS_MVIEW.REFRESH('ds0probe_l1_exceptions', method => 'C'); END;
+     0.38s  BEGIN DBMS_MVIEW.REFRESH('ds0probe_inv_money_trail_edges', method => 'C'); END;
+     0.33s  BEGIN DBMS_MVIEW.REFRESH('ds0probe_drift', method => 'C'); END;
+     0.26s  BEGIN DBMS_MVIEW.REFRESH('ds0probe_effective_balances', method => 'C'); END;
+     0.25s  BEGIN DBMS_MVIEW.REFRESH('ds0probe_daily_statement_summary', method => 'C'); END;
+     0.19s  BEGIN DBMS_STATS.GATHER_TABLE_STATS(USER, 'ds0probe_current_daily_balances'); END;
+SELECT drift: 0.087s (46592 violations)
+SELECT overdraft: 0.042s (23520 violations)
+SELECT expected_eod_balance_breach: 0.046s (21952 violations)
+violation counts py: drift=46592 over=23520 eod=21952  agreement: CLEAN
+EXIT=0

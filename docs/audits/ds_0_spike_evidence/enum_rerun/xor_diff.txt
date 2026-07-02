@@ -1,0 +1,12 @@
+6c6
+< [X1 HAVING <> 1 -> > 1 (misses 0-firings)] sat in 0.008s (expected sat) OK
+---
+> [X1 HAVING <> 1 -> > 1 (misses 0-firings)] sat in 0.009s (expected sat) OK
+15c15
+< [X2 status <> 'Failed' -> = 'Posted' in count] sat in 0.009s (expected sat) OK
+---
+> [X2 status <> 'Failed' -> = 'Posted' in count] sat in 0.010s (expected sat) OK
+24c24
+< [X3 COUNT(rows) -> COUNT(DISTINCT rail)] sat in 0.010s (expected sat) OK
+---
+> [X3 COUNT(rows) -> COUNT(DISTINCT rail)] sat in 0.011s (expected sat) OK

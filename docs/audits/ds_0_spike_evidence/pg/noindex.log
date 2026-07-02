@@ -1,0 +1,12 @@
+-- plan against index-less inner --
+  Seq Scan on ds0probe_current_daily_balances sb  (cost=0.00..20683298.48 rows=16464 width=72)
+    Filter: ((account_parent_role IS NOT NULL) AND ((account_scope)::text = 'internal'::text))
+    SubPlan 1
+      ->  Aggregate  (cost=1256.24..1256.25 rows=1 width=32)
+            ->  Seq Scan on ds0probe_curr_tx_noidx tx  (cost=0.00..1256.23 rows=1 width=8)
+                  Filter: ((posting <= sb.business_day_end) AND ((account_id)::text = (sb.account_id)::text) AND ((status)::text = 'Posted'::text))
+  JIT:
+    Functions: 13
+    Options: Inlining true, Optimization true, Expressions true, Deforming true
+
+execution against index-less inner: 24.75s (16464 rows)

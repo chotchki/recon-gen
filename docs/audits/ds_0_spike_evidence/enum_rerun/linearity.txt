@@ -1,0 +1,6 @@
+mult=1 cells=  38416 rows= 197568 insert=0.45s refresh=0.81s drift_rows=46592
+mult=2 cells=  76832 rows= 395136 insert=0.98s refresh=1.42s drift_rows=93184
+mult=4 cells= 153664 rows= 790272 insert=2.17s refresh=2.20s drift_rows=186368
+real 9.33
+user 14.92
+sys 0.43

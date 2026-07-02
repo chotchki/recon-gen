@@ -1,0 +1,100 @@
+========================================================================
+PHASE 1 — packed exhaustive runs
+========================================================================
+    [t] xor: domain build: 0.00s
+  xor domain: 22275 cells, 99450 tx rows (member-slot opts=45, extra opts=11)
+    [t] mx: domain build: 0.00s
+  mx domain: 27000 cells, 147000 tx rows (kinds=2, parent opts=45, child opts=10x10, extra=3)
+    [t] xor: fresh_db+schema: 0.09s
+    [t] xor: insert: 0.26s
+    [t] xor: refresh (full real matview chain): 0.35s
+    [t] xor: python residual: 0.03s
+    xor packed engine vs residual: EXACT MATCH (19719 violation rows)
+    [t] xor: engine read + compare: 0.02s
+    [t] mx: fresh_db+schema: 0.04s
+    [t] mx: insert: 0.39s
+    [t] mx: refresh (full real matview chain): 0.51s
+    [t] mx: python residuals (spec + engine-model): 0.05s
+  -- vs SPEC-reading residual (docstring semantics):
+    mx packed engine vs spec-residual: 4914 DIVERGENT keys (eng-only=2268 res-only=0 value-diff=2646); eng=15840 res=13572
+      eng-only mx003003: ('BulkAccrualSettlement', 2, ('BulkAccrualSettleWire', 'BulkAccrualSettleWire'), 'overlap', datetime.date(2030, 1, 1))  cell=(0, (('Posted', 0), ('Posted', 1)), (), ('Posted',), None)
+      eng-only mx003004: ('BulkAccrualSettlement', 2, ('BulkAccrualSettleWire', 'BulkAccrualSettleWire'), 'overlap', datetime.date(2030, 1, 1))  cell=(0, (('Posted', 0), ('Posted', 1)), (), ('Posted',), 'Posted')
+      eng-only mx003005: ('BulkAccrualSettlement', 2, ('BulkAccrualSettleWire', 'BulkAccrualSettleWire'), 'overlap', datetime.date(2030, 1, 1))  cell=(0, (('Posted', 0), ('Posted', 1)), (), ('Posted',), 'Failed')
+      value-diff mx003033: (('BulkAccrualSettlement', 4, ('BulkAccrualSettleACH', 'BulkAccrualSettleACH', 'BulkAccrualSettleWire', 'BulkAccrualSettleWire'), 'overlap', datetime.date(2030, 1, 1)), ('BulkAccrualSettlement', 2, ('BulkAccrualSettleACH', 'BulkAccrualSettleWire'), 'overlap', datetime.date(2030, 1, 1)))  cell=(0, (('Posted', 0), ('Posted', 1)), ('Posted',), ('Posted',), None)
+      value-diff mx003034: (('BulkAccrualSettlement', 4, ('BulkAccrualSettleACH', 'BulkAccrualSettleACH', 'BulkAccrualSettleWire', 'BulkAccrualSettleWire'), 'overlap', datetime.date(2030, 1, 1)), ('BulkAccrualSettlement', 2, ('BulkAccrualSettleACH', 'BulkAccrualSettleWire'), 'overlap', datetime.date(2030, 1, 1)))  cell=(0, (('Posted', 0), ('Posted', 1)), ('Posted',), ('Posted',), 'Posted')
+      value-diff mx003035: (('BulkAccrualSettlement', 4, ('BulkAccrualSettleACH', 'BulkAccrualSettleACH', 'BulkAccrualSettleWire', 'BulkAccrualSettleWire'), 'overlap', datetime.date(2030, 1, 1)), ('BulkAccrualSettlement', 2, ('BulkAccrualSettleACH', 'BulkAccrualSettleWire'), 'overlap', datetime.date(2030, 1, 1)))  cell=(0, (('Posted', 0), ('Posted', 1)), ('Posted',), ('Posted',), 'Failed')
+  -- vs ENGINE-model residual (day-multiplied counts):
+    mx packed engine vs engine-model residual: EXACT MATCH (15840 violation rows)
+    [t] mx: engine read + compare: 0.02s
+    divergence classes by (parent_days, fired_names): {(2, 1): 2268, (2, 2): 2646}
+
+========================================================================
+PHASE 2 — combined DB (both families packed together)
+========================================================================
+    [t] combined: fresh+insert+refresh: 1.28s
+    xor rows combined==xor-only-packed: True (19719 rows)
+    mx rows combined==mx-only-packed:  True (15840 rows)
+    [t] combined: compare: 0.03s
+
+========================================================================
+PHASE 3 — isolated sample (one cell per DB) vs packed
+========================================================================
+  sample sizes: xor=97 mx=122
+    [t] isolated: 97 xor cells: 8.43s
+    [t] isolated: 122 mx cells: 10.56s
+  packing-independence verdict: CLEAN
+
+========================================================================
+PHASE 4 — generalized mutation harness
+========================================================================
+  X1 [xor] KILLED: 216 divergent keys (0.05s) — missed-firing (count=0) cells vanish
+      witness: ('xr000001', 'res-only', (0, 0, (), datetime.date(2030, 1, 1)))
+      witness: ('xr000002', 'res-only', (0, 0, (), datetime.date(2030, 1, 2)))
+  X2 [xor] KILLED: 19800 divergent keys (0.04s) — Pending/Zq9x member legs uncounted (LEFT-JOIN status law)
+      witness: ('xr000033', 'eng', (0, 0, (), datetime.date(2030, 1, 1)))
+      witness: ('xr000034', 'eng', (0, 0, (), datetime.date(2030, 1, 1)))
+  X3 [xor] KILLED: 15939 divergent keys (0.05s) — 2-legs-same-rail overlap collapses to count=1
+      witness: ('xr000099', 'res-only', (0, 2, ('SettlementStandard', 'SettlementStandard'), datetime.date(2030, 1, 1)))
+      witness: ('xr000100', 'res-only', (0, 2, ('SettlementStandard', 'SettlementStandard'), datetime.date(2030, 1, 1)))
+  X4 [xor] KILLED: 3978 divergent keys (0.05s) — own pick: NULL-template member-rail legs (AUTO_NOTMPL) start counting
+      witness: ('xr000020', 'eng', (0, 2, ('SettlementAuto', 'SettlementStandard'), datetime.date(2030, 1, 1)))
+      witness: ('xr000021', 'eng', (0, 2, ('SettlementAuto', 'SettlementStandard'), datetime.date(2030, 1, 1)))
+  MX1 [mx] KILLED: 2106 divergent keys (0.04s) — missed (count=0) cells vanish
+      witness: ('mx000300', 'res-only', ('BulkAccrualSettlement', 0, (), 'missed', datetime.date(2030, 1, 1)))
+      witness: ('mx000301', 'res-only', ('BulkAccrualSettlement', 0, (), 'missed', datetime.date(2030, 1, 1)))
+  MX2 [mx] KILLED: 11934 divergent keys (0.04s) — Zq9x child transfers uncounted
+      witness: ('mx000309', 'eng', ('BulkAccrualSettlement', 0, (), 'missed', datetime.date(2030, 1, 1)))
+      witness: ('mx000310', 'eng', ('BulkAccrualSettlement', 0, (), 'missed', datetime.date(2030, 1, 1)))
+  MX3 [mx] KILLED: 7800 divergent keys (0.04s) — own pick: membership EXISTS always-true; non-member children counted
+      witness: ('mx000301', 'res-only', ('BulkAccrualSettlement', 0, (), 'missed', datetime.date(2030, 1, 1)))
+      witness: ('mx000304', 'eng', ('BulkAccrualSettlement', 2, ('BulkAccrualSettleWire', 'DisbursementSettleACH'), 'overlap', datetime.date(2030, 1, 1)))
+  MX4 [mx] KILLED: 21294 divergent keys (0.03s) — own pick: join-key corruption; children never match
+      witness: ('mx000303', 'eng', ('BulkAccrualSettlement', 0, (), 'missed', datetime.date(2030, 1, 1)))
+      witness: ('mx000304', 'eng', ('BulkAccrualSettlement', 0, (), 'missed', datetime.date(2030, 1, 1)))
+  MX5 [mx] KILLED: 15840 divergent keys (0.01s) — own pick: multi-XOR qualifier off-by-one; both chains vanish
+      witness: ('mx000300', 'res-only', ('BulkAccrualSettlement', 0, (), 'missed', datetime.date(2030, 1, 1)))
+      witness: ('mx000301', 'res-only', ('BulkAccrualSettlement', 0, (), 'missed', datetime.date(2030, 1, 1)))
+  MX6 [mx] SURVIVOR: 0 divergent keys (0.04s) — own pick: parent_firings UNION dedup dropped — predicted SURVIVOR (cross-arm dupes need a rail and template sharing a name; both arms are internally DISTINCT)
+
+========================================================================
+PHASE 5 — timing summary
+========================================================================
+      0.00s  xor: domain build
+      0.00s  mx: domain build
+      0.09s  xor: fresh_db+schema
+      0.26s  xor: insert
+      0.35s  xor: refresh (full real matview chain)
+      0.03s  xor: python residual
+      0.02s  xor: engine read + compare
+      0.04s  mx: fresh_db+schema
+      0.39s  mx: insert
+      0.51s  mx: refresh (full real matview chain)
+      0.05s  mx: python residuals (spec + engine-model)
+      0.02s  mx: engine read + compare
+      1.28s  combined: fresh+insert+refresh
+      0.03s  combined: compare
+      8.43s  isolated: 97 xor cells
+     10.56s  isolated: 122 mx cells
+  xor family full-step total: 0.75s
+  mx family full-step total:  1.02s
+  divergences: xor=0 mx_spec=4914 mx_engmodel=0

@@ -1,0 +1,50 @@
+========================================================================
+EXPERIMENT 4 — xor_group_violation: equivalence + mutations
+========================================================================
+[xor equiv k=6] unsat in 0.000s (expected unsat) OK
+
+[X1 HAVING <> 1 -> > 1 (misses 0-firings)] sat in 0.008s (expected sat) OK
+  transactions (current* = survives supersession):
+     id=0 entry=0 transfer=1 template=1 rail=1 status=Posted
+   * id=0 entry=2 transfer=0 template=0 rail=1 status=Posted
+   * id=1 entry=3 transfer=1 template=1 rail=1 status=Posted
+   * id=2 entry=1 transfer=0 template=0 rail=1 status=Posted
+  -> (transfer=1, template=1, group=0 members=[2]): spec_flag=True detector_flag=False true_firing_count=0
+  -> (transfer=1, template=1, group=1 members=[0, 3]): spec_flag=True detector_flag=False true_firing_count=0
+
+[X2 status <> 'Failed' -> = 'Posted' in count] sat in 0.009s (expected sat) OK
+  transactions (current* = survives supersession):
+   * id=0 entry=0 transfer=1 template=1 rail=2 status=Pending
+     id=0 entry=-2 transfer=0 template=0 rail=2 status=Pending
+     id=0 entry=-3 transfer=0 template=2 rail=2 status=Pending
+   * id=1 entry=-1 transfer=1 template=1 rail=3 status=Pending
+  -> (transfer=1, template=1, group=0 members=[2]): spec_flag=False detector_flag=True true_firing_count=1
+  -> (transfer=1, template=1, group=1 members=[0, 3]): spec_flag=False detector_flag=True true_firing_count=1
+
+[X3 COUNT(rows) -> COUNT(DISTINCT rail)] sat in 0.010s (expected sat) OK
+  transactions (current* = survives supersession):
+   * id=3 entry=2 transfer=1 template=1 rail=0 status=Posted
+   * id=1 entry=-1 transfer=1 template=1 rail=0 status=Posted
+   * id=2 entry=1 transfer=1 template=1 rail=0 status=Posted
+   * id=0 entry=0 transfer=1 template=1 rail=0 status=Posted
+  -> (transfer=1, template=1, group=1 members=[0, 3]): spec_flag=True detector_flag=False true_firing_count=4
+
+timing sweep k = 2,4,6,8,12,16,24,32 (equivalence, expect unsat)
+[xor equiv k=2] unsat in 0.000s (expected unsat) OK
+[xor equiv k=4] unsat in 0.000s (expected unsat) OK
+[xor equiv k=6] unsat in 0.000s (expected unsat) OK
+[xor equiv k=8] unsat in 0.000s (expected unsat) OK
+[xor equiv k=12] unsat in 0.000s (expected unsat) OK
+[xor equiv k=16] unsat in 0.001s (expected unsat) OK
+[xor equiv k=24] unsat in 0.001s (expected unsat) OK
+[xor equiv k=32] unsat in 0.002s (expected unsat) OK
+
+ k   solve_s
+ 2   0.000
+ 4   0.000
+ 6   0.000
+ 8   0.000
+ 12  0.000
+ 16  0.001
+ 24  0.001
+ 32  0.002

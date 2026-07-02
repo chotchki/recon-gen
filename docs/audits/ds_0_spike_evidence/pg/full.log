@@ -1,0 +1,108 @@
+[domain A full] day_opts=196 cells=38416 (full=38416)
+rows: tx=131712 bal=65856 total=197568
+schema apply: 0.11s
+config populate: 0.00s
+bulk insert via execute_script (PG one-shot): 12.16s (16243 rows/s)
+refresh matviews (CONCURRENTLY, real path): 57.22s (48 stmts)
+top-10 refresh statements:
+    49.74s  REFRESH MATERIALIZED VIEW CONCURRENTLY ds0probe_computed_subledger_balance
+     1.54s  REFRESH MATERIALIZED VIEW CONCURRENTLY ds0probe_current_transactions
+     0.92s  REFRESH MATERIALIZED VIEW CONCURRENTLY ds0probe_l1_exceptions
+     0.67s  REFRESH MATERIALIZED VIEW CONCURRENTLY ds0probe_daily_statement_summary
+     0.65s  REFRESH MATERIALIZED VIEW CONCURRENTLY ds0probe_effective_balances
+     0.64s  REFRESH MATERIALIZED VIEW CONCURRENTLY ds0probe_drift
+     0.57s  REFRESH MATERIALIZED VIEW CONCURRENTLY ds0probe_drift_summary
+     0.56s  REFRESH MATERIALIZED VIEW CONCURRENTLY ds0probe_inv_money_trail_edges
+     0.44s  REFRESH MATERIALIZED VIEW CONCURRENTLY ds0probe_current_daily_balances
+     0.22s  REFRESH MATERIALIZED VIEW CONCURRENTLY ds0probe_overdraft
+SELECT drift: 0.017s (46592 violations)
+SELECT overdraft: 0.008s (23520 violations)
+SELECT expected_eod_balance_breach: 0.006s (21952 violations)
+violation counts py: drift=46592 over=23520 eod=21952  agreement: CLEAN
+plain REFRESH (no CONCURRENTLY) on hot matviews:
+     0.52s  ds0probe_current_transactions
+     0.20s  ds0probe_current_daily_balances
+     0.31s  ds0probe_computed_subledger_balance
+
+== EXPLAIN (FORMAT TEXT) on hot matview defining queries ==
+
+-- ds0probe_computed_subledger_balance --
+  Seq Scan on ds0probe_current_daily_balances sb  (cost=0.00..558952.32 rows=65856 width=72)
+    Filter: ((account_parent_role IS NOT NULL) AND ((account_scope)::text = 'internal'::text))
+    SubPlan 1
+      ->  Aggregate  (cost=8.45..8.46 rows=1 width=32)
+            ->  Index Scan using idx_ds0probe_curr_tx_account_posting on ds0probe_current_transactions tx  (cost=0.42..8.44 rows=1 width=8)
+                  Index Cond: (((account_id)::text = (sb.account_id)::text) AND (posting <= sb.business_day_end))
+                  Filter: ((status)::text = 'Posted'::text)
+  JIT:
+    Functions: 15
+    Options: Inlining true, Optimization true, Expressions true, Deforming true
+
+-- ds0probe_current_transactions --
+  Seq Scan on ds0probe_transactions tx  (cost=0.00..590238.52 rows=659 width=2024)
+    Filter: (entry = (SubPlan 2))
+    SubPlan 2
+      ->  Result  (cost=4.44..4.45 rows=1 width=8)
+            InitPlan 1
+              ->  Limit  (cost=0.42..4.44 rows=1 width=8)
+                    ->  Index Only Scan Backward using ds0probe_transactions_pkey on ds0probe_transactions  (cost=0.42..4.44 rows=1 width=8)
+                          Index Cond: (id = (tx.id)::text)
+  JIT:
+    Functions: 8
+    Options: Inlining true, Optimization true, Expressions true, Deforming true
+
+-- after ANALYZE (fresh stats) --
+
+-- ds0probe_computed_subledger_balance (post-ANALYZE) --
+  Seq Scan on ds0probe_current_daily_balances sb  (cost=0.00..558952.32 rows=65856 width=72)
+    Filter: ((account_parent_role IS NOT NULL) AND ((account_scope)::text = 'internal'::text))
+    SubPlan 1
+      ->  Aggregate  (cost=8.45..8.46 rows=1 width=32)
+            ->  Index Scan using idx_ds0probe_curr_tx_account_posting on ds0probe_current_transactions tx  (cost=0.42..8.44 rows=1 width=8)
+                  Index Cond: (((account_id)::text = (sb.account_id)::text) AND (posting <= sb.business_day_end))
+                  Filter: ((status)::text = 'Posted'::text)
+  JIT:
+    Functions: 15
+    Options: Inlining true, Optimization true, Expressions true, Deforming true
+
+-- ds0probe_current_transactions (post-ANALYZE) --
+  Seq Scan on ds0probe_transactions tx  (cost=0.00..590238.52 rows=659 width=2024)
+    Filter: (entry = (SubPlan 2))
+    SubPlan 2
+      ->  Result  (cost=4.44..4.45 rows=1 width=8)
+            InitPlan 1
+              ->  Limit  (cost=0.42..4.44 rows=1 width=8)
+                    ->  Index Only Scan Backward using ds0probe_transactions_pkey on ds0probe_transactions  (cost=0.42..4.44 rows=1 width=8)
+                          Index Cond: (id = (tx.id)::text)
+  JIT:
+    Functions: 8
+    Options: Inlining true, Optimization true, Expressions true, Deforming true
+
+-- ds0probe_computed_subledger_balance (EXPLAIN ANALYZE) --
+  Seq Scan on ds0probe_current_daily_balances sb  (cost=0.00..558952.32 rows=65856 width=72) (actual time=143.373..267.015 rows=65856 loops=1)
+    Filter: ((account_parent_role IS NOT NULL) AND ((account_scope)::text = 'internal'::text))
+    SubPlan 1
+      ->  Aggregate  (cost=8.45..8.46 rows=1 width=32) (actual time=0.002..0.002 rows=1 loops=65856)
+            ->  Index Scan using idx_ds0probe_curr_tx_account_posting on ds0probe_current_transactions tx  (cost=0.42..8.44 rows=1 width=8) (actual time=0.001..0.001 rows=1 loops=65856)
+                  Index Cond: (((account_id)::text = (sb.account_id)::text) AND (posting <= sb.business_day_end))
+                  Filter: ((status)::text = 'Posted'::text)
+                  Rows Removed by Filter: 1
+  Planning Time: 0.050 ms
+  JIT:
+    Functions: 17
+    Options: Inlining true, Optimization true, Expressions true, Deforming true
+    Timing: Generation 0.532 ms (Deform 0.343 ms), Inlining 8.504 ms, Optimization 71.189 ms, Emission 63.633 ms, Total 143.859 ms
+  Execution Time: 269.135 ms
+
+== TIMING TABLE (seconds) ==
+                                      schema_apply:     0.11
+                                   config_populate:     0.00
+                                  insert_real_path:    12.16
+                                  refresh_matviews:    57.22
+                                      select_drift:     0.02
+                                  select_overdraft:     0.01
+                select_expected_eod_balance_breach:     0.01
+       plain_refresh_ds0probe_current_transactions:     0.52
+     plain_refresh_ds0probe_current_daily_balances:     0.20
+ plain_refresh_ds0probe_computed_subledger_balance:     0.31
+                            end-to-end (real path):    69.53

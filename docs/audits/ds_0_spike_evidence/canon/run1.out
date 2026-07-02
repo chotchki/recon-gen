@@ -1,0 +1,16 @@
+# z3 4.16.0 | Darwin-arm64 | python 3.14.6
+# rlimit=500000000 wall-cap=120s | fingerprint = sha256[:16] of canon.canonical_dump
+obligation                         | expected | got      | rlimit-used | canonical-fingerprint
+----------------------------------------------------------------------------------------------
+drift-equiv[k6,m4,A2,D4]           | unsat    | unsat    |      767315 | 7c79c45d0542f310
+drift-E1b-carried-day[k4,m4]       | unsat    | unsat    |        2432 | a1251dc53224115c
+xor-equiv[k6]                      | unsat    | unsat    |        2541 | 3c11b9f9910552cf
+drift-M1-cmp-ne-to-lt[k4,m3]       | sat      | sat      |      387716 | 09c9b297b6a22b4c
+drift-M2-day-le-to-lt[k4,m3]       | sat      | sat      |      450977 | 7233def6d28216a4
+drift-M3-drop-posted-filter[k4,m3] | sat      | sat      |      439691 | ad5c938e262a4e31
+drift-M4-sign-flip[k4,m3]          | sat      | sat      |      425618 | 54e79e3ce2831598
+drift-M5-drop-supersession[k4,m3]  | sat      | sat      |      400371 | 641623c3e4938312
+xor-X1-having-ne1-to-gt1[k4]       | sat      | sat      |      205723 | 8473380f3b7a0f6c
+xor-X2-notfailed-to-posted[k4]     | sat      | sat      |      212579 | aeb207d111245c98
+xor-X3-count-distinct-rails[k4]    | sat      | sat      |      270662 | 4a2a8fedd618f8d1
+RESULT: PASS

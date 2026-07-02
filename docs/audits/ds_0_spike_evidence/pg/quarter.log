@@ -1,0 +1,105 @@
+[domain A quarter] day_opts=196 cells=9604 (full=38416)
+rows: tx=31556 bal=16464 total=48020
+schema apply: 0.09s
+config populate: 0.00s
+bulk insert via execute_script (PG one-shot): 2.94s (16319 rows/s)
+refresh matviews (CONCURRENTLY, real path): 9.17s (48 stmts)
+top-10 refresh statements:
+     7.31s  REFRESH MATERIALIZED VIEW CONCURRENTLY ds0probe_inv_money_trail_edges
+     0.48s  REFRESH MATERIALIZED VIEW CONCURRENTLY ds0probe_current_transactions
+     0.22s  REFRESH MATERIALIZED VIEW CONCURRENTLY ds0probe_l1_exceptions
+     0.16s  REFRESH MATERIALIZED VIEW CONCURRENTLY ds0probe_daily_statement_summary
+     0.14s  REFRESH MATERIALIZED VIEW CONCURRENTLY ds0probe_effective_balances
+     0.13s  REFRESH MATERIALIZED VIEW CONCURRENTLY ds0probe_computed_subledger_balance
+     0.11s  REFRESH MATERIALIZED VIEW CONCURRENTLY ds0probe_drift
+     0.10s  REFRESH MATERIALIZED VIEW CONCURRENTLY ds0probe_current_daily_balances
+     0.08s  REFRESH MATERIALIZED VIEW CONCURRENTLY ds0probe_drift_summary
+     0.05s  REFRESH MATERIALIZED VIEW CONCURRENTLY ds0probe_balance_cadence_gap
+SELECT drift: 0.005s (11592 violations)
+SELECT overdraft: 0.003s (5880 violations)
+SELECT expected_eod_balance_breach: 0.002s (5488 violations)
+violation counts py: drift=11592 over=5880 eod=5488  agreement: CLEAN
+plain REFRESH (no CONCURRENTLY) on hot matviews:
+     0.11s  ds0probe_current_transactions
+     0.04s  ds0probe_current_daily_balances
+     0.05s  ds0probe_computed_subledger_balance
+
+== EXPLAIN (FORMAT TEXT) on hot matview defining queries ==
+
+-- ds0probe_computed_subledger_balance --
+  Seq Scan on ds0probe_current_daily_balances sb  (cost=0.00..137588.60 rows=16464 width=72)
+    Filter: ((account_parent_role IS NOT NULL) AND ((account_scope)::text = 'internal'::text))
+    SubPlan 1
+      ->  Aggregate  (cost=8.31..8.32 rows=1 width=32)
+            ->  Index Scan using idx_ds0probe_curr_tx_account_posting on ds0probe_current_transactions tx  (cost=0.29..8.31 rows=1 width=8)
+                  Index Cond: (((account_id)::text = (sb.account_id)::text) AND (posting <= sb.business_day_end))
+                  Filter: ((status)::text = 'Posted'::text)
+  JIT:
+    Functions: 15
+    Options: Inlining false, Optimization false, Expressions true, Deforming true
+
+-- ds0probe_current_transactions --
+  Seq Scan on ds0probe_transactions tx  (cost=0.00..4467.68 rows=3 width=4688)
+    Filter: (entry = (SubPlan 2))
+    SubPlan 2
+      ->  Result  (cost=5.63..5.64 rows=1 width=8)
+            InitPlan 1
+              ->  Limit  (cost=0.28..5.63 rows=1 width=8)
+                    ->  Index Only Scan Backward using ds0probe_transactions_pkey on ds0probe_transactions  (cost=0.28..16.33 rows=3 width=8)
+                          Index Cond: (id = (tx.id)::text)
+
+-- after ANALYZE (fresh stats) --
+
+-- ds0probe_computed_subledger_balance (post-ANALYZE) --
+  Seq Scan on ds0probe_current_daily_balances sb  (cost=0.00..137588.60 rows=16464 width=72)
+    Filter: ((account_parent_role IS NOT NULL) AND ((account_scope)::text = 'internal'::text))
+    SubPlan 1
+      ->  Aggregate  (cost=8.31..8.32 rows=1 width=32)
+            ->  Index Scan using idx_ds0probe_curr_tx_account_posting on ds0probe_current_transactions tx  (cost=0.29..8.31 rows=1 width=8)
+                  Index Cond: (((account_id)::text = (sb.account_id)::text) AND (posting <= sb.business_day_end))
+                  Filter: ((status)::text = 'Posted'::text)
+  JIT:
+    Functions: 15
+    Options: Inlining false, Optimization false, Expressions true, Deforming true
+
+-- ds0probe_current_transactions (post-ANALYZE) --
+  Seq Scan on ds0probe_transactions tx  (cost=0.00..263454.59 rows=158 width=2024)
+    Filter: (entry = (SubPlan 2))
+    SubPlan 2
+      ->  Result  (cost=8.30..8.31 rows=1 width=8)
+            InitPlan 1
+              ->  Limit  (cost=0.29..8.30 rows=1 width=8)
+                    ->  Index Only Scan Backward using ds0probe_transactions_pkey on ds0probe_transactions  (cost=0.29..8.30 rows=1 width=8)
+                          Index Cond: (id = (tx.id)::text)
+  JIT:
+    Functions: 8
+    Options: Inlining false, Optimization false, Expressions true, Deforming true
+
+-- ds0probe_computed_subledger_balance (EXPLAIN ANALYZE) --
+  Seq Scan on ds0probe_current_daily_balances sb  (cost=0.00..137588.60 rows=16464 width=72) (actual time=8.935..37.198 rows=16464 loops=1)
+    Filter: ((account_parent_role IS NOT NULL) AND ((account_scope)::text = 'internal'::text))
+    SubPlan 1
+      ->  Aggregate  (cost=8.31..8.32 rows=1 width=32) (actual time=0.001..0.001 rows=1 loops=16464)
+            ->  Index Scan using idx_ds0probe_curr_tx_account_posting on ds0probe_current_transactions tx  (cost=0.29..8.31 rows=1 width=8) (actual time=0.001..0.001 rows=1 loops=16464)
+                  Index Cond: (((account_id)::text = (sb.account_id)::text) AND (posting <= sb.business_day_end))
+                  Filter: ((status)::text = 'Posted'::text)
+                  Rows Removed by Filter: 1
+  Planning Time: 0.052 ms
+  JIT:
+    Functions: 17
+    Options: Inlining false, Optimization false, Expressions true, Deforming true
+    Timing: Generation 0.569 ms (Deform 0.367 ms), Inlining 0.000 ms, Optimization 0.388 ms, Emission 8.525 ms, Total 9.482 ms
+  Execution Time: 38.190 ms
+
+== TIMING TABLE (seconds) ==
+                                      schema_apply:     0.09
+                                   config_populate:     0.00
+                                  insert_real_path:     2.94
+                                  refresh_matviews:     9.17
+                                      select_drift:     0.00
+                                  select_overdraft:     0.00
+                select_expected_eod_balance_breach:     0.00
+       plain_refresh_ds0probe_current_transactions:     0.11
+     plain_refresh_ds0probe_current_daily_balances:     0.04
+ plain_refresh_ds0probe_computed_subledger_balance:     0.05
+                            end-to-end (real path):    12.22

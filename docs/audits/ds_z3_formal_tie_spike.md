@@ -119,7 +119,9 @@ The recommended architecture survived all three passes structurally; the wording
   emitted matviews. The annotation is the declaration site; the emitted artifacts stay the ground
   truth (an annotation nothing cross-checks is a registry in another costume).
 - [ ] DS.6 - Per-dialect lane: boundary-states replay on PG + Oracle in the db tier (full-domain
-  nightly optional). Claim ledger: PROVEN-on-D for DuckDB, PROVEN-on-D_ci for PG/Oracle.
+  nightly optional; full-domain per-dialect stays an on-demand LOCAL run — POLICY 1, same
+  containers both venues). Claim ledger: PROVEN-on-D for DuckDB, PROVEN-on-D_boundary for
+  PG/Oracle — the subscript names the domain subset, never the venue.
 - [ ] DS.7 - Semantic-lock --check re-wired onto the chain (finding 6) + lock identity upgraded to
   exact-cents (today the JSON pins rounded-float dollars against an exact-ZZ law — finding 8's
   round-trip in another costume); normalization helpers shared with the DST.2 proof cache.

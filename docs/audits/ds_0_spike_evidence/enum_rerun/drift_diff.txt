@@ -1,0 +1,70 @@
+4c4
+< [equiv k=6,m=4] unsat in 0.036s (expected unsat) OK
+---
+> [equiv k=6,m=4] unsat in 0.030s (expected unsat) OK
+10c10
+< [locf-intent-gap] sat in 0.070s (expected sat) OK
+---
+> [locf-intent-gap] sat in 0.065s (expected sat) OK
+28c28
+< [M1 '<>' -> '<'] sat in 0.018s (expected sat) OK
+---
+> [M1 '<>' -> '<'] sat in 0.016s (expected sat) OK
+43c43
+< [M2 posting <= day -> <] sat in 0.021s (expected sat) OK
+---
+> [M2 posting <= day -> <] sat in 0.019s (expected sat) OK
+56c56
+< [M3 dropped status='Posted' filter] sat in 0.021s (expected sat) OK
+---
+> [M3 dropped status='Posted' filter] sat in 0.022s (expected sat) OK
+101c101
+< [equiv k=2,m=2,A=2,D=4] unsat in 0.010s (expected unsat) OK
+---
+> [equiv k=2,m=2,A=2,D=4] unsat in 0.007s (expected unsat) OK
+103,107c103,107
+< [equiv k=6,m=3,A=2,D=4] unsat in 0.022s (expected unsat) OK
+< [equiv k=8,m=4,A=2,D=4] unsat in 0.038s (expected unsat) OK
+< [equiv k=12,m=6,A=2,D=4] unsat in 0.086s (expected unsat) OK
+< [equiv k=16,m=8,A=2,D=4] unsat in 0.143s (expected unsat) OK
+< [equiv k=24,m=12,A=2,D=4] unsat in 0.212s (expected unsat) OK
+---
+> [equiv k=6,m=3,A=2,D=4] unsat in 0.021s (expected unsat) OK
+> [equiv k=8,m=4,A=2,D=4] unsat in 0.036s (expected unsat) OK
+> [equiv k=12,m=6,A=2,D=4] unsat in 0.085s (expected unsat) OK
+> [equiv k=16,m=8,A=2,D=4] unsat in 0.136s (expected unsat) OK
+> [equiv k=24,m=12,A=2,D=4] unsat in 0.204s (expected unsat) OK
+109,110c109,110
+< [equiv k=16,m=8,A=4,D=8] unsat in 0.925s (expected unsat) OK
+< [equiv k=24,m=12,A=4,D=10] unsat in 4.427s (expected unsat) OK
+---
+> [equiv k=16,m=8,A=4,D=8] unsat in 0.901s (expected unsat) OK
+> [equiv k=24,m=12,A=4,D=10] unsat in 4.375s (expected unsat) OK
+113c113
+<  k=2,m=2,A=2,D=4         0.010
+---
+>  k=2,m=2,A=2,D=4         0.007
+115,119c115,119
+<  k=6,m=3,A=2,D=4         0.022
+<  k=8,m=4,A=2,D=4         0.038
+<  k=12,m=6,A=2,D=4        0.086
+<  k=16,m=8,A=2,D=4        0.143
+<  k=24,m=12,A=2,D=4       0.212
+---
+>  k=6,m=3,A=2,D=4         0.021
+>  k=8,m=4,A=2,D=4         0.036
+>  k=12,m=6,A=2,D=4        0.085
+>  k=16,m=8,A=2,D=4        0.136
+>  k=24,m=12,A=2,D=4       0.204
+121,122c121,122
+<  k=16,m=8,A=4,D=8        0.925
+<  k=24,m=12,A=4,D=10      4.427
+---
+>  k=16,m=8,A=4,D=8        0.901
+>  k=24,m=12,A=4,D=10      4.375
+126,127c126,127
+< [determinism run 2] unsat in 0.034s (expected unsat) OK
+< [determinism run 3] unsat in 0.034s (expected unsat) OK
+---
+> [determinism run 2] unsat in 0.033s (expected unsat) OK
+> [determinism run 3] unsat in 0.033s (expected unsat) OK
