@@ -22,7 +22,7 @@
         "identity": {
           "account_id": "tmpl-cust-001",
           "business_day": "2029-12-07",
-          "drift": 3175.0
+          "drift": 3450.0
         }
       },
       {
@@ -30,7 +30,7 @@
         "identity": {
           "account_id": "tmpl-cust-001",
           "business_day": "2029-12-14",
-          "drift": 3175.0
+          "drift": 6725.0
         }
       },
       {
@@ -38,7 +38,7 @@
         "identity": {
           "account_id": "tmpl-cust-001",
           "business_day": "2029-12-21",
-          "drift": 3175.0
+          "drift": 10000.0
         }
       },
       {
@@ -46,7 +46,7 @@
         "identity": {
           "account_id": "tmpl-cust-001",
           "business_day": "2029-12-25",
-          "drift": 3225.0
+          "drift": 13325.0
         }
       },
       {
@@ -54,7 +54,7 @@
         "identity": {
           "account_id": "tmpl-cust-001",
           "business_day": "2029-12-26",
-          "drift": 3200.0
+          "drift": 13300.0
         }
       },
       {
@@ -62,7 +62,7 @@
         "identity": {
           "account_id": "tmpl-cust-001",
           "business_day": "2029-12-27",
-          "drift": 3175.0
+          "drift": 13275.0
         }
       },
       {
@@ -70,7 +70,7 @@
         "identity": {
           "account_id": "tmpl-cust-001",
           "business_day": "2029-12-28",
-          "drift": 3075.0
+          "drift": 13175.0
         }
       },
       {
@@ -78,7 +78,7 @@
         "identity": {
           "account_id": "tmpl-cust-001",
           "business_day": "2029-12-29",
-          "drift": 3150.0
+          "drift": 20750.0
         }
       },
       {
@@ -86,7 +86,7 @@
         "identity": {
           "account_id": "tmpl-cust-001",
           "business_day": "2029-12-30",
-          "drift": 3125.0
+          "drift": 16500.0
         }
       },
       {
@@ -94,7 +94,7 @@
         "identity": {
           "account_id": "tmpl-cust-001",
           "business_day": "2029-12-31",
-          "drift": 3100.0
+          "drift": 16475.0
         }
       },
       {
@@ -102,7 +102,7 @@
         "identity": {
           "account_id": "tmpl-cust-001",
           "business_day": "2030-01-01",
-          "drift": -2950.0
+          "drift": 10150.0
         }
       },
       {
@@ -118,15 +118,7 @@
         "identity": {
           "account_id": "tmpl-cust-002",
           "business_day": "2029-12-06",
-          "drift": 1500.0
-        }
-      },
-      {
-        "kind": "rule_violation",
-        "identity": {
-          "account_id": "tmpl-cust-002",
-          "business_day": "2029-12-13",
-          "drift": 1500.0
+          "drift": -3000.0
         }
       },
       {
@@ -134,7 +126,7 @@
         "identity": {
           "account_id": "tmpl-cust-002",
           "business_day": "2029-12-20",
-          "drift": 1500.0
+          "drift": 3000.0
         }
       },
       {
@@ -142,7 +134,7 @@
         "identity": {
           "account_id": "tmpl-cust-002",
           "business_day": "2029-12-27",
-          "drift": 1500.0
+          "drift": 6000.0
         }
       }
     ],
@@ -77345,7 +77337,7 @@
         "identity": {
           "account_id": "customer-ledger",
           "business_day": "2029-12-29",
-          "drift": -150.0
+          "drift": -650.0
         }
       },
       {
@@ -77549,6 +77541,78 @@
         "kind": "rule_violation",
         "identity": {
           "account_id": "tmpl-cust-001",
+          "business_day": "2029-12-08",
+          "direction": "Outbound",
+          "rail_name": "ExternalRailOutbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-001",
+          "business_day": "2029-12-09",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-001",
+          "business_day": "2029-12-15",
+          "direction": "Outbound",
+          "rail_name": "ExternalRailOutbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-001",
+          "business_day": "2029-12-16",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-001",
+          "business_day": "2029-12-22",
+          "direction": "Outbound",
+          "rail_name": "ExternalRailOutbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-001",
+          "business_day": "2029-12-23",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-001",
+          "business_day": "2029-12-29",
+          "direction": "Outbound",
+          "rail_name": "ExternalRailOutbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-001",
+          "business_day": "2029-12-30",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-001",
           "business_day": "2030-01-01",
           "direction": "Inbound",
           "rail_name": "ExternalRailInbound"
@@ -77568,6 +77632,78 @@
         "identity": {
           "account_id": "tmpl-cust-002",
           "business_day": "2029-11-30",
+          "direction": "Outbound",
+          "rail_name": "ExternalRailOutbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
+          "business_day": "2029-12-05",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
+          "business_day": "2029-12-07",
+          "direction": "Outbound",
+          "rail_name": "ExternalRailOutbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
+          "business_day": "2029-12-12",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
+          "business_day": "2029-12-14",
+          "direction": "Outbound",
+          "rail_name": "ExternalRailOutbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
+          "business_day": "2029-12-19",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
+          "business_day": "2029-12-21",
+          "direction": "Outbound",
+          "rail_name": "ExternalRailOutbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
+          "business_day": "2029-12-26",
+          "direction": "Inbound",
+          "rail_name": "ExternalRailInbound"
+        }
+      },
+      {
+        "kind": "rule_violation",
+        "identity": {
+          "account_id": "tmpl-cust-002",
+          "business_day": "2029-12-28",
           "direction": "Outbound",
           "rail_name": "ExternalRailOutbound"
         }
