@@ -475,6 +475,17 @@ L1 invariants third, dashboard-shape last. PostgreSQL refuses to
 refresh a downstream matview before its upstream is fresh; the
 emitter handles ordering.
 
+The refresh script's last statement is a cycle tripwire: if the money
+trail's recursive walk hit its depth cap — which only happens when a
+`transfer_parent_id` cycle was made reachable from a root, a data
+corruption this tool exists to catch — the statement fails with
+`money_trail_depth_cap_exceeded__transfer_parent_id_cycle_suspected`
+in the error text. A failing refresh here is the system WORKING: fix
+the cyclic parent references in the feed, re-load, re-run. (A cycle
+with no root anchor never enters the walk and is silently absent from
+the trail — if a transfer you expect is missing, check its parent
+chain for loops.)
+
 Statistics cascade WITH the refreshes: the base tables get theirs
 first (a bulk load leaves them unanalyzed, and the Current\* refreshes
 plan against them), then each matview's ANALYZE lands right after its

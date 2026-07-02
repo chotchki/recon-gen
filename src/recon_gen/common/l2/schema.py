@@ -503,7 +503,7 @@ def refresh_matviews_sql(
         + analyze_table(n, dialect)
         for n in names
     )
-    return f"{base_table_stats}\n{cascade}"
+    return f"{base_table_stats}\n{cascade}\n{money_trail_tripwire_sql(p, dialect)}"
 
 
 def _emit_table_based_matview_refresh(
@@ -589,6 +589,7 @@ def _emit_table_based_matview_refresh(
         + invariants + "\n\n"
         + inv_views + "\n\n"
         + analyzes + "\n"
+        + money_trail_tripwire_sql(p, dialect) + "\n"
     )
 
 
@@ -1557,7 +1558,39 @@ def _emit_inv_views(
         ),
         window_end_expr=cast("ps.posted_day", "TIMESTAMP", dialect),
         with_recursive_kw=with_recursive(dialect),
+        trail_depth_cap=str(MONEY_TRAIL_DEPTH_CAP),
     )
+
+
+def money_trail_tripwire_sql(p: str, dialect: Dialect) -> str:
+    """The loud-fail statement every refresh script carries after the
+    money-trail refresh (DS.3.1).
+
+    Edge rows at ``depth >= MONEY_TRAIL_DEPTH_CAP`` exist only when the
+    recursive walk hit the recursion bound — a ``transfer_parent_id``
+    cycle made root-reachable (the chain-corruption class this detector
+    exists for). The statement errors AT REFRESH TIME with the
+    diagnosis in the error text, instead of leaving a silently
+    truncated trail: the cast input is data-dependent (an
+    EXISTS-driven CASE), which is what keeps PG from constant-folding
+    the failing cast at plan time — verified empirically on PG 17 +
+    DuckDB; a constant ``CAST('x' AS INTEGER)`` folds eagerly on PG
+    and would fail every HEALTHY refresh.
+
+    Known under-detection, accepted at DS.3.1: cycle members whose
+    transfers carry no source×target leg pair emit no edge rows, so a
+    pure single-leg cycle terminates (the cap guarantees that) but
+    stays silent — that residual class is a candidate data-quality
+    invariant, recorded in the DS backlog.
+    """
+    trip = (
+        f"CAST(CASE WHEN EXISTS (SELECT 1 FROM {p}_inv_money_trail_edges "
+        f"WHERE depth >= {MONEY_TRAIL_DEPTH_CAP}) "
+        f"THEN 'money_trail_depth_cap_exceeded__transfer_parent_id_cycle_suspected' "
+        f"ELSE '0' END AS {'NUMBER' if dialect is Dialect.ORACLE else 'INTEGER'})"
+    )
+    tail = " FROM DUAL" if dialect is Dialect.ORACLE else ""
+    return f"SELECT {trip} AS money_trail_cycle_tripwire{tail};"
 
 
 # Phase AW.3 (2026-05-23): `_render_unbundled_age_cases` removed. Caps
@@ -3941,6 +3974,18 @@ _INV_MATVIEW_DROP_NAMES: tuple[str, ...] = (
 # sit at z=0 (not enough signal to call an anomaly anyway).
 _INV_MIN_HISTORICAL_WINDOWS: Final[int] = 3
 
+# DS.3.1 — money_trail recursion bound. `transfer_parent_id` is customer
+# ETL data with no FK and no cycle guard at the DDL level; a cycle made
+# root-reachable by a multi-parent row (exactly a chain_parent_
+# disagreement corruption) sends the unbounded recursive walk divergent
+# — the refresh hangs on PG/DuckDB and errors ORA-32044 on Oracle. The
+# cap makes refresh TOTAL by construction; legitimate chain topology is
+# a couple of levels deep, so anything reaching the cap is corruption.
+# Rows AT the cap trip the loud-fail statement `money_trail_tripwire_
+# sql` emits into every refresh script. Exported for tests + the
+# tripwire.
+MONEY_TRAIL_DEPTH_CAP: Final[int] = 32
+
 
 _INV_MATVIEW_DROPS_HEADER = """\
 -- Investigation matview drops (N.3.b) — like the L1 invariant matview
@@ -4221,6 +4266,12 @@ chain (transfer_id, root_transfer_id, depth) AS (
         c.depth + 1
     FROM distinct_transfers d
     JOIN chain c ON d.transfer_parent_id = c.transfer_id
+    -- DS.3.1 — recursion bound: a transfer_parent_id cycle made
+    -- root-reachable would otherwise walk forever (refresh hang /
+    -- ORA-32044). Rows that reach the cap trip the loud-fail
+    -- statement the refresh script carries after this matview's
+    -- refresh.
+    WHERE c.depth < {trail_depth_cap}
 )
 -- v6 column rename. signed_amount becomes amount_money (signed),
 -- posted_at becomes posting, and account_type becomes account_role.

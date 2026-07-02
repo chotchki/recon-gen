@@ -507,9 +507,12 @@ def expected_trail_edges(state: ResidualState) -> frozenset[TrailEdge]:
     Posted) × (tgt leg: amount > 0, Posted) pair, labeled with the
     root's transfer_id and the member's depth.
 
-    CURRENT semantics on cycles: members unreachable from any root are
-    silently omitted (DS.3.1 makes that a loud pre-refresh failure; when
-    it lands, this docstring and KAT D3 flip WITH the fix).
+    Cycle semantics (DS.3.1, landed): a cycle made ROOT-REACHABLE by a
+    multi-parent row walks to MONEY_TRAIL_DEPTH_CAP and the refresh
+    script's tripwire fails LOUDLY. A pure cycle unreachable from any
+    root never enters the walk — silently omitted here and in the
+    detector alike (KAT D3 pins it); that residual class is a candidate
+    data-quality invariant in the DS backlog.
     """
     legs = current_legs(state)
     parent_of: dict[str, str | None] = {}

@@ -113,8 +113,8 @@
    "expected": []
   },
   {
-   "name": "D3-cycle-silently-omitted-CURRENT-SEMANTICS",
-   "comment": "flips WITH DS.3.1 when silence becomes a loud pre-refresh failure",
+   "name": "D3-pure-cycle-silently-omitted-ACCEPTED",
+   "comment": "DS.3.1 landed: root-reachable cycles trip the refresh tripwire loudly; a PURE cycle (no root anchor) stays silently omitted \u2014 accepted, candidate data-quality invariant in the DS backlog",
    "state": {
     "legs": [
      {
