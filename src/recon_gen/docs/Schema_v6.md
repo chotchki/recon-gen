@@ -431,7 +431,8 @@ from recon_gen.common.l2 import refresh_matviews_sql
 from recon_gen.common.sql import Dialect
 
 sql = refresh_matviews_sql(instance, dialect=Dialect.POSTGRES)
-# 13 matviews × 2 statements (REFRESH + ANALYZE) = 26 statements
+# base-table ANALYZEs first, then a REFRESH + ANALYZE pair per matview
+# in dependency order
 
 # Postgres
 import psycopg
@@ -459,10 +460,14 @@ L1 invariants third, dashboard-shape last. PostgreSQL refuses to
 refresh a downstream matview before its upstream is fresh; the
 emitter handles ordering.
 
-The ANALYZE follow-ups update planner statistics so subsequent SELECTs
-hit the indexed lookups (without ANALYZE the planner doesn't know the
-post-REFRESH row count + value distribution and may pick a sequential
-scan over the matview).
+Statistics cascade WITH the refreshes: the base tables get theirs
+first (a bulk load leaves them unanalyzed, and the Current\* refreshes
+plan against them), then each matview's ANALYZE lands right after its
+own REFRESH. Two things depend on this ordering — downstream refreshes
+plan against analyzed upstreams (without it, the correlated subqueries
+in the balance helpers degrade to per-row scans and refresh time goes
+quadratic in the feed size), and subsequent SELECTs hit the indexed
+lookups instead of sequential scans.
 
 ---
 

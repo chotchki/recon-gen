@@ -875,8 +875,10 @@ async def step_4_matviews(
     the demo DB.
 
     The schema helper picks the right shape per dialect:
-      - PG / Oracle: ``REFRESH MATERIALIZED VIEW`` + ``ANALYZE`` per name.
-      - SQLite (matview-as-table): ``DROP TABLE`` + ``CREATE TABLE … AS``
+      - PG / Oracle: base-table stats first, then a REFRESH + stats
+        pair per matview in dependency order (the DS.0a cascade — no
+        refresh plans against an unanalyzed upstream).
+      - DuckDB (matview-as-table): ``DROP TABLE`` + ``CREATE TABLE … AS``
         per name (re-runs the matview body).
 
     No-op safe — the SQL is dependency-ordered + idempotent at the

@@ -199,7 +199,9 @@ or `{{ l2_instance_name }}_daily_balances`, refresh the dependent matviews:
 ```python
 from recon_gen.common.l2 import refresh_matviews_sql
 sql = refresh_matviews_sql(instance)
-# 24 matviews × 2 statements each = 48 (REFRESH + ANALYZE) per call
+# base-table ANALYZEs, then a REFRESH + ANALYZE pair per matview in
+# dependency order — stats cascade with the refreshes so no matview
+# plans against an unanalyzed upstream
 ```
 
 ### 4. Serve the L1 dashboard against your instance

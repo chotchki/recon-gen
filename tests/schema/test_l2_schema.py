@@ -1486,36 +1486,27 @@ def test_multi_xor_violation_filters_fan_in_via_view_predicate() -> None:
 
 
 def test_refresh_matviews_sql_emits_one_per_view() -> None:
-    """All 21 L1+inv matviews each get a REFRESH command + an
-    ANALYZE follow-up: 2 current_* + 2 computed_* + 1 CL.5
-    (effective_balances) + 11 L1 invariants
-    (drift + ledger_drift + overdraft + expected_eod_balance_breach +
-    CL.6 balance_cadence_gap + limit_breach + stuck_pending +
-    stuck_unbundled + chain_parent_disagreement [AB.2.3] +
-    xor_group_violation [AB.3.3] + fan_in_disagreement [AB.4.7]) + 1
-    derived (transfer_parents [AB.4.3]) + 2 dashboard-shape
-    (daily_statement_summary + l1_exceptions) + 2 Investigation
-    matviews (inv_pair_rolling_anomalies + inv_money_trail_edges,
-    added in N.3.b) + AB.6.5's multi_xor_violation + DK.1's data_anchor
-    singleton + DL.3.5's drift_summary derived matview
-    = 24 matviews × 2 statements each = 48 total."""
+    """Every refreshed matview gets a stats follow-up, and the only
+    stats targets BEYOND the matviews are the two base tables — the
+    DS.0a cascade roots (a bulk load leaves them unanalyzed, and the
+    Current* refreshes plan against them). Structure only, no
+    statement counts (a count in a test is stale the moment a matview
+    is added; the cascade ORDERING is pinned by
+    tests/unit/test_ds0a_stats_cascade.py)."""
     sql = refresh_matviews_sql(_baseline_instance(), prefix="re")
     statements = [s.strip() for s in sql.split(";") if s.strip()]
     refreshes = [s for s in statements if s.startswith("REFRESH ")]
     analyzes = [s for s in statements if s.startswith("ANALYZE ")]
-    assert len(refreshes) == 24
-    assert len(analyzes) == 24
-    # Every REFRESHed matview gets a matching ANALYZE.
+    assert refreshes, "no refresh statements emitted"
     # BV.6 — PG emits REFRESH MATERIALIZED VIEW CONCURRENTLY <name>; for
-    # every matview that ships a UNIQUE index. Post-BV.6-finish (2026-06-10)
-    # the only carve-out is inv_pair_rolling_anomalies. Strip both prefixes
+    # every matview that ships a UNIQUE index. Strip both prefixes
     # so the name-equivalence assertion stays clean.
     def _refresh_name(s: str) -> str:
         s = s.removeprefix("REFRESH MATERIALIZED VIEW CONCURRENTLY ")
         return s.removeprefix("REFRESH MATERIALIZED VIEW ")
     refresh_names = {_refresh_name(s) for s in refreshes}
     analyze_names = {s.removeprefix("ANALYZE ") for s in analyzes}
-    assert refresh_names == analyze_names
+    assert analyze_names == refresh_names | {"re_transactions", "re_daily_balances"}
 
 
 def test_refresh_matviews_sql_dependency_order() -> None:

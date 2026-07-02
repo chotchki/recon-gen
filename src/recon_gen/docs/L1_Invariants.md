@@ -508,10 +508,12 @@ surfaces with `entry_count > 1`.
 ## Refresh + extend contracts
 
 - **Refresh:** `refresh_matviews_sql(instance)` returns a single
-  SQL string with 48 statements (24 REFRESH + 24 ANALYZE) in
-  dependency order. Caller splits on `;` and executes
-  per-statement (psycopg2's `cursor.execute` can't run multiple
-  statements separated by `;` reliably).
+  SQL string in dependency order: base-table statistics first, then
+  a REFRESH + statistics pair per matview — every object's stats
+  land right after its own refresh, so no downstream matview ever
+  plans against an unanalyzed upstream. Caller splits on `;` and
+  executes per-statement (psycopg2's `cursor.execute` can't run
+  multiple statements separated by `;` reliably).
 - **Per-instance hot-path indexes:** every L1 invariant matview
   ships indexes on the dashboard's filter dropdowns
   (`account_id`, `rail_name`, `business_day`, etc) so the deployed

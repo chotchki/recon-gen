@@ -352,13 +352,13 @@ def refresh_matviews_sql(
     helpers, then L1 invariants — because a downstream matview's
     REFRESH reads from upstream matview data.
 
-    Returns one `REFRESH MATERIALIZED VIEW <name>;` per line on PG /
-    Oracle. SQLite has no matviews — refresh becomes a per-table
-    ``DELETE FROM <name>; INSERT INTO <name> <body>;`` pair, where
-    ``<body>`` is the same SELECT the matview was originally created
-    with. To avoid duplicating every matview body here, the SQLite
-    branch uses ``DROP TABLE … CREATE TABLE … AS <body>`` — re-runs
-    the schema's matview-create SQL by tearing down + rebuilding.
+    PG / Oracle: base-table stats first, then one
+    ``REFRESH MATERIALIZED VIEW <name>;`` + stats pair per matview in
+    dependency order (the DS.0a cascade — see the inline comment).
+    DuckDB has no native matviews — they land as plain tables via
+    CREATE TABLE AS SELECT, so refresh re-runs the schema template's
+    matview block (drops + creates); DuckDB gathers its own stats on
+    CTAS, no cascade needed.
 
     Caller splits + executes (psycopg2's cursor.execute can't run
     multiple statements separated by `;` reliably; the verify script
@@ -448,10 +448,22 @@ def refresh_matviews_sql(
         # the matview block (drops + creates), since the base tables
         # stay untouched by a refresh.
         return _emit_table_based_matview_refresh(instance, prefix=p, dialect=dialect)
-    # REFRESH first, then ANALYZE — ANALYZE updates planner stats so
-    # subsequent SELECTs use the indexes we ship on each matview
-    # (without ANALYZE the planner doesn't know the post-REFRESH row
-    # count + value distribution and may pick a sequential scan).
+    # DS.0a — stats CASCADE with the refresh dependency order. The
+    # pre-DS.0a shape (all REFRESHes, then all ANALYZEs at the end)
+    # meant every matview's FIRST refresh planned against unanalyzed
+    # upstreams: the correlated subqueries in computed_subledger_balance
+    # and the Current* supersession views flipped to per-outer-row scan
+    # plans and went quadratic (measured: Oracle full-domain refresh
+    # 679s -> 7.63s under the cascade; PG computed_subledger 49.7s ->
+    # 0.6s once stats existed — evidence in
+    # docs/audits/ds_0_spike_evidence/{pg,oracle}/). The cascade makes
+    # the stale-stats window unrepresentable BY CONSTRUCTION: base
+    # tables are the roots (a bulk load leaves them unanalyzed, and the
+    # Current* refreshes plan against them), then every matview's stats
+    # land immediately after its own refresh, before any dependent
+    # refreshes. Production ETL and the test fixtures inherit through
+    # this one script — the fix must never migrate to a fixture-local
+    # patch.
     #
     # BV.6 / DL.15 — PG REFRESH CONCURRENTLY for every matview that
     # ships a UNIQUE index. BV.6 finish (2026-06-10) added UNIQUE
@@ -478,15 +490,20 @@ def refresh_matviews_sql(
     # rather than removed so a future regression (a new matview without
     # a UNIQUE index) has a typed home to land in.
     _NON_UNIQUE_MATVIEWS: frozenset[str] = frozenset()
-    refreshes = "\n".join(
+    base_table_stats = "\n".join(
+        analyze_table(t, dialect)
+        for t in (f"{p}_transactions", f"{p}_daily_balances")
+    )
+    cascade = "\n".join(
         refresh_matview(
             n, dialect,
             concurrently=(dialect is Dialect.POSTGRES and n not in _NON_UNIQUE_MATVIEWS),
         )
+        + "\n"
+        + analyze_table(n, dialect)
         for n in names
     )
-    analyzes = "\n".join(analyze_table(n, dialect) for n in names)
-    return f"{refreshes}\n{analyzes}"
+    return f"{base_table_stats}\n{cascade}"
 
 
 def _emit_table_based_matview_refresh(
