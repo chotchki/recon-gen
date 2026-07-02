@@ -20,7 +20,7 @@ they "ride the money domain"):
   on one (account, day) — later entry wins — crossed with one
   optional Posted leg; exercises the Current* argmax under drift.
 
-The nightly tier widens the window to 3 days and adds a reduced-axis
+The full (default) tier uses a 3-day window and adds a reduced-axis
 3-day grid (full 3-day cross of the 196 day-options is ~7.5M cells —
 deliberately out of scope; the reduced grid keeps per-day options at
 28 so the 3-day cross stays enumerable).
@@ -167,11 +167,11 @@ def _supersession_cells(window: tuple[dt.date, ...]) -> list[PackedCell]:
 
 
 def money_cells(
-    window: tuple[dt.date, ...], *, nightly: bool,
+    window: tuple[dt.date, ...], *, wide: bool,
 ) -> list[PackedCell]:
     """All money-grid cells for the tier. Grids enumerate over the
     first two window days; every cell is EVALUATED over the full
-    window (a 3-day nightly window turns day 3 into a carried-day
+    window (a 3-day window turns day 3 into a carried-day
     probe for every 2-day cell for free)."""
     two_days = window[:2]
     cells = _grid_cells(
@@ -182,7 +182,7 @@ def money_cells(
         window,
     )
     cells += _supersession_cells(window)
-    if nightly and len(window) >= 3:
+    if wide and len(window) >= 3:
         cells += _grid_cells(
             "n3",
             _day_opts(

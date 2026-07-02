@@ -26,17 +26,17 @@ from tests.enumeration.domains._base import (
     spec_profile,
     window_days,
 )
-from tests.enumeration.harness import PackedDomain, artifacts_for, is_nightly
+from tests.enumeration.harness import PackedDomain, artifacts_for, wide_domains
 
 
 def build_locf_domain() -> PackedDomain:
     """The WINDOW-ALIGNED money family: drift's grids + ledger_drift's
     topology cells share one carry-forward spine; overdraft +
     expected_eod ride the same cells."""
-    nightly = is_nightly()
-    window = window_days(nightly=nightly)
+    wide = wide_domains()
+    window = window_days(wide=wide)
     anchor_tx, anchor_bal = _locf.anchor_rows(window)
-    cells = drift.money_cells(window, nightly=nightly)
+    cells = drift.money_cells(window, wide=wide)
     cells += ledger_drift.topology_cells(window)
     return PackedDomain(
         name="locf",

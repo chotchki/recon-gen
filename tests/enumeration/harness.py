@@ -567,9 +567,12 @@ def isolated_cell_diffs(
 
 
 def enum_tier() -> str:
-    """``ci`` (default) or ``nightly`` — from RECON_GEN_ENUM_TIER."""
-    return RECON_GEN_ENUM_TIER.get_or_none() or "ci"
+    """``full`` (default) or ``quick`` — from RECON_GEN_ENUM_TIER.
+    The common path runs the full domains (operator rule: no split
+    test tier unless runtimes demand it — they measure in seconds);
+    ``quick`` is the explicit narrowing for local iteration."""
+    return RECON_GEN_ENUM_TIER.get_or_none() or "full"
 
 
-def is_nightly() -> bool:
-    return enum_tier() == "nightly"
+def wide_domains() -> bool:
+    return enum_tier() != "quick"

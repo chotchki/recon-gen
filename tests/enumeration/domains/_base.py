@@ -26,14 +26,14 @@ SPEC_EXAMPLE: Final = (
 )
 SPEC_PREFIX: Final = "spec_example"
 
-# The 2-day CI enumeration window (nightly widens to 3 — the domain
+# The 2-day CI enumeration window (the full tier uses 3 — the domain
 # builders read the tier). Anchored at the repo's canonical semantic
 # anchor date.
 WINDOW_START: Final = dt.date(2030, 1, 1)
 
 
-def window_days(*, nightly: bool) -> tuple[dt.date, ...]:
-    n = 3 if nightly else 2
+def window_days(*, wide: bool) -> tuple[dt.date, ...]:
+    n = 3 if wide else 2
     return tuple(WINDOW_START + dt.timedelta(days=i) for i in range(n))
 
 

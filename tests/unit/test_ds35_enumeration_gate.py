@@ -29,7 +29,7 @@ Gate pieces:
   the production fix lands; it must not be "fixed" by weakening the
   law side).
 
-Tier: RECON_GEN_ENUM_TIER (ci default / nightly widens domains +
+Tier: RECON_GEN_ENUM_TIER (full default / quick narrows domains —
 sample). Packed runs are built once per process and cached.
 """
 from __future__ import annotations
@@ -113,7 +113,7 @@ def _packed(name: str) -> PackedRun:
 
 
 def _lemma_sample_size() -> int:
-    return 25 if enum_tier() == "nightly" else 3
+    return 3 if enum_tier() == "quick" else 25
 
 
 DETECTORS = tuple(DETECTOR_DOMAINS)

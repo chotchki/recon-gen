@@ -624,14 +624,16 @@ RECON_GEN_AI_FUZZ_SAMPLE_N: Final = EnvVar(
 RECON_GEN_ENUM_TIER: Final = EnvVar(
     name="RECON_GEN_ENUM_TIER",
     description=(
-        "Enumeration-gate domain tier ('ci' or 'nightly') for "
-        "tests/unit/test_ds35_enumeration_gate.py. Absent → 'ci' "
-        "(the unit-tier packed domains); 'nightly' widens the "
-        "domains (3-day money window, larger isolated sample)."
+        "Enumeration-gate domain tier ('full' or 'quick') for "
+        "tests/unit/test_ds35_enumeration_gate.py. Absent → 'full' "
+        "(operator rule: the common path runs EVERYTHING — measured "
+        "well under the 30s step budget, so no split tier is earned); "
+        "'quick' is the explicit narrowing for fast local iteration "
+        "(2-day window, small isolated sample)."
     ),
     coercer=str,
     optional=True,
-    validator=matches(re.compile(r"ci|nightly")),
+    validator=matches(re.compile(r"full|quick")),
 )
 
 # Y.2.gate.b.14.3 — destructive-op opt-in. ``./run_tests.sh down`` /

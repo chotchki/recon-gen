@@ -12,7 +12,7 @@ expected_parent_count) carries it in its own packed DB — enumeration
 is instance-parametric by design (DS.0 §5, config-injection lemma).
 ``expected = 1`` from the DS.0 sketch's {None, 1, 2} axis is
 deliberately not declared: it exercises no SQL branch that
-{None, 2} doesn't already cover (nightly candidate, noted here).
+{None, 2} doesn't already cover (future-axis candidate, noted here).
 
 KNOWN DIVERGENCE — the zero-parent blind spot (DS.3.5 FINDING,
 2026-07-02). The signed law (``fan_in_residual``) gives a cell to any
