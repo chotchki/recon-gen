@@ -29,7 +29,7 @@ from __future__ import annotations
 import random
 from recon_gen.common.db import SyncConnection
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from typing import ClassVar
 
 from recon_gen.common.l2.primitives import (
@@ -48,8 +48,27 @@ from recon_gen.common.spine._emit_helpers import (
     to_date,
     ts,
 )
+from recon_gen.common.spine.residuals import (
+    BalanceRow,
+    LegRow,
+    ResidualState,
+    drift_residual,
+    ledger_drift_residual,
+)
 from recon_gen.common.spine.rng import scenario_rng
-from recon_gen.common.spine.violation import RuleViolation, Violation
+from recon_gen.common.spine.violation import (
+    RuleViolation,
+    Violation,
+    identity_dollars,
+)
+
+
+def _posting_dt(day: date) -> datetime:
+    """The residual-domain projection of ``ts(day)`` — parse the exact
+    string the insert boundary writes, so the planned ``LegRow.posting``
+    tracks the emit-side timestamp convention (noon default) by
+    construction rather than by a copied constant."""
+    return datetime.strptime(ts(day), "%Y-%m-%d %H:%M:%S")
 
 
 @dataclass(frozen=True)
@@ -194,13 +213,125 @@ class DriftGenerator:
     # AY.4.d — production callers thread cfg.db.table_prefix here.
     prefix: str = "spec_example"
 
+    def _planned_child_balance(self) -> BalanceRow:
+        """The child's stored balance — leg total shifted by
+        ``magnitude`` (the drift). Cents conversion mirrors the insert
+        boundary's ``Cents.from_dollars(str(value))`` exactly."""
+        return BalanceRow(
+            account_id=self.child_account_id,
+            entry=0,
+            day=self.anchor_day,
+            money=Cents.from_dollars(str(self.leg_amount + self.magnitude)),
+            account_role=self.child_role,
+            account_parent_role=self.parent_role,
+        )
+
+    def _planned_clean_leg(self) -> LegRow:
+        """The child's one non-zero Posted leg (the clean side of the
+        drift). Id slug omits anchor_day — see emit()'s dedup note."""
+        return LegRow(
+            id=f"tx-drift-{self.child_role}-{self.child_account_id}-1",
+            entry=0,
+            account_id=self.child_account_id,
+            amount=Cents.from_dollars(str(self.leg_amount)),
+            status=POSTED_STATUS,
+            posting=_posting_dt(self.anchor_day),
+            transfer_id=(
+                f"xfer-drift-{self.child_role}-{self.child_account_id}-1"
+            ),
+            rail_name="_spine_plant",
+            account_role=self.child_role,
+            account_parent_role=self.parent_role,
+        )
+
+    def _planned_child_marker(self) -> LegRow:
+        """The DL.3.1 zero-amount drilldown marker on the child. Zero
+        amount is load-bearing: it keeps the drift residual's Σ legs at
+        exactly ``leg_amount`` (see emit()'s rationale comment)."""
+        day_slug = self.anchor_day.isoformat()
+        return LegRow(
+            id=f"tx-drift-marker-child-{self.child_account_id}-{day_slug}",
+            entry=0,
+            account_id=self.child_account_id,
+            amount=Cents.from_dollars(str(0.0)),
+            status=POSTED_STATUS,
+            posting=_posting_dt(self.anchor_day),
+            transfer_id=(
+                f"xfer-drift-marker-child-{self.child_account_id}-{day_slug}"
+            ),
+            rail_name="_spine_plant",
+            account_role=self.child_role,
+            account_parent_role=self.parent_role,
+        )
+
+    def _planned_parent_balance(self) -> BalanceRow | None:
+        """The parent's stored balance — the CLEAN leg total, so the
+        parent's ledger_drift is child-propagated (Σ child stored is
+        inflated by ``magnitude``). None when the shape has no parent
+        account — mirrors emit()'s parent-emission condition."""
+        if self.parent_account_id is None or self.parent_account_role is None:
+            return None
+        return BalanceRow(
+            account_id=self.parent_account_id,
+            entry=0,
+            day=self.anchor_day,
+            money=Cents.from_dollars(str(self.leg_amount)),
+            account_role=self.parent_account_role,
+            account_parent_role=None,
+        )
+
+    def _planned_parent_marker(self) -> LegRow | None:
+        """The DL.3.1 zero-amount marker on the parent. Zero keeps the
+        ledger_drift residual's direct-postings term at exactly 0."""
+        if self.parent_account_id is None or self.parent_account_role is None:
+            return None
+        day_slug = self.anchor_day.isoformat()
+        return LegRow(
+            id=f"tx-drift-marker-parent-{self.parent_account_id}-{day_slug}",
+            entry=0,
+            account_id=self.parent_account_id,
+            amount=Cents.from_dollars(str(0.0)),
+            status=POSTED_STATUS,
+            posting=_posting_dt(self.anchor_day),
+            transfer_id=(
+                f"xfer-drift-marker-parent-{self.parent_account_id}-{day_slug}"
+            ),
+            rail_name="_spine_plant",
+            account_role=self.parent_account_role,
+            account_parent_role=None,
+        )
+
+    def _plan(self) -> ResidualState:
+        """Every row ``emit()`` writes, projected into the residual
+        domain — the SINGLE plan both ``emit()`` and the intended/edge
+        properties read (DS.2: a separately-written expectation is the
+        calibration-drift disease with a new name)."""
+        legs: list[LegRow] = [
+            self._planned_clean_leg(), self._planned_child_marker(),
+        ]
+        balances: list[BalanceRow] = [self._planned_child_balance()]
+        parent_balance = self._planned_parent_balance()
+        if parent_balance is not None:
+            balances.append(parent_balance)
+        parent_marker = self._planned_parent_marker()
+        if parent_marker is not None:
+            legs.append(parent_marker)
+        return ResidualState(legs=tuple(legs), balances=tuple(balances))
+
     @property
     def intended(self) -> RuleViolation:
+        # DS.2 — the magnitude comes from the drift RESIDUAL evaluated
+        # over the planned rows, not hand-inlined `round(magnitude, 2)`:
+        # if the law moves, this expectation moves with it.
+        residual = drift_residual(
+            self._plan(), self.child_account_id, self.anchor_day,
+        )
+        assert residual is not None  # child is a planted internal leaf
         return RuleViolation.of(
             "drift",
             account_id=self.child_account_id,
             business_day=self.anchor_day,
-            drift=round(self.magnitude, 2),
+            drift=identity_dollars(residual),
         )
 
     @property
@@ -208,17 +339,27 @@ class DriftGenerator:
         """The secondary edge: when this generator's child-drift
         propagates up to the parent's `_ledger_drift`. `None` when no
         parent account is present in the shape (the L2 instance has no
-        account with the child's `parent_role`)."""
-        if self.parent_account_id is None:
+        account with the child's `parent_role`).
+
+        DS.2 — derived from ``ledger_drift_residual`` over the same
+        planned rows emit() writes (child stored is `leg + magnitude`,
+        parent stored is the clean `leg`, so the law yields
+        −magnitude). The guard mirrors emit()'s parent-emission
+        condition (BOTH id and role must be present) — the pre-DS.2
+        id-only guard could claim a ledger_drift edge for a parent row
+        emit() never writes.
+        """
+        if self.parent_account_id is None or self.parent_account_role is None:
             return None
+        residual = ledger_drift_residual(
+            self._plan(), self.parent_account_id, self.anchor_day,
+        )
+        assert residual is not None  # the plan carries the parent row
         return RuleViolation.of(
             "ledger_drift",
             account_id=self.parent_account_id,
             business_day=self.anchor_day,
-            # Sign: child stored is `leg + magnitude`, parent computed
-            # sums children, so parent.stored − parent.computed =
-            # `leg − (leg + magnitude)` = −magnitude.
-            drift=round(-self.magnitude, 2),
+            drift=identity_dollars(residual),
         )
 
     @property
@@ -243,20 +384,24 @@ class DriftGenerator:
             scenario_id, generator="DriftGenerator",
         )
         start, end = day_bounds(self.anchor_day)
-        day_slug = self.anchor_day.isoformat()
+        # DS.2 — every money value + row id below reads off the SAME
+        # plan the intended/edge properties evaluate residuals over.
+        child_balance = self._planned_child_balance()
+        clean_leg = self._planned_clean_leg()
+        child_marker = self._planned_child_marker()
         # Child: clean balance == leg total. Stored is shifted by
         # `magnitude` → drift fires on the child.
         insert_balance(
             conn,
             prefix=self.prefix,
-            account_id=self.child_account_id,
+            account_id=child_balance.account_id,
             account_name=f"Drift Child ({self.child_role})",
             account_role=self.child_role,
             account_scope="internal",
-            account_parent_role=self.parent_role,
+            account_parent_role=child_balance.account_parent_role,
             business_day_start=start,
             business_day_end=end,
-            money=self.leg_amount + self.magnitude,
+            money=float(child_balance.money.to_dollars()),
             metadata=metadata,
         )
         # The non-zero clean leg. ID slug intentionally OMITS anchor_day
@@ -269,17 +414,17 @@ class DriftGenerator:
         insert_tx(
             conn,
             prefix=self.prefix,
-            id=f"tx-drift-{self.child_role}-{self.child_account_id}-1",
-            account_id=self.child_account_id,
+            id=clean_leg.id,
+            account_id=clean_leg.account_id,
             account_name=f"Drift Child ({self.child_role})",
             account_role=self.child_role,
             account_scope="internal",
-            account_parent_role=self.parent_role,
-            amount_money=self.leg_amount,
+            account_parent_role=clean_leg.account_parent_role,
+            amount_money=float(clean_leg.amount.to_dollars()),
             amount_direction="Credit",
             status=POSTED_STATUS,
-            posting=ts(self.anchor_day),
-            transfer_id=f"xfer-drift-{self.child_role}-{self.child_account_id}-1",
+            posting=clean_leg.posting.strftime("%Y-%m-%d %H:%M:%S"),
+            transfer_id=clean_leg.transfer_id,
             rail_name="_spine_plant",
             origin=ORIGIN_INTERNAL_INITIATED,
             metadata=metadata,
@@ -303,17 +448,17 @@ class DriftGenerator:
         insert_tx(
             conn,
             prefix=self.prefix,
-            id=f"tx-drift-marker-child-{self.child_account_id}-{day_slug}",
-            account_id=self.child_account_id,
+            id=child_marker.id,
+            account_id=child_marker.account_id,
             account_name=f"Drift Child ({self.child_role})",
             account_role=self.child_role,
             account_scope="internal",
-            account_parent_role=self.parent_role,
-            amount_money=0.0,
+            account_parent_role=child_marker.account_parent_role,
+            amount_money=float(child_marker.amount.to_dollars()),
             amount_direction="Credit",
             status=POSTED_STATUS,
-            posting=ts(self.anchor_day),
-            transfer_id=f"xfer-drift-marker-child-{self.child_account_id}-{day_slug}",
+            posting=child_marker.posting.strftime("%Y-%m-%d %H:%M:%S"),
+            transfer_id=child_marker.transfer_id,
             rail_name="_spine_plant",
             origin=ORIGIN_INTERNAL_INITIATED,
             metadata=metadata,
@@ -322,18 +467,20 @@ class DriftGenerator:
         # CLEAN child leg total. With the child's stored inflated by
         # `magnitude`, the parent's computed (Σ child.money) is off by
         # `magnitude` too → ledger_drift fires on the parent.
-        if self.parent_account_id is not None and self.parent_account_role is not None:
+        parent_balance = self._planned_parent_balance()
+        parent_marker = self._planned_parent_marker()
+        if parent_balance is not None and parent_marker is not None:
             insert_balance(
                 conn,
                 prefix=self.prefix,
-                account_id=self.parent_account_id,
+                account_id=parent_balance.account_id,
                 account_name=f"Drift Parent ({self.parent_account_role})",
-                account_role=self.parent_account_role,
+                account_role=parent_balance.account_role,
                 account_scope="internal",
                 account_parent_role=None,
                 business_day_start=start,
                 business_day_end=end,
-                money=self.leg_amount,
+                money=float(parent_balance.money.to_dollars()),
                 metadata=metadata,
             )
             # DL.3.1 — zero-amount drilldown marker tx so the `Parent
@@ -356,17 +503,17 @@ class DriftGenerator:
             insert_tx(
                 conn,
                 prefix=self.prefix,
-                id=f"tx-drift-marker-parent-{self.parent_account_id}-{day_slug}",
-                account_id=self.parent_account_id,
+                id=parent_marker.id,
+                account_id=parent_marker.account_id,
                 account_name=f"Drift Parent ({self.parent_account_role})",
-                account_role=self.parent_account_role,
+                account_role=parent_marker.account_role,
                 account_scope="internal",
                 account_parent_role=None,
-                amount_money=0.0,
+                amount_money=float(parent_marker.amount.to_dollars()),
                 amount_direction="Credit",
                 status=POSTED_STATUS,
-                posting=ts(self.anchor_day),
-                transfer_id=f"xfer-drift-marker-parent-{self.parent_account_id}-{day_slug}",
+                posting=parent_marker.posting.strftime("%Y-%m-%d %H:%M:%S"),
+                transfer_id=parent_marker.transfer_id,
                 rail_name="_spine_plant",
                 origin=ORIGIN_INTERNAL_INITIATED,
                 metadata=metadata,
@@ -402,13 +549,99 @@ class LedgerDriftGenerator:
     leg_amount: float = 100.0
     prefix: str = "spec_example"
 
+    def _planned_child_balance(self) -> BalanceRow:
+        """The clean child: stored money == its single leg. Links to
+        the synthetic parent_role so the residual's Σ-children term
+        (like the matview's) sums exactly our child. Cents conversion
+        mirrors the insert boundary's ``Cents.from_dollars(str(value))``
+        exactly."""
+        return BalanceRow(
+            account_id=self.child_account_id,
+            entry=0,
+            day=self.anchor_day,
+            money=Cents.from_dollars(str(self.leg_amount)),
+            account_role=self.child_role,
+            account_parent_role=self.parent_role,
+        )
+
+    def _planned_clean_leg(self) -> LegRow:
+        """The child's matching credit leg — keeps the CHILD drift-free
+        (stored == Σ legs), so only ledger_drift fires."""
+        return LegRow(
+            id=f"tx-ledger-drift-{self.parent_role}-1",
+            entry=0,
+            account_id=self.child_account_id,
+            amount=Cents.from_dollars(str(self.leg_amount)),
+            status=POSTED_STATUS,
+            posting=_posting_dt(self.anchor_day),
+            transfer_id=f"xfer-ledger-drift-{self.parent_role}-1",
+            rail_name="_spine_plant",
+            account_role=self.child_role,
+            account_parent_role=self.parent_role,
+        )
+
+    def _planned_parent_balance(self) -> BalanceRow:
+        """The parent's stored balance — Σ child stored shifted by
+        ``delta`` (the ledger drift)."""
+        return BalanceRow(
+            account_id=self.parent_account_id,
+            entry=0,
+            day=self.anchor_day,
+            money=Cents.from_dollars(str(self.leg_amount + self.delta)),
+            account_role=self.parent_role,
+            account_parent_role=None,
+        )
+
+    def _planned_parent_marker(self) -> LegRow:
+        """The DL.3.1 zero-amount drilldown marker on the parent. Zero
+        keeps the ledger_drift residual's direct-postings term at 0."""
+        day_slug = self.anchor_day.isoformat()
+        return LegRow(
+            id=(
+                f"tx-ledger-drift-marker-parent-"
+                f"{self.parent_account_id}-{day_slug}"
+            ),
+            entry=0,
+            account_id=self.parent_account_id,
+            amount=Cents.from_dollars(str(0.0)),
+            status=POSTED_STATUS,
+            posting=_posting_dt(self.anchor_day),
+            transfer_id=(
+                f"xfer-ledger-drift-marker-parent-"
+                f"{self.parent_account_id}-{day_slug}"
+            ),
+            rail_name="_spine_plant",
+            account_role=self.parent_role,
+            account_parent_role=None,
+        )
+
+    def _plan(self) -> ResidualState:
+        """Every row ``emit()`` writes, projected into the residual
+        domain — the SINGLE plan both ``emit()`` and ``intended`` read
+        (DS.2)."""
+        return ResidualState(
+            legs=(self._planned_clean_leg(), self._planned_parent_marker()),
+            balances=(
+                self._planned_child_balance(),
+                self._planned_parent_balance(),
+            ),
+        )
+
     @property
     def intended(self) -> RuleViolation:
+        # DS.2 — the magnitude comes from the ledger_drift RESIDUAL
+        # evaluated over the planned rows, not hand-inlined
+        # `round(delta, 2)`: if the law moves, this expectation moves
+        # with it.
+        residual = ledger_drift_residual(
+            self._plan(), self.parent_account_id, self.anchor_day,
+        )
+        assert residual is not None  # the plan carries the parent row
         return RuleViolation.of(
             "ledger_drift",
             account_id=self.parent_account_id,
             business_day=self.anchor_day,
-            drift=round(self.delta, 2),
+            drift=identity_dollars(residual),
         )
 
     @property
@@ -427,6 +660,12 @@ class LedgerDriftGenerator:
             scenario_id, generator="LedgerDriftGenerator",
         )
         start, end = day_bounds(self.anchor_day)
+        # DS.2 — every money value + row id below reads off the SAME
+        # plan `intended` evaluates the ledger_drift residual over.
+        child_balance = self._planned_child_balance()
+        clean_leg = self._planned_clean_leg()
+        parent_balance = self._planned_parent_balance()
+        parent_marker = self._planned_parent_marker()
         # Child: stored money == leg_amount, with one matching credit
         # leg → child's computed_subledger = leg_amount → no drift on
         # child. Child's account_parent_role points at our SYNTHETIC
@@ -435,35 +674,34 @@ class LedgerDriftGenerator:
         insert_balance(
             conn,
             prefix=self.prefix,
-            account_id=self.child_account_id,
+            account_id=child_balance.account_id,
             account_name=f"Ledger Drift Child ({self.child_role})",
             account_role=self.child_role,
             account_scope="internal",
-            account_parent_role=self.parent_role,
+            account_parent_role=child_balance.account_parent_role,
             business_day_start=start,
             business_day_end=end,
-            money=self.leg_amount,
+            money=float(child_balance.money.to_dollars()),
             metadata=metadata,
         )
         # Child clean leg — id intentionally omits anchor_day so the
         # pre-DL.3.1 cumulative-Σ shape is preserved (see
         # DriftGenerator.emit's same-shape comment). Today's per-day-
         # unique parent_role keeps this id collision-safe across plants.
-        day_slug = self.anchor_day.isoformat()
         insert_tx(
             conn,
             prefix=self.prefix,
-            id=f"tx-ledger-drift-{self.parent_role}-1",
-            account_id=self.child_account_id,
+            id=clean_leg.id,
+            account_id=clean_leg.account_id,
             account_name=f"Ledger Drift Child ({self.child_role})",
             account_role=self.child_role,
             account_scope="internal",
-            account_parent_role=self.parent_role,
-            amount_money=self.leg_amount,
+            account_parent_role=clean_leg.account_parent_role,
+            amount_money=float(clean_leg.amount.to_dollars()),
             amount_direction="Credit",
             status=POSTED_STATUS,
-            posting=ts(self.anchor_day),
-            transfer_id=f"xfer-ledger-drift-{self.parent_role}-1",
+            posting=clean_leg.posting.strftime("%Y-%m-%d %H:%M:%S"),
+            transfer_id=clean_leg.transfer_id,
             rail_name="_spine_plant",
             origin=ORIGIN_INTERNAL_INITIATED,
             metadata=metadata,
@@ -474,14 +712,14 @@ class LedgerDriftGenerator:
         insert_balance(
             conn,
             prefix=self.prefix,
-            account_id=self.parent_account_id,
+            account_id=parent_balance.account_id,
             account_name=f"Ledger Drift Parent ({self.parent_role})",
-            account_role=self.parent_role,
+            account_role=parent_balance.account_role,
             account_scope="internal",
             account_parent_role=None,
             business_day_start=start,
             business_day_end=end,
-            money=self.leg_amount + self.delta,
+            money=float(parent_balance.money.to_dollars()),
             metadata=metadata,
         )
         # DL.3.1 — zero-amount drilldown marker tx on the parent so the
@@ -495,17 +733,17 @@ class LedgerDriftGenerator:
         insert_tx(
             conn,
             prefix=self.prefix,
-            id=f"tx-ledger-drift-marker-parent-{self.parent_account_id}-{day_slug}",
-            account_id=self.parent_account_id,
+            id=parent_marker.id,
+            account_id=parent_marker.account_id,
             account_name=f"Ledger Drift Parent ({self.parent_role})",
-            account_role=self.parent_role,
+            account_role=parent_marker.account_role,
             account_scope="internal",
             account_parent_role=None,
-            amount_money=0.0,
+            amount_money=float(parent_marker.amount.to_dollars()),
             amount_direction="Credit",
             status=POSTED_STATUS,
-            posting=ts(self.anchor_day),
-            transfer_id=f"xfer-ledger-drift-marker-parent-{self.parent_account_id}-{day_slug}",
+            posting=parent_marker.posting.strftime("%Y-%m-%d %H:%M:%S"),
+            transfer_id=parent_marker.transfer_id,
             rail_name="_spine_plant",
             origin=ORIGIN_INTERNAL_INITIATED,
             metadata=metadata,
