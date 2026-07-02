@@ -39,15 +39,17 @@ dashboards or the portability of the SQL?"
 
 Three reference points:
 
-- **`docs/Schema_v6.md` → metadata catalog tables** — the existing
-  per-`rail_name` key inventory. New keys should slot into the
-  same shape (key name, type, what it drives).
+- **The rail's `metadata_keys:` in the L2 YAML** — the
+  per-`rail_name` key declaration (`metadata_keys: [external_reference]`).
+  New keys get added there (the seed reads `rail.metadata_keys` to emit
+  values). `Schema_v6.md` "Metadata JSON columns" carries only a prose
+  Common-patterns note (NO per-rail catalog table).
 - **`src/recon_gen/apps/<app>/datasets.py`** — the SQL
   patterns. Every metadata extraction looks like
   `JSON_VALUE(metadata, '$.<key>') AS <alias>`; new keys follow
   the same shape. The L1 Reconciliation Dashboard's datasets are
   the densest reference.
-- **CLAUDE.md → "Database portability constraint"** — the
+- **`Schema_v6.md` → "Forbidden SQL patterns"** — the
   forbidden-pattern list (`JSONB`, `->>`, `->`, `@>`, `?`, GIN
   indexes). If you reach for any of these, the new key won't
   port.
@@ -80,7 +82,7 @@ card_brand` in the dataset projection. That pair —
 `JSON_VALUE(metadata, '$.key')` on the consumer side — is the only
 shape allowed.
 
-See it live: https://recon-gen-spec.hotchkiss.io/
+[See it live](https://recon-gen-spec.hotchkiss.io/)
 
 ## What it means
 
@@ -100,9 +102,10 @@ The contract for any new metadata key has four parts:
    `common/sql/dialect.py::json_value(col, path, dialect)` — emits
    `JSON_VALUE` on PG/Oracle, `json_extract_string` on DuckDB, the
    local-iteration default.)
-4. **Document the new key in `Schema_v6.md`'s metadata catalog
-   for that `rail_name`**. Otherwise the schema-doc drift
-   tests fail the next time anyone touches the catalog.
+4. **Declare the new key on the rail's `metadata_keys:` in the L2
+   YAML** (the seed reads `rail.metadata_keys` to emit demo values).
+   `Schema_v6.md` "Common patterns" is the human-facing note — no
+   per-rail catalog table, no drift test gates it.
 
 A subtle constraint on dataset visuals: if a visual EXPECTS the
 key to be present (e.g., uses it as a filter or grouping
@@ -146,14 +149,15 @@ SELECT
     -- existing columns ...
     JSON_VALUE(metadata, '$.originating_branch') AS originating_branch
 FROM {{ l2_instance_name }}_transactions
-WHERE rail_name = 'sale';
+WHERE rail_name = 'MerchantCardSale';
 ```
 
-Update the matching `DatasetContract` to add `("originating_branch",
+Update the matching `DatasetContract` to add `ColumnSpec("originating_branch",
 "STRING")` so the contract test stays green.
 
-**Step 3 — document it.** Add a row to the `sale` metadata
-catalog table in `Schema_v6.md`:
+**Step 3 — declare it.** Add the key to the rail's `metadata_keys:`
+in the L2 YAML (the demo L2's card-sale rail is `MerchantCardSale`, NOT
+`sale`):
 
 ```markdown
 | `originating_branch` | string | Branch code that handled the sale | Branch grouping in downstream sheets |
@@ -173,9 +177,10 @@ Once the key is producing, consuming and rendering:
 
 1. **Run the unit + integration tests**:
    `.venv/bin/pytest tests/unit/test_etl_examples.py
-   tests/json/test_dataset_contract.py`. The schema-contract test
-   verifies your new key is in the catalog; the dataset-contract
-   test verifies the SQL projection matches.
+   tests/json/test_dataset_contract.py`. `test_etl_examples.py` asserts the ETL-examples SQL still
+   demonstrates the metadata-extension shape (`originating_branch`/`fraud_score`); the projection sweep
+   (`tests/unit/test_dataset_sql_contract_projection.py`) verifies every
+   contract column appears in the dataset SQL.
 2. **Re-run the pre-flight invariants** from the validation
    walkthrough. Adding a metadata key shouldn't break any of
    them, but if you backfilled rows via UPDATE, double-check that
@@ -199,5 +204,5 @@ Once the key is producing, consuming and rendering:
   the "visual shows N/A" symptom in the debug recipes is usually
   a metadata-key contract violation.
 - [Schema_v6 → metadata catalog](../../Schema_v6.md#metadata-json-columns) —
-  the per-`rail_name` key inventory and its forbidden-syntax
+  the `metadata` read patterns (`JSON_VALUE`/`JSON_QUERY`/`JSON_EXISTS`) and its forbidden-syntax
   rules.

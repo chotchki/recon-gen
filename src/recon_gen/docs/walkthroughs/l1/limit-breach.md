@@ -24,7 +24,7 @@ breaching side.)
 ??? example "Screenshot"
     ![Limit Breach](../screenshots/l1/l1-sheet-limit-breach.png)
 
-See it live: https://recon-gen-spec.hotchkiss.io/
+[See it live](https://recon-gen-spec.hotchkiss.io/)
 
 ## When to use it
 

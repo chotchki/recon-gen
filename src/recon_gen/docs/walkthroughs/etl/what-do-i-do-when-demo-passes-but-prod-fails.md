@@ -4,7 +4,7 @@
 
 ## The story
 
-The demo dashboards work. You ran the demo flow (`schema apply --execute`, `data apply --execute`, `data refresh --execute`, `json apply --execute`), opened the four
+The demo dashboards work. You ran the demo flow (`schema apply --execute`, `data apply --execute`, `data refresh --execute`), opened the four
 L2-fed dashboards (L1 Reconciliation, L2 Flow Tracing,
 Investigation, Executives) and saw the planted exception
 scenarios light up the way they should. See it live:
@@ -112,7 +112,7 @@ populates an optional key.
 ```sql
 SELECT COUNT(*) AS rows_missing_key
 FROM {{ l2_instance_name }}_transactions
-WHERE rail_name = 'sale'
+WHERE rail_name = 'MerchantCardSale'
   AND -- your scope filter
   AND NOT JSON_EXISTS(metadata, '$.card_brand');
 ```

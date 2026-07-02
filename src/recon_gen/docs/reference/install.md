@@ -17,7 +17,7 @@ their own pipeline doesn't pull reportlab / mkdocs / DB drivers. DuckDB
 rides along in the base because every `recon-gen` invocation imports it
 as the default local dialect.
 
-See it live: https://recon-gen-spec.hotchkiss.io/
+[See it live](https://recon-gen-spec.hotchkiss.io/)
 
 ## What each extra unlocks
 

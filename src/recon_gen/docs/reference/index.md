@@ -9,7 +9,7 @@ produces the rows the dashboard expects.
 If you arrived here directly, the [role pages](../for-your-role/index.md)
 curate which handbooks each role uses day-to-day.
 
-See it live: https://recon-gen-spec.hotchkiss.io/
+[See it live](https://recon-gen-spec.hotchkiss.io/)
 
 ## Pages
 

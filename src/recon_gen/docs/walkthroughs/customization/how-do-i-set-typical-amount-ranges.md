@@ -12,7 +12,7 @@ isn't — the per-kind lognormal default in
 occasionally, and the planted Outbound LimitBreachPlant was sized
 ``cap × 1.5`` regardless of what the rail's normal volume looks
 like. The numbers are valid; they're just absurd for retail card
-sales clearing through an in-house DDA.
+sales force-posting through the MerchantPayableClearing GL.
 
 You want every firing on your retail card-sale rail to land
 between $5 and $500 (typical low-end clustering — single coffees
@@ -55,14 +55,14 @@ and add ``amount_typical_range: [min, max]``:
 rails:
   # existing rails...
   - name: MerchantCardSale
-    source_role: MerchantSettlement
-    destination_role: MerchantDDA
-    metadata_keys: [transfer_id, card_brand, terminal_id]
+    source_role: ExternalCardNetwork
+    destination_role: MerchantPayableClearing
+    metadata_keys: [merchant_id, settlement_period, card_network_ref, card_brand]
     amount_typical_range: [5, 500]
     description: |
-      Retail card sale settling from the rail-side concentration
-      account into the merchant's DDA. Single coffee to high-end
-      retail; values cluster at the low end (log-uniform sampling).
+      One merchant card-sale posting (card network force-posts the
+      external debit leg; the internal ledger credits the MerchantPayableClearing
+      GL; values cluster at the low end via log-uniform sampling).
 ```
 
 Two notes on shape:
@@ -91,7 +91,7 @@ sampler honoring your declared range. Open the L1 dashboard and
 filter to ``rail_name = MerchantCardSale`` — every firing should
 land between $5 and $500, clustering at the low end.
 
-See it live: https://recon-gen-spec.hotchkiss.io/ (the spec_example
+[See it live](https://recon-gen-spec.hotchkiss.io/) (the spec_example
 fixture's ranged rails render there).
 
 If your rail also carries a LimitSchedule cap, the cap-breach plant

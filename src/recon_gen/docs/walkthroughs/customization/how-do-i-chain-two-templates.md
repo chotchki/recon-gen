@@ -112,7 +112,7 @@ Open the L1 Exceptions sheet. You should see:
 - Drilling from the row leads you to the Transactions sheet
   filtered to the conflicting Transfer's id.
 
-See it live: https://recon-gen-spec.hotchkiss.io/
+[See it live](https://recon-gen-spec.hotchkiss.io/)
 
 ## What you should NOT do
 

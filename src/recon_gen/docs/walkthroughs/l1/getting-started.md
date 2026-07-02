@@ -16,7 +16,7 @@ instance:
   analyst the SHAPE of the institution before they tab over to the
   exception sheets.
 
-See it live: https://recon-gen-spec.hotchkiss.io/
+[See it live](https://recon-gen-spec.hotchkiss.io/)
 
 ??? example "Screenshot"
     ![Getting Started](../screenshots/l1/l1-sheet-getting-started.png)

@@ -191,7 +191,7 @@ distinct visual treatment — a ``[fan-in 5→1]`` label annotation +
 double arrowhead — so the topology reader sees the N:1 shape
 without reading the yaml.
 
-See it live: https://recon-gen-spec.hotchkiss.io/
+[See it live](https://recon-gen-spec.hotchkiss.io/)
 
 ## What you should NOT do
 
@@ -229,7 +229,7 @@ See it live: https://recon-gen-spec.hotchkiss.io/
 - [L1 Invariants → Fan-In Disagreement](../../L1_Invariants.md#fan-in-disagreement)
   — the SHOULD-constraint the matview encodes ("every fan_in child
   Transfer's parent_count matches the chain's expected_parent_count").
-- [Schema_v6 → Chain](../../Schema_v6.md) — the data contract for
+- [L1 Invariants → Fan-In Disagreement](../../L1_Invariants.md#fan-in-disagreement) — the data contract for
   the matview's column shape (``child_transfer_id`` /
   ``chain_parent_name`` / ``child_template_name`` / ``parent_count``
   / ``expected_parent_count`` / ``disagreement_kind`` /

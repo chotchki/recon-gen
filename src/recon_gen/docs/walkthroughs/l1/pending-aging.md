@@ -55,4 +55,4 @@ transitioned overnight and didn't.
 - **Rail** — multi-select dropdown over `rail_name` (the same column
   Transfer Type narrows).
 
-See it live: https://recon-gen-spec.hotchkiss.io/
+[See it live](https://recon-gen-spec.hotchkiss.io/)

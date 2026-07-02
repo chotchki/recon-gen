@@ -107,5 +107,5 @@ Pick a primitive to walk its full inventory + descriptions:
 For a per-app sheet-by-sheet walkthrough, see the
 [Walkthroughs](../walkthroughs/index.md) section.
 
-See it live: https://recon-gen-spec.hotchkiss.io/ — the bundled
+[See it live](https://recon-gen-spec.hotchkiss.io/) — the bundled
 `spec_example` institution rendered as the live HTMX dashboards.

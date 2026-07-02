@@ -434,8 +434,8 @@ sql = refresh_matviews_sql(instance, dialect=Dialect.POSTGRES)
 # 13 matviews × 2 statements (REFRESH + ANALYZE) = 26 statements
 
 # Postgres
-import psycopg2
-conn = psycopg2.connect(your_db_url)
+import psycopg
+conn = psycopg.connect(your_db_url)
 conn.autocommit = True
 with conn.cursor() as cur:
     for stmt in sql.split(';'):
@@ -506,7 +506,7 @@ Optional on day 1:
 
 1. Write your L2 instance YAML — declare accounts, rails, transfer
    templates, chains, limit schedules. Rich descriptions.
-2. `emit_schema(instance)` → DDL → psql/psycopg2. Verifies the schema
+2. `emit_schema(instance)` → DDL → psql/psycopg. Verifies the schema
    applies cleanly; idempotent on re-run.
 3. Write minimum-viable rows to both base tables.
 4. `refresh_matviews_sql(instance)` after every batch.

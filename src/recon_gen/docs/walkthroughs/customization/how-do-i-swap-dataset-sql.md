@@ -53,11 +53,15 @@ Three reference points:
   `build_*_dataset()` function. Read the contract first; it's
   the interface. Read the SQL second; it's the default
   implementation.
-- **`tests/json/test_dataset_contract.py`** — the regression
-  test. For every dataset it builds the DataSet, extracts the
-  `InputColumn` list the projection emits and asserts it matches
-  the declared contract. This is the test that catches a
-  projection bug before it reaches the dashboards.
+- **`tests/unit/test_dataset_sql_contract_projection.py`** — the
+  regression test. Sweeps every dataset the 4 app builders emit,
+  scans each `BuiltDataset.sql` SELECT list and asserts every
+  declared contract column NAME appears (name-presence,
+  order-agnostic). This is the test that catches a projection bug
+  before it reaches the dashboards. (The per-builder InputColumn
+  gate retired with the QS emitter in DW.8.1.b —
+  `test_dataset_contract.py` now covers only the `DatasetContract`
+  primitives + the Oracle case-fold wrapper.)
 
 ## What you'll see in the demo
 
@@ -88,7 +92,7 @@ To swap the implementation, edit `build_overdraft_dataset()` and
 change the SQL — leaving the contract untouched:
 
 ```python
-def build_overdraft_dataset(cfg: Config, l2_instance: L2Instance) -> DataSet:
+def build_overdraft_dataset(cfg: Config, l2_instance: L2Instance) -> BuiltDataset:
     sql = """\
 SELECT
     account_id,
@@ -120,7 +124,7 @@ and the view returns every row regardless of what the user picks.
 Run the contract test:
 
 ```bash
-.venv/bin/pytest tests/json/test_dataset_contract.py -k overdraft
+.venv/bin/pytest tests/unit/test_dataset_sql_contract_projection.py -k overdraft
 ```
 
 Pass = your projection emits the contract columns in the right
@@ -130,7 +134,7 @@ sheet reads your new SQL on the next request — Direct Query, so
 the change shows immediately, no deploy step. Every visual on
 the sheet keeps working — they don't know your SQL changed.
 
-See it live: https://recon-gen-spec.hotchkiss.io/
+[See it live](https://recon-gen-spec.hotchkiss.io/)
 
 ## What it means
 
@@ -148,18 +152,21 @@ properties of the swap that matter:
    alphabet. If you emit `DECIMAL` where the contract says
    `INTEGER`, the renderer still reads it but visual formatting
    (axes, KPI display, category sort order) can silently
-   degrade. The contract test enforces both name and ordering —
-   but it does NOT check the type your SQL actually returns, so
+   degrade. The contract test enforces column-name presence
+   (name-only, order-agnostic) — but it does NOT check the type
+   your SQL actually returns, so
    a type mismatch surfaces only when the dashboard formats the
    column wrong (a currency shown as a bare number, dates sorted
    as strings).
-3. **Column order matters.** `DatasetContract.columns` is a
-   list, not a set, and the contract test asserts list equality.
-   Reorder columns in your SELECT and the test fails. That's
-   intentional — column order is part of the dataset's public
-   surface (it drives the field-list order the renderer
-   presents), so reordering is a breaking change customers
-   should be conscious of.
+3. **Column order isn't enforced.** `DatasetContract.columns` is
+   a list, but the projection gate checks column-NAME presence
+   only (`re.search` per contract column — order-agnostic).
+   Reorder columns in your SELECT and the test still passes;
+   SELECT-list order is not a tested surface. Rendered column
+   order comes from the visual field wells, NOT the SELECT list
+   (`contract.columns` only feeds order-insensitive
+   label/format/hidden lookups) — so a reorder is invisible
+   downstream.
 
 ## Drilling in
 

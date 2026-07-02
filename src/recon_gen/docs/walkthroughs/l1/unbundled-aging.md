@@ -16,7 +16,7 @@ emits a NULL cap and drops out by construction.
 ??? example "Screenshot"
     ![Unbundled Aging](../screenshots/l1/l1-sheet-unbundled-aging.png)
 
-See it live: https://recon-gen-spec.hotchkiss.io/
+[See it live](https://recon-gen-spec.hotchkiss.io/)
 
 ## When to use it
 

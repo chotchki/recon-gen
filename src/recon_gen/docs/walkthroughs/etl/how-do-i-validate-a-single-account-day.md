@@ -23,7 +23,7 @@ the account-day walk: opening balance, signed debits, signed
 credits, closing stored, the Posting Drift KPI and the day's legs
 as a table.
 
-See it live: https://recon-gen-spec.hotchkiss.io/
+[See it live](https://recon-gen-spec.hotchkiss.io/)
 
 ## The question
 

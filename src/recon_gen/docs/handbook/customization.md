@@ -178,8 +178,8 @@ from recon_gen.common.l2 import emit_schema, load_instance
 instance = load_instance("path/to/myorg.yaml")
 sql = emit_schema(instance, prefix="myorg")  # Z.C — prefix is now a kwarg
 # Pipe to psql, or:
-import psycopg2
-conn = psycopg2.connect(your_db_url)
+import psycopg
+conn = psycopg.connect(your_db_url)
 with conn.cursor() as cur:
     cur.execute(sql)
 ```

@@ -18,7 +18,7 @@ SHOULD-constraint violation; healthy = empty.
 ??? example "Screenshot"
     ![Drift](../screenshots/l1/l1-sheet-drift.png)
 
-See it live: https://recon-gen-spec.hotchkiss.io/
+[See it live](https://recon-gen-spec.hotchkiss.io/)
 
 ## When to use it
 

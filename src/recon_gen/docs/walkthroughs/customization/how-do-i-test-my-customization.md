@@ -25,7 +25,7 @@ where do I add a test for the change I just made?"
 ## Where to look
 
 The test suite runs as a layered chain — `./run_tests.sh
-up_to=<layer>` walks `unit → db → app2` and
+up_to=<layer>` walks `unit → db → app2 → app2_browser → agreement` and
 running layer N runs every layer before it. Three reference points
 for a customization:
 
@@ -33,11 +33,11 @@ for a customization:
   `tests/data`, `tests/json`) run with no live DB; the
   e2e tiers under `tests/e2e/` spin up containers and serve the
   self-hosted dashboards.
-- **`tests/json/test_dataset_contract.py`** — the contract test.
+- **`tests/unit/test_dataset_sql_contract_projection.py`** — the contract-projection sweep.
   For every dataset, asserts the SQL projection's column shape
   matches the declared `DatasetContract`. This is the test that
   catches contract drift after a SQL swap.
-- **`./run_tests.sh up_to=app2`** — the full chain: it spins the
+- **`./run_tests.sh up_to=agreement`** — the full terminal chain: spins the
   container, serves the self-hosted dashboards and runs the e2e
   tiers against them. Run it before declaring a customization
   production-ready.
@@ -60,7 +60,7 @@ never fires.
 The full chain:
 
 ```bash
-./run_tests.sh up_to=app2
+./run_tests.sh up_to=agreement
 ```
 
 Spins the container, serves the self-hosted dashboards, then runs
@@ -71,12 +71,12 @@ For a single test, bare pytest is fine when you're iterating on one
 file:
 
 ```bash
-.venv/bin/pytest tests/json/test_dataset_contract.py -k overdraft -v
+.venv/bin/pytest tests/unit/test_dataset_sql_contract_projection.py -k overdraft -v
 ```
 
 The `-k` filter matches on test ID. The contract test IDs are the
-first column of each contract (e.g. `account_id` for
-`OVERDRAFT_CONTRACT`). Use this to narrow to one customization at a
+`DataSetId` of each dataset (e.g. `recon-test-l1-overdraft-dataset`
+for the overdraft dataset). Use this to narrow to one customization at a
 time during iteration. For layered work — anything above one file —
 go through `./run_tests.sh`, not bare pytest; the runner sets up the
 container + server fixtures the e2e tiers depend on.
@@ -88,14 +88,14 @@ Class 1 lives in the fast `unit` tier, which `up_to=unit` runs.
 Classes 2 and 3 live in `tests/data` — also no-DB, but the
 `up_to=unit` command does NOT run them, so a seed edit needs them
 invoked explicitly. The fourth is the e2e end of the chain
-(`db → app2`).
+(`app2_browser` browser tier then the terminal `agreement` cross-check).
 
 ### Class 1 — Unit tests (`tests/unit/`)
 
 Fast. No database. Pure-Python assertions about the
 generator's output.
 
-- **`tests/json/test_dataset_contract.py`** — the SQL projection
+- **`tests/unit/test_dataset_sql_contract_projection.py`** — the SQL projection
   matches the declared `DatasetContract`. The MOST important test
   for a customization. Fails if your SQL swap forgot a column or
   got the order wrong.
@@ -165,7 +165,7 @@ update the matching test expectation alongside the schema change.
 
 ### Class 4 — End-to-end (`tests/e2e/`)
 
-The expensive end of the chain. The browser tier (`@pytest.mark.browser`)
+The expensive end of the chain. The browser tier (`tests/e2e/app2_browser/`, dir-selected — the `-m browser` marker retired in DY.1)
 is Playwright WebKit headless: it loads the self-hosted dashboard
 server, clicks through tabs and asserts visual rendering + filter
 interactions against a real container's data. Catches the two
@@ -178,7 +178,7 @@ Run the full chain once before declaring a customization
 production-ready:
 
 ```bash
-./run_tests.sh up_to=app2
+./run_tests.sh up_to=agreement
 ```
 
 To drive a single failing e2e test interactively (spin the
@@ -186,10 +186,10 @@ container, serve the dashboards, drop into pdb against the live
 fixtures) reach for the triage verb instead of a hand-rolled setup:
 
 ```bash
-./run_tests.sh triage tests/e2e/test_l1_filters.py::test_check_type_dropdown_exposes_options
+./run_tests.sh triage tests/e2e/app2_browser/test_l1_filters.py::test_check_type_dropdown_exposes_options
 ```
 
-See it live: https://recon-gen-spec.hotchkiss.io/ — the demos render
+[See it live](https://recon-gen-spec.hotchkiss.io/) — the demos render
 from this codebase, so they're a quick eyeball check that a dashboard
 shape actually shows the data.
 
@@ -208,7 +208,7 @@ Pattern:
 import os
 
 import pytest
-import psycopg2
+import psycopg
 
 from recon_gen.common.config import load_config
 from recon_gen.common.l2.loader import load_instance
@@ -223,9 +223,9 @@ def test_overdraft_returns_known_overdrawn_account():
     cfg = load_config("config.yaml")
     l2 = load_instance("run/my_institution.yaml")
     ds = build_overdraft_dataset(cfg, l2)
-    sql = next(iter(ds.PhysicalTableMap.values())).CustomSql.SqlQuery
+    sql = ds.sql
 
-    conn = psycopg2.connect(os.environ["RECON_GEN_TEST_DB_URL"])
+    conn = psycopg.connect(os.environ["RECON_GEN_TEST_DB_URL"])
     cur = conn.cursor()
     cur.execute(sql)
     rows = cur.fetchall()
@@ -259,7 +259,7 @@ def test_repo_transfers_appear_in_rail_filter(l1_dashboard_driver):
     assert "repo" in options
 ```
 
-New tests follow the existing patterns — `tests/e2e/test_l1_*.py`
+New tests follow the existing patterns — `tests/e2e/app2_browser/test_l1_*.py`
 is the canonical reference for the driver verbs and the fixture.
 
 ### When to add a test vs trust the contract test
@@ -310,7 +310,7 @@ Once you have a test plan in place:
    `JSON_EXISTS` assertion in the relevant dataset's column
    projection.
 3. **Run the full chain before you ship the customization.**
-   `./run_tests.sh up_to=app2`. The browser tier is the catch-all
+   `./run_tests.sh up_to=agreement`. The `app2_browser` browser tier is the catch-all
    for "the dashboard renders" — a green run here is the last gate
    before you put the customization in front of users.
 

@@ -9,7 +9,7 @@ Your ETL team added a new attribute to
 sales, or `risk_score` on external transfers. The key is landing
 in the JSON; you can see it in the database. Now you need to
 surface it on the dashboards: as a column in a table, a filter in
-a sheet control, a grouping dimension in a pivot or a category
+a sheet control, a grouping dimension or a category
 axis on a bar chart.
 
 The dashboard side of the metadata-key contract is shorter than
@@ -52,8 +52,12 @@ Three reference points:
 
 ## What you'll see in the demo
 
-An existing dataset reads sale-row metadata. Grep an L1 dataset
-SQL for `JSON_VALUE(metadata`:
+No L1 dataset hardcodes a metadata read — L1 carries the raw
+`metadata` column hidden (for the Table metadata-popup). The
+portable read pattern lives in L2 Flow Tracing via the
+`json_value(col, '$.key', dialect)` helper (DuckDB
+`json_extract_string` / PG+Oracle `JSON_VALUE`), see
+`apps/l2_flow_tracing/datasets.py`:
 
 ```sql
 SELECT
@@ -66,7 +70,7 @@ SELECT
     JSON_VALUE(metadata, '$.cashier')         AS cashier,
     JSON_VALUE(metadata, '$.payment_method')  AS payment_method
 FROM {{ l2_instance_name }}_transactions
-WHERE rail_name = 'sale'
+WHERE rail_name = 'MerchantCardSale'   -- a card-sale rail (spec_example ships none; name it per your L2)
 ```
 
 The matching `DatasetContract` declares each extracted column:
@@ -101,7 +105,7 @@ SELECT
     -- existing columns ...
     JSON_VALUE(metadata, '$.originating_branch') AS originating_branch
 FROM {{ l2_instance_name }}_transactions
-WHERE rail_name = 'sale';
+WHERE rail_name = 'MerchantCardSale';
 ```
 
 `JSON_VALUE` returns NULL for rows that don't carry the key.
@@ -138,17 +142,22 @@ This is the decision end users actually feel — the key is just
 data until a visual treatment exposes it. Three patterns from the
 existing dashboards:
 
-- **As a table column.** Drag `originating_branch` into a Table
-  visual's Field Wells → Group By. Shows up as a sortable,
+- **As a table column.** Add `originating_branch` as a DimensionField
+  on the Table visual in `apps/<app>/app.py` (visuals are code-defined
+  tree nodes — no drag-drop field-well UI post-DW). Shows up as a sortable,
   filterable cell in every row. Right answer when the user's
   question is *"show me one row per sale, including the branch."*
 - **As a sheet-level filter (dropdown / multi-select).** Add a
-  ParameterControl + linked Filter group. Shows up as a sheet
+  ParameterControl bound to a `<<$pParamName>>` placeholder in the
+  dataset SQL (SQL-level pushdown is canonical — analysis-level Filter
+  groups are DEPRECATED for filter intent). Shows up as a sheet
   header control that scopes every visual on the sheet. Right
   answer when the user's question is *"show me everything for
   the West Hills branch."*
-- **As a grouping / category dimension.** Drag into a
-  BarChart's Group By or a Pivot's Row dimension. Visualizes
+- **As a grouping / category dimension.** Add the field as a group-by
+  dimension on a BarChart in `apps/<app>/app.py` (no Pivot visual type —
+  the tree ships KPI / Table / BarChart / LineChart / Sankey / ForceGraph,
+  all code-built). Visualizes
   the metric *across* branches. Right answer when the user's
   question is *"compare sales volume across branches."*
 
@@ -232,7 +241,7 @@ Once the new column is reading and rendering:
 2. **Serve and verify the visual.** `recon-gen dashboards
    -c config.yaml`. Open the dashboard,
    confirm the new column / filter / dimension renders with
-   non-blank values. See it live: https://recon-gen-spec.hotchkiss.io/
+   non-blank values. [See it live](https://recon-gen-spec.hotchkiss.io/)
 3. **Decide whether to document.** If the key is bank-specific
    (your own `originating_branch` schema), document in your
    internal customization README; if it's a candidate for

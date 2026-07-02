@@ -13,7 +13,7 @@ External counterparty accounts are excluded by the underlying view
 intentional — banks may legitimately overdraft US; we MUST NOT
 overdraft THEM.
 
-See it live: https://recon-gen-spec.hotchkiss.io/
+[See it live](https://recon-gen-spec.hotchkiss.io/)
 
 ??? example "Screenshot"
     ![Overdraft](../screenshots/l1/l1-sheet-overdraft.png)

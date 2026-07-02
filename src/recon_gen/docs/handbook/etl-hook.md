@@ -20,7 +20,7 @@ your source system into two tables; everything else
 audit reconciliation report) is generated against your data without
 further customization.
 
-See it live: https://recon-gen-spec.hotchkiss.io/
+[See it live](https://recon-gen-spec.hotchkiss.io/)
 
 ## Canonical column tuples — source of truth
 

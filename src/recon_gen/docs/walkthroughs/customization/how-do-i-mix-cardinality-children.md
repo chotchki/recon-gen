@@ -135,7 +135,7 @@ contribution surfaces only on multi_xor_violation; a healthy
 cycle picked exactly one vehicle BUT contributed to the wrong
 batch surfaces only on fan_in_disagreement.
 
-See it live: https://recon-gen-spec.hotchkiss.io/
+[See it live](https://recon-gen-spec.hotchkiss.io/)
 
 Open Studio's `/diagram` page. The chain renders with separate
 edge styles per child:

@@ -43,9 +43,11 @@ Three reference points:
   {period: week, range: [3, 8]}``). Search for
   ``firings_typical_per_period``.
 - **`run/sasquatch_pr.yaml`** (or your own L2 yaml under `run/`) — the
-  bundled real-world example carries per-business-day counts on
-  ``MerchantCardSale [50, 500]``, ``CustomerInboundACH [50, 200]`` and
-  ``InternalTransferDebit [200, 500]``.
+  bundled real-world example carries NO firing-count bands — every rail
+  falls back to the count heuristic. ``MerchantCardSale``,
+  ``CustomerInboundACH`` and ``InternalTransferDebit`` are the rails you'd
+  add ``firings_typical_per_period`` to; worked forms live in the
+  ``tests/l2/spec_example.yaml`` bullet above.
 
 ## The change
 
@@ -102,7 +104,7 @@ top-line — the card-sales aggregate should now be (50-500 swipes/day) ×
 a day, the realistic range for a small bank, instead of the $2.5M the
 heuristic produced.
 
-See it live: https://recon-gen-spec.hotchkiss.io/
+[See it live](https://recon-gen-spec.hotchkiss.io/)
 
 To confirm the count specifically, filter the L1 transactions view to
 ``rail_name = MerchantCardSale`` and group by the ``posting`` day — the

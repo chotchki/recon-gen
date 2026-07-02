@@ -22,7 +22,7 @@ definition Current* hides the prior entries we want to audit here.
 ??? example "Screenshot"
     ![Supersession Audit](../screenshots/l1/l1-sheet-supersession-audit.png)
 
-See it live: https://recon-gen-spec.hotchkiss.io/
+[See it live](https://recon-gen-spec.hotchkiss.io/)
 
 ## When to use it
 

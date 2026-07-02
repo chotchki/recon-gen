@@ -165,10 +165,13 @@ nav:
     - Operations:
       - Install: reference/install.md
       - Self-hosting the dashboards (App 2): reference/self-host.md
+      - Studio — L2 editor + data-shaping: reference/studio.md
       - ETL — Data Integration: handbook/etl.md
       - ETL Hook — Bulk Helpers Reference: handbook/etl-hook.md
+      - Studio triage — L2 gap finder: L2_Triage_Gaps.md
       - Customization: handbook/customization.md
       - CLI reference: reference/cli.md
+      - Test-harness quirks: reference/test-harness-quirks.md
       - QuickSight quirks log: reference/quicksight-quirks.md
   # API Reference moved to ReadTheDocs (Sphinx autodoc, .readthedocs.yaml
   # + docs/sphinx/). The mkdocstrings-generated pages here were too

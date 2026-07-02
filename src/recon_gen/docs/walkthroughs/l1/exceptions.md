@@ -47,7 +47,7 @@ First sheet to open every morning. The KPI answers the only 9am question — did
 anything break overnight. From there the bar chart shows the error-class shape,
 and the detail table sorts biggest-first so the loudest violations sit at the top.
 
-See it live: https://recon-gen-spec.hotchkiss.io/
+[See it live](https://recon-gen-spec.hotchkiss.io/)
 
 ## Visuals
 

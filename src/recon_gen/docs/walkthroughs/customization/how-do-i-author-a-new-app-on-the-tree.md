@@ -30,7 +30,7 @@ in the codebase, carrying none of the old boilerplate — per-app
 visual builders, a constant-flooded `constants.py` or manual
 visual-ID bookkeeping.
 
-See it live: https://recon-gen-spec.hotchkiss.io/
+[See it live](https://recon-gen-spec.hotchkiss.io/)
 
 ## The question
 
@@ -56,14 +56,15 @@ Five reference points:
   API surface. Each typed Visual subtype, Filter wrapper and Drill
   action's signature is the canonical place to look up parameter
   shape.
-- **`src/recon_gen/cli/_app_builders.py`** — the
-  `_generate_executives()` helper. Add a sibling
-  `_generate_<myapp>()` here.
-  **`src/recon_gen/cli/_helpers.py`** — the `APPS` tuple
-  shared across the artifact groups; append your app slug.
+- **`src/recon_gen/cli/_html_serve.py`** — the `build_real_app()`
+  if/elif dispatch. Add a sibling branch (mirror the `executives`
+  branch), then append your slug to `REAL_APPS` + `APP_TITLES` — that's
+  all a new app needs to render under `dashboards` / `studio`. (The
+  old `_helpers.py::APPS` tuple is legacy — it fed the removed `json`
+  deploy and drives nothing now.)
 - **`tests/json/test_executives.py`** — the starter pack that walks the
   tree to assert structural invariants (sheet count, visual presence,
-  filter scoping, CLI smoke); `tests/e2e/test_exec_sheet_visuals.py`
+  filter scoping, CLI smoke); `tests/e2e/app2_browser/test_exec_sheet_visuals.py`
   adds the live-render checks. Mirror this shape in your app's tests.
 
 ## What you'll see in the demo
@@ -113,23 +114,24 @@ SHEET_MYAPP_DETAIL = SheetId("myapp-sheet-detail")
 
 
 def build_myapp_app(cfg: Config) -> App:
-    app = App(cfg=cfg)
+    app = App(name="myapp", cfg=cfg)
 
     # Register datasets (typed Dataset nodes; visuals reference these).
     datasets = build_all_datasets(cfg)
-    ds_foo = app.register_dataset(DS_MYAPP_FOO, datasets[0].DataSetArn)
-    # ... register the rest
+    ds_foo = app.add_dataset(Dataset(identifier=DS_MYAPP_FOO))
+    # ... add_dataset the rest (build_all_datasets(cfg) above already
+    # registered the contracts; visuals reference these Dataset nodes)
 
     # Pre-register sheet shells so cross-sheet drills can target them
     # by Sheet object ref (not string ID) before they're populated.
-    overview_sheet = app.analysis.add_sheet(
+    overview_sheet = app.analysis.add_sheet(Sheet(
         sheet_id=SHEET_MYAPP_OVERVIEW, name="Overview",
         title="Overview", description="...",
-    )
-    detail_sheet = app.analysis.add_sheet(
+    ))
+    detail_sheet = app.analysis.add_sheet(Sheet(
         sheet_id=SHEET_MYAPP_DETAIL, name="Detail",
         title="Detail", description="...",
-    )
+    ))
 
     # Populate each sheet (one function per sheet — keeps `app.py`
     # readable as the dashboard grows).
@@ -192,10 +194,10 @@ you've shipped one:
 
 1. **Object refs, not string IDs.** Visuals reference `Dataset` nodes,
    not dataset identifier strings; drills reference `Sheet` nodes, not
-   sheet IDs. `app.emit_analysis()` runs validation walks (dataset /
+   sheet IDs. `app.validate()` runs validation walks (dataset /
    calc-field / parameter / drill-destination references) — a missing
    reference fails at construction with a stack trace pointing at the
-   wiring site, not at deploy with an opaque "InvalidParameterValue".
+   wiring site, not at render time as a silent broken visual.
 2. **Pre-register all sheets.** Cross-sheet drills need their target
    `Sheet` ref to exist before the source visual is constructed. The
    pattern: declare every sheet shell first (`app.analysis.add_sheet(...)`
@@ -220,14 +222,14 @@ The tree primitives expose more than this walkthrough surfaces:
 - **Calculated fields**: `CalcField` for analysis-level computed
   columns. Ties to one `Dataset`; usable across visuals.
   [recon_gen.common.tree (data)](https://recon-gen.readthedocs.io/en/latest/).
-- **Parameters + parameter controls**: `StringParameter` /
-  `IntegerParameter` / etc. + their `Control` wrappers (dropdown,
+- **Parameters + parameter controls**: `StringParam` /
+  `IntegerParam` / `DateTimeParam` + their `Control` wrappers (dropdown,
   slider, datetime picker). Drills can write to parameters; filters
   can read from them.
   [recon_gen.common.tree (filters / controls)](https://recon-gen.readthedocs.io/en/latest/).
-- **Cross-app drills**: `CustomActionURLOperation` builders in
-  `common/drill.py` for jumping to another app's dashboard
-  with parameter values pre-set in the URL.
+- **Cross-app drills**: `CrossAppDrill` (`common/tree/actions.py`) for jumping to
+  another app's dashboard — App2 threads its `target_path` +
+  `?param_<name>=` into the destination's filter form.
 
 ## Next step
 
@@ -238,10 +240,11 @@ The tree primitives expose more than this walkthrough surfaces:
 3. Build a minimal `app.py` with one sheet and one visual; `pytest
    tests/json/test_<myapp>.py -v` to confirm it builds.
 4. Wire it into the CLI: append your app slug to the `APPS` tuple
-   in `cli/_helpers.py` and add `_generate_<myapp>()` to
-   `cli/_app_builders.py` (mirror `_generate_executives`).
+   in `cli/_helpers.py` and add a `build_real_app()` branch in
+   `cli/_html_serve.py` (mirror the `executives` branch) + append your
+   slug to `REAL_APPS` + `APP_TITLES`.
    `recon-gen dashboards` then serves your app alongside the others.
-5. Add e2e tests mirroring `tests/e2e/test_exec_*.py` once your
+5. Add e2e tests mirroring `tests/e2e/app2_browser/test_exec_*.py` (+ `tests/e2e/app2/`) once your
    app renders.
 
 ## Related shape

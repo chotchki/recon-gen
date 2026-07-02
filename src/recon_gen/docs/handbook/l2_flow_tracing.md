@@ -14,7 +14,7 @@ HYGIENE problem — the declaration drifted from reality, or reality
 drifted from the declaration — and it surfaces nowhere on the L1
 dashboard.
 
-See it live: https://recon-gen-spec.hotchkiss.io/
+[See it live](https://recon-gen-spec.hotchkiss.io/)
 
 ## Dataflow — which datasets feed which sheets
 

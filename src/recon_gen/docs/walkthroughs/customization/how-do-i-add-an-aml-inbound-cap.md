@@ -84,25 +84,31 @@ Re-emit the L2-derived schema and seed against your demo DB:
 ```bash
 recon-gen schema apply -c run/config.yaml --execute
 recon-gen data apply -c run/config.yaml --execute
+recon-gen data refresh -c run/config.yaml --execute
 ```
 
 The first command rewrites the `<prefix>_limit_breach` matview
 with the second UNION-ALL branch picking up your new cap. The
 second one re-seeds the demo data — `auto_scenario.py` plants an
-`InboundCapBreachPlant` for the Inbound cap (cap × 1.5 amount), so
-the dashboard has a row to surface immediately.
+`InboundCapBreachPlant` for the Inbound cap (amount = min(cap × 1.5,
+rail range.max × 3) floored at cap + $1 — the AB.5 realism clamp; a
+rail with no amount_typical_range keeps the naive cap × 1.5), so the
+dashboard has a row to surface immediately.
 
 Open the L1 Limit Breach sheet. You should see:
 
 - One new row whose Direction column reads "Inbound" and whose
-  Flow column is `~$30,000` (the planted $20K × 1.5).
+  `outbound_total` column is `~$20,001` (the AB.5 realism clamp
+  pins the plant to min(cap × 1.5, rail range.max × 3) then floors
+  at cap + $1 — CustomerInboundACH's range [50, 5000] lands it at
+  $20,001, not the naive $20K × 1.5).
 - The existing Outbound rows (if any) still present, marked
   "Outbound" in the same column.
 - L1 Exceptions inherits the new row automatically — its
   UNION-over-matviews already reads from `<prefix>_limit_breach`
   unchanged.
 
-See it live: https://recon-gen-spec.hotchkiss.io/ (the
+[See it live](https://recon-gen-spec.hotchkiss.io/) (the
 `spec_example` fixture carries the Inbound cap).
 
 ## What you should NOT do

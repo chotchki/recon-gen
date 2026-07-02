@@ -19,7 +19,7 @@ spiked once after a deploy — the trend is what tells them apart.
 ??? example "Screenshot"
     ![Drift Timelines](../screenshots/l1/l1-sheet-drift-timelines.png)
 
-See it live: https://recon-gen-spec.hotchkiss.io/
+[See it live](https://recon-gen-spec.hotchkiss.io/)
 
 ## When to use it
 

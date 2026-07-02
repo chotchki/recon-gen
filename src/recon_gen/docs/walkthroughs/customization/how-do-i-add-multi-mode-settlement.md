@@ -65,8 +65,7 @@ In your `run/<institution>.yaml`, three edits:
 rails:
   # existing rails...
 
-  - !SingleLegRail
-    name: SettlementAuto
+  - name: SettlementAuto
     leg_role: [ClearingSuspense]
     leg_direction: Variable
     origin: InternalInitiated
@@ -74,8 +73,7 @@ rails:
     max_pending_age: PT4H        # auto = intraday SLA
     description: Auto-sweep variant — fires within 4 hours of cycle close.
 
-  - !SingleLegRail
-    name: SettlementStandard
+  - name: SettlementStandard
     leg_role: [ClearingSuspense]
     leg_direction: Variable
     origin: InternalInitiated
@@ -83,8 +81,7 @@ rails:
     max_pending_age: P1D         # T+1 cadence
     description: Standard variant — fires by end of next business day.
 
-  - !SingleLegRail
-    name: SettlementSlow
+  - name: SettlementSlow
     leg_role: [ClearingSuspense]
     leg_direction: Variable
     origin: InternalInitiated
@@ -230,10 +227,12 @@ template cluster, labeled "XOR group 1 (exactly 1 fires)".
 - [L1 Invariants → XOR group violation](../../L1_Invariants.md#xor-group-violation)
   — the SHOULD-constraint the matview encodes ("exactly one
   member of each leg_rail_xor_groups entry fires per Transfer").
-- [Schema_v6 → TransferTemplate](../../Schema_v6.md) — the data
-  contract for the matview's column shape (
-  ``transfer_id`` / ``template_name`` / ``xor_group_index`` /
-  ``firing_count`` / ``fired_rails`` / ``business_day``).
+- [Schema_v6 → the template_name feed column](../../Schema_v6.md#etl-contract-minimum-viable-feed)
+  — the ETL feed column the template stamps on each leg; the matview's
+  OWN column shape (``transfer_id`` / ``template_name`` /
+  ``xor_group_index`` / ``firing_count`` / ``fired_rails`` /
+  ``business_day``) is documented under the L1 Invariants link above,
+  not here.
 - [How do I chain two templates?](how-do-i-chain-two-templates.md)
   — the sibling walkthrough for cascading multi-leg flows (the
   OTHER closure-shape extension).

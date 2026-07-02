@@ -104,7 +104,8 @@ The docs landing page (`index.md`) renders its intro against your L2:
 
 Build against your L2 (`recon-gen docs apply --l2 path/to/my.yaml`). The
 rendered intro reads "Acme Federal Bank" instead of "Your Institution".
-The acronym shows up on role-specific landing pages —
+The name renders on role-specific landing pages too (the acronym
+shows up deeper, not in this opening line) —
 `for-your-role/operator.md` opens with "*Audience — reconciliation
 operator at Acme Federal Bank*".
 

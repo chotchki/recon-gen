@@ -9,7 +9,7 @@ reader already knows the relevant concept (see
 Landed here cold? The [role pages](../for-your-role/index.md) curate
 which walkthroughs each role needs, and in what order — start there.
 
-See it live: https://recon-gen-spec.hotchkiss.io/
+[See it live](https://recon-gen-spec.hotchkiss.io/)
 
 ## L1 sheets
 

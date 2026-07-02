@@ -91,4 +91,4 @@ Defaults to the bundled `{{ l2_instance_name }}` L2 fixture. To target a
 different L2 instance, see the
 [customization handbook](customization.md).
 
-See it live: https://recon-gen-spec.hotchkiss.io/
+[See it live](https://recon-gen-spec.hotchkiss.io/)

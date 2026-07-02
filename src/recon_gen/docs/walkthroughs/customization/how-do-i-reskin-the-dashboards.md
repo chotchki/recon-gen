@@ -60,11 +60,11 @@ theme:
     - "#E07B39"     # accent series 2
     - "#3A9E6F"     # accent series 3
     # ... 5 more bulk-fill colors
-  empty_fill_color: "#E5E7EB"
-  gradient: ["#D6E4F5", "#2E5090"]
+  empty_fill_color: "#D9D9D9"
+  gradient: ["#C5DAF7", "#2E5090"]
   primary_bg: "#FFFFFF"
-  secondary_bg: "#F8F9FA"
-  primary_fg: "#1F2933"
+  secondary_bg: "#F5F6FA"
+  primary_fg: "#2D2D2D"
   accent: "#2E5090"
   accent_fg: "#FFFFFF"
   link_tint: "#E8EFF9"
@@ -96,7 +96,7 @@ measure colors) are bulk fills — they affect chart series order
 and KPI tile chrome, but brand recognition rides on the three
 above.
 
-See it live: https://recon-gen-spec.hotchkiss.io/
+[See it live](https://recon-gen-spec.hotchkiss.io/)
 
 ## What it means
 
@@ -148,7 +148,7 @@ theme:
   measure_fg: "#FFFFFF"
 ```
 
-If you omit the ``theme:`` block entirely, ``build_theme`` returns
+If you omit the ``theme:`` block entirely, ``resolve_l2_theme`` returns
 ``None`` and the renderer falls back to a neutral navy/grey
 (``common/theme.py::DEFAULT_PRESET``) for that institution — no
 persona palette (silent-fallback contract). Useful for quick

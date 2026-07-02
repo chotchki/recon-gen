@@ -70,20 +70,24 @@ in your feed contradicts what the schema and dashboards assume.
 
 ```sql
 -- Pre-flight: transfers whose Posted legs do NOT sum to zero.
--- Single-leg types (sale, external_txn) are excluded by construction.
+-- Single-leg transfers legitimately don't net — single-leg is an L2
+-- rail property (SingleLegRail: standalone expected_net or a
+-- TransferTemplate leg-pattern member) NOT a fixed rail_name set, so
+-- filter by COUNT(*) > 1 below.
 SELECT
     transfer_id,
     SUM(amount_money) AS net,
     COUNT(*)          AS leg_count
 FROM {{ l2_instance_name }}_transactions
 WHERE status = 'Posted'
-  AND rail_name NOT IN ('external_txn', 'sale')   -- single-leg types
 GROUP BY transfer_id
-HAVING SUM(amount_money) <> 0;
+HAVING COUNT(*) > 1 AND SUM(amount_money) <> 0;
 ```
 
-A row here means a multi-leg transfer (`internal`, `payment`,
-`settlement`, `clearing_sweep`, `ach`, `wire`, etc.) has legs that
+A row here means a multi-leg transfer (any transfer with >1
+non-failed leg — real rail names are per-L2 and PascalCase e.g.
+CustomerInboundACH / InternalTransferDebit / MerchantPayoutACH, NOT
+lowercase generics) has legs that
 don't balance. Either you projected the wrong sign on one leg,
 dropped a leg or set `status = 'Posted'` on a leg that didn't
 post.
@@ -190,7 +194,7 @@ checklist:
   ETL touched today (planted demo failures will appear — those are
   the demo's job, not yours).
 
-See it live: https://recon-gen-spec.hotchkiss.io/
+[See it live](https://recon-gen-spec.hotchkiss.io/)
 
 ## Next step
 

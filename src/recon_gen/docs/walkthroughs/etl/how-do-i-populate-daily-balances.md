@@ -172,7 +172,7 @@ transactions projection:
    rounding bug in the dollars→cents conversion. Whole dollars or
    more ⇒ either a transaction is missing from the feed, or your
    day-boundary convention disagrees between the two feeds.
-   See it live: https://recon-gen-spec.hotchkiss.io/
+   [See it live](https://recon-gen-spec.hotchkiss.io/)
 3. **Iterate** — populate `expected_eod_balance` /
    `metadata.limits` when downstream checks need them.
 

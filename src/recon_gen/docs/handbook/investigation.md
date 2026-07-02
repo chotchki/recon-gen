@@ -90,7 +90,7 @@ flags those natural transitions at the bottom.
 
 ## What you'll see in the demo
 
-See it live: https://recon-gen-spec.hotchkiss.io/
+[See it live](https://recon-gen-spec.hotchkiss.io/)
 
 {% if vocab.demo.has_investigation_plants %}
 The bundled `{{ vocab.fixture_name }}` fixture plants three

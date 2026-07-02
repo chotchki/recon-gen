@@ -22,7 +22,7 @@ this pair usually moves?"
 
 Open the **Investigation** dashboard, **Volume Anomalies** sheet.
 
-See it live: https://recon-gen-spec.hotchkiss.io/
+[See it live](https://recon-gen-spec.hotchkiss.io/)
 
 The sheet has two controls in the top-right panel:
 

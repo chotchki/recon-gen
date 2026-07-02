@@ -7,7 +7,7 @@ the live training-materials surface rendered against
 materials render against your own institution once you swap the L2
 YAML.*
 
-See it live: https://recon-gen-spec.hotchkiss.io/
+[See it live](https://recon-gen-spec.hotchkiss.io/)
 
 Accounting is standard. Your institution is not. Recon Generator
 layers the two — standard double-entry invariants on top of your

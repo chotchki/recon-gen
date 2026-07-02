@@ -41,7 +41,7 @@ to know before I commit?"
 Two reference points before you write a line of mapping code:
 
 - **[Schema_v6.md → The minimum viable feed](../../Schema_v6.md#etl-contract-minimum-viable-feed)** —
-  the 11 mandatory columns on `{{ l2_instance_name }}_transactions` + 6 on
+  the 12 mandatory columns on `{{ l2_instance_name }}_transactions` + 7 on
   `{{ l2_instance_name }}_daily_balances`. Read these first. Anything beyond
   the minimum is conditional and can wait for v2.
 - **`common/l2/schema.py::emit_schema(instance, prefix=..., dialect=...)`** — the
@@ -60,7 +60,7 @@ Executive scorecard — reads from these same two tables.
 
 After the demo flow (`recon-gen schema apply --execute &&
 recon-gen data apply --execute && recon-gen data
-refresh --execute`), your demo database (Postgres or Oracle,
+refresh --execute`), your demo database (DuckDB by default, or Postgres / Oracle for prod,
 dispatched off `db.dialect`) holds:
 
 - **`{{ l2_instance_name }}_transactions`** — every money-movement leg, one
@@ -81,7 +81,7 @@ dimension tables. Every exception check, every drill-down, every
 aging bucket reads from `{{ l2_instance_name }}_transactions` and
 `{{ l2_instance_name }}_daily_balances`.
 
-See it live: https://recon-gen-spec.hotchkiss.io/
+[See it live](https://recon-gen-spec.hotchkiss.io/)
 
 ## What it means
 
@@ -106,9 +106,11 @@ walkthrough has the full SQL projection.
 Your card processor sends a daily settlement file. Each row is
 the processor's view of money landing in your account. These
 become `{{ l2_instance_name }}_transactions` rows with
-`rail_name = 'external_txn'`,
-`origin = 'ExternalForcePosted'` and a populated
-`external_system` (e.g., `BankSync`, `PaymentHub`).
+`rail_name = '<your external rail>'` (rail names are L2-declared —
+external card force-posts ride a card-sale rail like `MerchantCardSale`),
+`origin = 'ExternalForcePosted'` — force-post provenance lives on
+`origin` plus a metadata key (`card_network_ref` /
+`external_reference`), there is NO `external_system` column.
 
 You don't need a separate table for these. The L1 drift split
 between bank-initiated activity and force-posted activity reads
@@ -157,13 +159,22 @@ you commit:
   query) is a deliberate redundancy for query speed. Your ETL
   writes one extra column; the dashboard reads it without a
   cast.
-- **`account_role` describes role, not structural level.** Six
-  canonical values: `gl_control`, `dda`, `merchant_dda`,
-  `external_counter`, `concentration_master`, `funds_pool`.
+- **`account_role` describes role, not structural level.** It's a
+  FREE-FORM `VARCHAR(100)` declared per-L2 — there is NO fixed enum.
+  Each instance's YAML names its own set (the demo L2's leaf/control
+  roles: `DDAControl` `MerchantDDAControl` `ConcentrationMaster`
+  `CashDueFRB` `ACHOrigSettlement` `CardAcquiringSettlement`
+  `WireSettlementSuspense` `MerchantPayableClearing`
+  `InternalSuspenseRecon` `InternalTransferSuspense`
+  `ExternalCardNetwork` `ExternalCounterparty`; template roles
+  `CustomerDDA` `MerchantDDA` `ZBASubAccount`). Read the real set off
+  the model (`from recon_gen.common.l2.loader import load_instance`
+  then `load_instance("tests/l2/{{ l2_instance_name }}.yaml")`) — never
+  hardcode a list.
   Structural level (control vs. sub-ledger) derives from
   `account_parent_role`. Don't pack the level into the role
   field — see
-  [Schema_v6.md → Canonical account_role values](../../Schema_v6.md#table-1-prefix_transactions).
+  [Schema_v6.md → Table 1 `{{ l2_instance_name }}_transactions`](../../Schema_v6.md#table-1-prefix_transactions).
 - **`metadata` is the extension point, not a schema migration.**
   Your bank wants to surface a custom field (a transaction
   reference number, a regulatory flag, a per-merchant tier
@@ -184,7 +195,7 @@ Once you've decided this product fits your data:
    render the per-prefix DDL — base tables
    (`{{ l2_instance_name }}_transactions` / `{{ l2_instance_name }}_daily_balances`), Current*
    views, computed-balance helpers and L1 invariant matviews.
-   Apply it to a dev Postgres or Oracle instance directly, or chain
+   Apply it to a dev DuckDB (default) / Postgres / Oracle instance directly, or chain
    `recon-gen schema apply -c run/config.yaml --execute &&
    recon-gen data apply -c run/config.yaml --execute &&
    recon-gen data refresh -c run/config.yaml --execute` to

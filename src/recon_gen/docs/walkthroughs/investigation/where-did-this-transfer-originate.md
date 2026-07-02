@@ -22,7 +22,7 @@ where else did it go?"
 
 Open the **Investigation** dashboard, **Money Trail** sheet.
 
-See it live: https://recon-gen-spec.hotchkiss.io/
+[See it live](https://recon-gen-spec.hotchkiss.io/)
 
 The sheet has three controls in the top-right panel:
 

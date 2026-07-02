@@ -17,7 +17,7 @@ slice I care about" — no KPIs above the table, just dropdowns.
 ??? example "Screenshot"
     ![Transactions](../screenshots/l1/l1-sheet-transactions.png)
 
-See it live: https://recon-gen-spec.hotchkiss.io/
+[See it live](https://recon-gen-spec.hotchkiss.io/)
 
 ## When to use it
 

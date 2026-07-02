@@ -47,7 +47,7 @@ custom theme, an extra plugin set, your own CI), extract the source:
 
 ```bash
 recon-gen docs export -o /tmp/my-docs --l2 run/my-l2.yaml
-QS_DOCS_L2_INSTANCE=/Users/me/run/my-l2.yaml \
+RECON_GEN_DOCS_L2_INSTANCE=/Users/me/run/my-l2.yaml \
     mkdocs build -f /tmp/my-docs/mkdocs.yml
 ```
 
@@ -57,8 +57,9 @@ Three substitution surfaces:
 
 - **Vocab strings** ({% raw %}`{{ vocab.institution.name }}`,
   `{{ vocab.institution.acronym }}`{% endraw %}, etc.) substitute
-  throughout the prose. The built-in `sasquatch_pr` vocabulary
-  carries Sasquatch flavor; any other instance falls back to a
+  throughout the prose. The `sasquatch_pr` fixture (via its
+  declared `institution_name` / `institution_acronym`) carries
+  Sasquatch flavor; any other instance falls back to a
   neutral "Your Institution" voice derived from the L2 description's
   first proper-noun-shaped run.
 - **L2-driven diagrams** ({% raw %}`{{ diagram("l2_topology", kind="accounts") }}`,
@@ -85,19 +86,24 @@ Three substitution surfaces:
 ## Adding your institution's flavor
 
 If your institution wants richer flavor than the neutral fallback,
-the primary path is the optional `persona:` block on your L2
-YAML — institution name + acronym, upstream stakeholders, GL
-account labels, merchant names, free-form flavor literals. The
+the primary path is the top-level `institution_name` /
+`institution_acronym` / `description` fields on your L2 YAML
+(BXa.1 dissolved the `persona:` block — its `stakeholders` /
+`gl_accounts` / `merchants` / `flavor` sub-fields were never
+substituted in any docs page and got dropped). The
 handbook templates substitute via `vocab` Jinja references at render time.
 
 See [How do I brand my handbook prose?](how-do-i-brand-my-handbook-prose.md)
-for the full block shape, the field-by-field map to handbook
+for the full field set, the field-by-field map to handbook
 surfaces and the neutral fall-through behavior when fields are
 omitted.
 
 The Investigation walkthroughs' worked-example admonitions (the
 `??? example "Worked example: <fixture>"` blocks naming specific
-accounts) are still wired by *role* in
-`common/handbook/vocabulary.py::_sasquatch_pr_vocabulary` rather
-than from the YAML — those need a small Python addition for now.
-A future extension will likely lift them into the persona block.
+accounts) are wired by *role* from the L2 YAML's top-level
+`investigation_personas:` block (typed `{name, account_id, role}`
+entries; templates gate on roles `convergence_anchor` /
+`counterparty_bank` / `operations_account` / `shell_entity`).
+BXa.1 already lifted them out of the deleted
+`_sasquatch_pr_vocabulary` code intercept into the YAML — no
+Python edit needed.

@@ -152,7 +152,7 @@ def webkit_page(
         # the only on-green change is dropping a filmstrip that was
         # discarded anyway. Do NOT set RECON_GEN_TRACE_ALL=1 for a full
         # xdist qs_browser run on macOS — it re-arms the leak across all
-        # workers (see docs/reference/quicksight-quirks.md).
+        # workers (see docs/reference/test-harness-quirks.md).
         trace_screenshots = bool(RECON_GEN_TRACE_ALL.get_or_none())
         try:
             context.tracing.start(

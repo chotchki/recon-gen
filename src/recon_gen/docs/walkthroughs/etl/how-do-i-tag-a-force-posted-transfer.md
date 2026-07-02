@@ -157,7 +157,7 @@ Once your Fed-statement projection is wired up:
    your Fed rows are tagged `InternalInitiated` (tag bug — they
    get counted as bank activity instead of Fed activity).
 
-See it live: https://recon-gen-spec.hotchkiss.io/
+[See it live](https://recon-gen-spec.hotchkiss.io/)
 
 ## Related walkthroughs
 

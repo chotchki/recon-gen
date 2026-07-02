@@ -22,7 +22,7 @@ when the picture demands it.
 
 Open the **Investigation** dashboard, **Account Network** sheet.
 
-See it live: https://recon-gen-spec.hotchkiss.io/
+[See it live](https://recon-gen-spec.hotchkiss.io/)
 
 The sheet has two controls in the top-right panel:
 

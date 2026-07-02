@@ -14,7 +14,7 @@ recon-gen dashboards -c config.yaml                # one process, all 4 apps
 
 It's stateless on purpose: no auth or sessions, and no in-process cache. Every GET re-runs the query — the URL IS the cache key (filter state round-trips as `?param_X=…` query params), so an edge / browser cache layer Just Works. Embed it behind your own auth front when you put it on a network.
 
-See it live: https://recon-gen-spec.hotchkiss.io/
+[See it live](https://recon-gen-spec.hotchkiss.io/)
 
 ## What gets bundled in the wheel (offline by design)
 

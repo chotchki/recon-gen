@@ -179,7 +179,7 @@ with its own seed import — no cross-process shared state.
 
 Per `account_role` lookup, sampled per-account at generator init via
 `_initialize_starting_balances`. Role-name substring matching
-classifies each account into one of six kinds (see `_classify_role` in
+classifies each account into one of seven kinds (see `_classify_role` in
 `seed.py`); the kind picks a lognormal `(mu, sigma)` for the starting
 balance distribution.
 
@@ -251,7 +251,7 @@ a specific dashboard sheet, exists as a frozen dataclass in
 | Plant | Surfaces on | Picker condition (when fires) |
 | --- | --- | --- |
 | `DriftPlant` | L1 Drift | At least one materialized customer DDA + a rail that lands on it. |
-| `OverdraftPlant` | L1 Overdraft | A two-leg rail whose source role resolves to a non-`gl_control` account. |
+| `OverdraftPlant` | L1 Overdraft | Needs only a materialized customer TemplateInstance — no rail (plants a negative EOD balance on the SECOND customer). The overdraft matview fires on `account_scope = 'internal'` rows, NOT a role match. |
 | `LimitBreachPlant` | L1 Limit Breach | The L2 declares ≥1 `LimitSchedule` with a matching outbound rail. |
 | `StuckPendingPlant` | L1 Pending Aging | A rail with `max_pending_age` declared. |
 | `StuckUnbundledPlant` | L1 Unbundled Aging | A rail with `max_unbundled_age` declared AND that's named in some `bundles_activity`. |
@@ -388,8 +388,8 @@ Sankey and Volume Anomalies' z-score band.
 
 ## L2 coverage assertion set
 
-A separate harness file `_harness_l2_coverage_assertions.py`
-(referenced from the broader e2e harness) cross-checks every L2
+The pytest module `tests/data/test_l2_runtime_assertions.py`
+(R.5.d — ordinary pytest, NO e2e harness) cross-checks every L2
 declaration against runtime evidence. The assertion set is the
 contract locked in alongside the realistic baseline:
 
@@ -414,7 +414,7 @@ contract locked in alongside the realistic baseline:
   spike z-score in the dashboard's "high" anomaly bar coloring band.
 
 The assertion set runs after `data apply` against the live demo DB
-(see `tests/test_l2_runtime_assertions.py` for the public surface).
+(see `tests/data/test_l2_runtime_assertions.py` for the public surface).
 Skip cleanly when no demo DB URL is configured.
 
 ## Out of spec / open
@@ -466,4 +466,4 @@ or a CRC32-derived per-Rail offset.
   same two tables. Useful when comparing "what the demo seed produces"
   against "what your production feed should produce".
 
-See it live: https://recon-gen-spec.hotchkiss.io/
+[See it live](https://recon-gen-spec.hotchkiss.io/)

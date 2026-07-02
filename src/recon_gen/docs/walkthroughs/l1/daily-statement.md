@@ -20,7 +20,7 @@ for that account-day — a green ✓ next to the number means $0
 ??? example "Screenshot"
     ![Daily Statement](../screenshots/l1/l1-sheet-daily-statement.png)
 
-See it live: https://recon-gen-spec.hotchkiss.io/
+[See it live](https://recon-gen-spec.hotchkiss.io/)
 
 ## When to use it
 

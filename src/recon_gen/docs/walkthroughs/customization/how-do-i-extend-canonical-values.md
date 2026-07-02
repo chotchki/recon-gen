@@ -35,11 +35,12 @@ Three reference points:
   renders these declarations directly, and
   `common/l2/schema.py::emit_schema` inlines them into the
   prefixed L1 invariant views (limit caps, aging windows, etc.).
-- **[Schema_v6.md → canonical account_role values](../../Schema_v6.md#table-1-prefix_transactions)** —
-  the cataloged `account_role` set: `gl_control`, `dda`,
-  `merchant_dda`, `external_counter`, `concentration_master`,
-  `funds_pool`. New `account_role` values are convention-only,
-  not enforced by any CHECK constraint.
+- **[Schema_v6.md → `{{ l2_instance_name }}_transactions`](../../Schema_v6.md#table-1-prefix_transactions)** —
+  the `account_role` column contract: `VARCHAR(100) NOT NULL`,
+  FREE-FORM ("the L2 role this account materializes"). There is NO
+  canonical account_role enum — each L2 declares its own roles on its
+  `accounts:` + `account_templates:` (live-inspect them, see below).
+  New values are convention-only, not enforced by any CHECK constraint.
 - **`common/l2/schema.py`** — the source of truth for the
   prefixed DDL. Read this to see how the L2 vocabulary becomes
   inline CASE branches in the L1 invariant views.
@@ -68,14 +69,19 @@ The `account_role` column is unconstrained at the schema level:
 account_role VARCHAR(100) NOT NULL,
 ```
 
-The canonical list (`gl_control`, `dda`, `merchant_dda`,
-`external_counter`, `concentration_master`, `funds_pool`) is
-documented in
-[Schema_v6.md](../../Schema_v6.md#table-1-prefix_transactions)
-but enforced only by convention. Adding a new account_role is
-zero-DDL.
+The `account_role` values are whatever the active L2 declares — no
+canonical list, no CHECK constraint. Inspect the real set the same way
+you inspect rails:
 
-See it live: https://recon-gen-spec.hotchkiss.io/
+```python
+l2 = load_instance("tests/l2/{{ l2_instance_name }}.yaml")
+print(sorted({str(a.role) for a in l2.accounts}
+             | {str(t.role) for t in l2.account_templates}))
+```
+
+Adding a new account_role is zero-DDL.
+
+[See it live](https://recon-gen-spec.hotchkiss.io/)
 
 ## What it means
 
@@ -109,10 +115,10 @@ invariant views know what to do with its rows.
 
 Two steps, no L2 or schema change:
 
-1. **Document the new value.** Update
-   [Schema_v6.md → Canonical account_role values](../../Schema_v6.md#table-1-prefix_transactions)
-   with the new role and what it means. The list is the
-   convention; without it, future-you will guess.
+1. **Pick the value.** No doc to update — account_role is free-form
+   `VARCHAR(100)` declared per-L2 (there is no canonical registry to
+   append to). Keep it consistent with your L2's existing roles
+   (live-inspect the set as shown above).
 2. **Wire your ETL to write the new value.** Whatever feed
    creates the new account role writes `account_role =
    'broker_dealer'` (or whatever you named it). The dashboards
@@ -233,6 +239,6 @@ Once your new rail is wired:
   for when you need to extend a rail-scoped exception check
   to fire on your new value via a dataset SQL change rather
   than (or in addition to) an L2 update.
-- [Schema_v6 → Canonical account_role values](../../Schema_v6.md#table-1-prefix_transactions) —
-  the documented convention for `account_role`. Update the
-  table when you add a new role.
+- [Schema_v6 → `{{ l2_instance_name }}_transactions`](../../Schema_v6.md#table-1-prefix_transactions) —
+  the `account_role` column contract (free-form `VARCHAR(100)`, no
+  canonical enum). Roles are declared per-L2, not registered here.
