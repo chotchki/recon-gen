@@ -1,0 +1,319 @@
+[reordered] day_opts=196 cells=9604
+rows: tx=31556 bal=16464 total=48020
+schema apply: 0.76s
+bulk insert (DPL): 1.21s (39673 rows/s)
+
+-- optimizer stats state [post-seed, pre-refresh] --
+table                                       num_rows  blocks  last_analyzed
+DS0PROBE_COMPUTED_SUBLEDGER_BALANCE             None    None  None
+DS0PROBE_CURRENT_DAILY_BALANCES                 None    None  None
+DS0PROBE_CURRENT_TRANSACTIONS                   None    None  None
+DS0PROBE_DAILY_BALANCES                         None    None  None
+DS0PROBE_TRANSACTIONS                           None    None  None
+
+refresh script: 48 stmts (REORDERED)
+
+-- EXPLAIN PLAN [cdb defining query, state at its refresh] --
+Plan hash value: 3940474558
+ 
+-------------------------------------------------------------------------------------------------------------------------
+| Id  | Operation                    | Name                                     | Rows  | Bytes | Cost (%CPU)| Time     |
+-------------------------------------------------------------------------------------------------------------------------
+|   0 | SELECT STATEMENT             |                                          | 17288 |    40M|    23   (5)| 00:00:01 |
+|   1 |  NESTED LOOPS                |                                          | 17288 |    40M|    23   (5)| 00:00:01 |
+|   2 |   NESTED LOOPS               |                                          |   149M|    40M|    23   (5)| 00:00:01 |
+|   3 |    VIEW                      | VW_SQ_1                                  | 17288 |  1316K|    23   (5)| 00:00:01 |
+|   4 |     HASH GROUP BY            |                                          | 17288 |  1316K|    23   (5)| 00:00:01 |
+|   5 |      INDEX FAST FULL SCAN    | SYS_C007581                              | 17288 |  1316K|    22   (0)| 00:00:01 |
+|*  6 |    INDEX RANGE SCAN          | IDX_DS0PROBE_DAILY_BALANCES_BUSINESS_DAY |  8644 |       |     0   (0)| 00:00:01 |
+|*  7 |   TABLE ACCESS BY INDEX ROWID| DS0PROBE_DAILY_BALANCES                  |     1 |  2391 |     0   (0)| 00:00:01 |
+-------------------------------------------------------------------------------------------------------------------------
+ 
+Predicate Information (identified by operation id):
+---------------------------------------------------
+ 
+   6 - access("ITEM_2"="SB"."BUSINESS_DAY_START")
+   7 - filter("SB"."ENTRY"="MAX(ENTRY)" AND "ITEM_1"="SB"."ACCOUNT_ID")
+ 
+Note
+-----
+   - dynamic statistics used: dynamic sampling (level=2)
+
+-- v$sql refresh cursors for ds0probe_current_daily_balances [actual refresh cursor] --
+sql_id=8my1cufgfrus2 child=0 type=2 execs=1 elapsed=23.31s
+  text: /* MV_REFRESH (INS) */INSERT /*+ BYPASS_RECURSIVE_CHECK */ INTO "SYSTEM"."DS0PROBE_COMPUTE
+sql_id=6vftmar5fkvrq child=0 type=2 execs=1 elapsed=15.45s
+  text: /* MV_REFRESH (INS) */INSERT /*+ BYPASS_RECURSIVE_CHECK */ INTO "SYSTEM"."DS0PROBE_CURRENT
+sql_id=fk7s635xh7hqz child=0 type=2 execs=1 elapsed=0.07s
+  text: /* MV_REFRESH (INS) */INSERT /*+ BYPASS_RECURSIVE_CHECK */ INTO "SYSTEM"."DS0PROBE_EFFECTI
+sql_id=bq8muc9z5ktw0 child=0 type=2 execs=1 elapsed=0.04s
+  text: /* MV_REFRESH (INS) */INSERT /*+ BYPASS_RECURSIVE_CHECK */ INTO "SYSTEM"."DS0PROBE_BALANCE
+sql_id=dsk6dbbatcxnq child=0 type=2 execs=1 elapsed=0.02s
+  text: /* MV_REFRESH (INS) */INSERT /*+ BYPASS_RECURSIVE_CHECK */ INTO "SYSTEM"."DS0PROBE_COMPUTE
+sql_id=6n8q1gszcyrn4 child=0 type=2 execs=1 elapsed=0.01s
+  text: /* MV_REFRESH (INS) */INSERT /*+ BYPASS_RECURSIVE_CHECK */ INTO "SYSTEM"."DS0PROBE_EXPECTE
+sql_id=dx5f86ff780zu child=0 type=2 execs=0 elapsed=0s
+  text: INSERT INTO "SYSTEM"."DS0PROBE_COMPUTED_LEDGER_BALANCE" SELECT     parent_db.account_id,  
+sql_id=927fpwjaqw5nz child=0 type=2 execs=0 elapsed=0s
+  text: INSERT INTO "SYSTEM"."DS0PROBE_BALANCE_CADENCE_GAP" WITH all_internal AS (     SELECT DIST
+sql_id=4azd632a6ms46 child=0 type=2 execs=0 elapsed=0s
+  text: INSERT INTO "SYSTEM"."DS0PROBE_EFFECTIVE_BALANCES" WITH all_internal_accounts AS (     SEL
+sql_id=6njj734f52rn7 child=0 type=2 execs=0 elapsed=0s
+  text: INSERT INTO "SYSTEM"."DS0PROBE_CURRENT_DAILY_BALANCES" SELECT * FROM ds0probe_daily_balanc
+sql_id=cvv9hch2v9zxs child=0 type=2 execs=1 elapsed=0s
+  text: /* MV_REFRESH (INS) */INSERT /*+ BYPASS_RECURSIVE_CHECK */ INTO "SYSTEM"."DS0PROBE_DATA_AN
+sql_id=1xs8a27jh9bhv child=0 type=2 execs=0 elapsed=0s
+  text: INSERT INTO "SYSTEM"."DS0PROBE_COMPUTED_SUBLEDGER_BALANCE" SELECT     sb.account_id,     s
+sql_id=a0v7aqfqp1qpx child=0 type=7 execs=1 elapsed=0s
+  text: /* MV_REFRESH (DEL) */ delete from "SYSTEM"."DS0PROBE_CURRENT_DAILY_BALANCES"
+sql_id=bftrvun3ktcat child=0 type=2 execs=0 elapsed=0s
+  text: INSERT INTO "SYSTEM"."DS0PROBE_DATA_ANCHOR" SELECT     1 AS row_marker,     MAX(anchor) AS
+sql_id=52xsk4fwu7v2k child=0 type=2 execs=0 elapsed=0s
+  text: INSERT INTO "SYSTEM"."DS0PROBE_EXPECTED_EOD_BALANCE_BREACH" SELECT     sb.account_id,     
+
+-- DISPLAY_CURSOR 8my1cufgfrus2/0 (elapsed 23.31s) --
+SQL_ID  8my1cufgfrus2, child number 0
+-------------------------------------
+/* MV_REFRESH (INS) */INSERT /*+ BYPASS_RECURSIVE_CHECK */ INTO 
+"SYSTEM"."DS0PROBE_COMPUTED_SUBLEDGER_BALANCE" SELECT     
+sb.account_id,     sb.business_day_start,     sb.business_day_end,     
+sb.account_parent_role,     COALESCE((         SELECT 
+SUM(tx.amount_money)         FROM ds0probe_current_transactions tx      
+   WHERE tx.account_id = sb.account_id           AND tx.status = 
+'Posted'           AND tx.posting <= sb.business_day_end     ), 0) AS 
+computed_balance FROM ds0probe_current_daily_balances sb WHERE 
+sb.account_scope = 'internal'   AND sb.account_parent_role IS NOT NULL
+ 
+Plan hash value: 3425291352
+ 
+--------------------------------------------------------------------------------------------------------------------------------
+| Id  | Operation                                | Name                                | Rows  | Bytes | Cost (%CPU)| Time     |
+--------------------------------------------------------------------------------------------------------------------------------
+|   0 | INSERT STATEMENT                         |                                     |       |       |   970K(100)|          |
+|   1 |  LOAD TABLE CONVENTIONAL                 | DS0PROBE_COMPUTED_SUBLEDGER_BALANCE |       |       |            |          |
+|   2 |   SORT AGGREGATE                         |                                     |     1 |   105 |            |          |
+|*  3 |    MAT_VIEW ACCESS BY INDEX ROWID BATCHED| DS0PROBE_CURRENT_TRANSACTIONS       |     9 |   945 |    55   (0)| 00:00:01 |
+|*  4 |     INDEX RANGE SCAN                     | IDX_DS0PROBE_CURR_TX_STATUS         | 18117 |       |    55   (0)| 00:00:01 |
+|*  5 |   MAT_VIEW ACCESS FULL                   | DS0PROBE_CURRENT_DAILY_BALANCES     | 18482 |  2562K|    58   (0)| 00:00:01 |
+--------------------------------------------------------------------------------------------------------------------------------
+ 
+Predicate Information (identified by operation id):
+---------------------------------------------------
+ 
+   3 - filter(("TX"."ACCOUNT_ID"=:B1 AND "TX"."POSTING"<=:B2))
+   4 - access("TX"."STATUS"='Posted')
+   5 - filter(("SB"."ACCOUNT_PARENT_ROLE" IS NOT NULL AND "SB"."ACCOUNT_SCOPE"='internal'))
+ 
+Note
+-----
+   - dynamic statistics used: dynamic sampling (level=2)
+ 
+
+-- DISPLAY_CURSOR 6vftmar5fkvrq/0 (elapsed 15.45s) --
+SQL_ID  6vftmar5fkvrq, child number 0
+-------------------------------------
+/* MV_REFRESH (INS) */INSERT /*+ BYPASS_RECURSIVE_CHECK */ INTO 
+"SYSTEM"."DS0PROBE_CURRENT_DAILY_BALANCES" SELECT * FROM 
+ds0probe_daily_balances sb WHERE sb.entry = (     SELECT MAX(entry)     
+FROM ds0probe_daily_balances     WHERE account_id = sb.account_id       
+AND business_day_start = sb.business_day_start )
+ 
+Plan hash value: 671834506
+ 
+--------------------------------------------------------------------------------------------------------------------------
+| Id  | Operation                     | Name                                     | Rows  | Bytes | Cost (%CPU)| Time     |
+--------------------------------------------------------------------------------------------------------------------------
+|   0 | INSERT STATEMENT              |                                          |       |       |    23 (100)|          |
+|   1 |  LOAD TABLE CONVENTIONAL      | DS0PROBE_CURRENT_DAILY_BALANCES          |       |       |            |          |
+|   2 |   NESTED LOOPS                |                                          | 17288 |    40M|    23   (5)| 00:00:01 |
+|   3 |    NESTED LOOPS               |                                          |   149M|    40M|    23   (5)| 00:00:01 |
+|   4 |     VIEW                      | VW_SQ_1                                  | 17288 |  1316K|    23   (5)| 00:00:01 |
+|   5 |      SORT GROUP BY            |                                          | 17288 |  1316K|    23   (5)| 00:00:01 |
+|   6 |       INDEX FAST FULL SCAN    | SYS_C007581                              | 17288 |  1316K|    22   (0)| 00:00:01 |
+|*  7 |     INDEX RANGE SCAN          | IDX_DS0PROBE_DAILY_BALANCES_BUSINESS_DAY |  8644 |       |     0   (0)|          |
+|*  8 |    TABLE ACCESS BY INDEX ROWID| DS0PROBE_DAILY_BALANCES                  |     1 |  2391 |     0   (0)|          |
+--------------------------------------------------------------------------------------------------------------------------
+ 
+Predicate Information (identified by operation id):
+---------------------------------------------------
+ 
+   7 - access("ITEM_2"="SB"."BUSINESS_DAY_START")
+   8 - filter(("SB"."ENTRY"="MAX(ENTRY)" AND "ITEM_1"="SB"."ACCOUNT_ID"))
+ 
+Note
+-----
+   - dynamic statistics used: dynamic sampling (level=2)
+ 
+
+-- optimizer stats state [state at csb refresh] --
+table                                       num_rows  blocks  last_analyzed
+DS0PROBE_COMPUTED_SUBLEDGER_BALANCE             None    None  None
+DS0PROBE_CURRENT_DAILY_BALANCES                16464     207  2026-07-02 18:31:39
+DS0PROBE_CURRENT_TRANSACTIONS                  31556     596  2026-07-02 18:31:39
+DS0PROBE_DAILY_BALANCES                         None    None  None
+DS0PROBE_TRANSACTIONS                           None    None  None
+
+-- EXPLAIN PLAN [csb defining query, state at its refresh] --
+Plan hash value: 3933794974
+ 
+--------------------------------------------------------------------------------------------------------------------------------
+| Id  | Operation                               | Name                                 | Rows  | Bytes | Cost (%CPU)| Time     |
+--------------------------------------------------------------------------------------------------------------------------------
+|   0 | SELECT STATEMENT                        |                                      | 16464 |   884K| 41261   (1)| 00:00:02 |
+|   1 |  SORT AGGREGATE                         |                                      |     1 |    32 |            |          |
+|*  2 |   MAT_VIEW ACCESS BY INDEX ROWID BATCHED| DS0PROBE_CURRENT_TRANSACTIONS        |     1 |    32 |     3   (0)| 00:00:01 |
+|*  3 |    INDEX RANGE SCAN                     | IDX_DS0PROBE_CURR_TX_ACCOUNT_POSTING |     1 |       |     2   (0)| 00:00:01 |
+|*  4 |  MAT_VIEW ACCESS FULL                   | DS0PROBE_CURRENT_DAILY_BALANCES      | 16464 |   884K|    58   (0)| 00:00:01 |
+--------------------------------------------------------------------------------------------------------------------------------
+ 
+Predicate Information (identified by operation id):
+---------------------------------------------------
+ 
+   2 - filter("TX"."STATUS"='Posted')
+   3 - access("TX"."ACCOUNT_ID"=:B1 AND "TX"."POSTING"<=:B2)
+   4 - filter("SB"."ACCOUNT_SCOPE"='internal' AND "SB"."ACCOUNT_PARENT_ROLE" IS NOT NULL)
+
+-- v$sql refresh cursors for ds0probe_computed_subledger_balance [actual refresh cursor] --
+sql_id=1r9xxqsyyzdnj child=0 type=2 execs=1 elapsed=0.08s
+  text: /* MV_REFRESH (INS) */INSERT /*+ BYPASS_RECURSIVE_CHECK */ INTO "SYSTEM"."DS0PROBE_DRIFT" 
+sql_id=8my1cufgfrus2 child=0 type=2 execs=1 elapsed=0.03s
+  text: /* MV_REFRESH (INS) */INSERT /*+ BYPASS_RECURSIVE_CHECK */ INTO "SYSTEM"."DS0PROBE_COMPUTE
+sql_id=1xs8a27jh9bhv child=0 type=2 execs=0 elapsed=0s
+  text: INSERT INTO "SYSTEM"."DS0PROBE_COMPUTED_SUBLEDGER_BALANCE" SELECT     sb.account_id,     s
+sql_id=9jdnk3dmq87ns child=0 type=2 execs=0 elapsed=0s
+  text: INSERT INTO "SYSTEM"."DS0PROBE_DRIFT" SELECT     sb.account_id,     sb.account_name,     s
+sql_id=af0h3rwknrsd6 child=0 type=7 execs=1 elapsed=0s
+  text: /* MV_REFRESH (DEL) */ delete from "SYSTEM"."DS0PROBE_COMPUTED_SUBLEDGER_BALANCE"
+
+-- DISPLAY_CURSOR 1r9xxqsyyzdnj/0 (elapsed 0.08s) --
+SQL_ID  1r9xxqsyyzdnj, child number 0
+-------------------------------------
+/* MV_REFRESH (INS) */INSERT /*+ BYPASS_RECURSIVE_CHECK */ INTO 
+"SYSTEM"."DS0PROBE_DRIFT" SELECT     sb.account_id,     
+sb.account_name,     sb.account_role,     sb.account_parent_role,     
+sb.business_day_start,     sb.business_day_end,     sb.effective_money 
+AS stored_balance,     cb.computed_balance,     sb.effective_money - 
+cb.computed_balance AS drift,     sb.source FROM 
+ds0probe_effective_balances sb JOIN ds0probe_computed_subledger_balance 
+cb   ON cb.account_id = sb.account_id  AND cb.business_day_start = 
+sb.business_day_start WHERE sb.account_scope = 'internal'   AND 
+sb.account_parent_role IS NOT NULL   AND sb.effective_money IS NOT NULL 
+  AND sb.effective_money <> cb.computed_balance
+ 
+Plan hash value: 1951766682
+ 
+--------------------------------------------------------------------------------------------------------------------------
+| Id  | Operation                        | Name                                  | Rows  | Bytes | Cost (%CPU)| Time     |
+--------------------------------------------------------------------------------------------------------------------------
+|   0 | INSERT STATEMENT                 |                                       |       |       |    32 (100)|          |
+|   1 |  LOAD TABLE CONVENTIONAL         | DS0PROBE_DRIFT                        |       |       |            |          |
+|   2 |   NESTED LOOPS                   |                                       | 17878 |  7385K|    32   (0)| 00:00:01 |
+|   3 |    NESTED LOOPS                  |                                       | 17878 |  7385K|    32   (0)| 00:00:01 |
+|   4 |     MAT_VIEW ACCESS FULL         | DS0PROBE_COMPUTED_SUBLEDGER_BALANCE   | 17878 |  1361K|    32   (0)| 00:00:01 |
+|*  5 |     INDEX UNIQUE SCAN            | IDX_DS0PROBE_EFF_BALANCES_ACCOUNT_DAY |     1 |       |     0   (0)|          |
+|*  6 |    MAT_VIEW ACCESS BY INDEX ROWID| DS0PROBE_EFFECTIVE_BALANCES           |     1 |   345 |     0   (0)|          |
+--------------------------------------------------------------------------------------------------------------------------
+ 
+Predicate Information (identified by operation id):
+---------------------------------------------------
+ 
+   5 - access("CB"."ACCOUNT_ID"="SB"."ACCOUNT_ID" AND "CB"."BUSINESS_DAY_START"="SB"."BUSINESS_DAY_START")
+   6 - filter(("SB"."ACCOUNT_PARENT_ROLE" IS NOT NULL AND "SB"."ACCOUNT_SCOPE"='internal' AND 
+              "SB"."EFFECTIVE_MONEY"<>"CB"."COMPUTED_BALANCE" AND "SB"."EFFECTIVE_MONEY" IS NOT NULL))
+ 
+Note
+-----
+   - dynamic statistics used: dynamic sampling (level=2)
+ 
+
+-- DISPLAY_CURSOR 8my1cufgfrus2/0 (elapsed 0.03s) --
+SQL_ID  8my1cufgfrus2, child number 0
+-------------------------------------
+/* MV_REFRESH (INS) */INSERT /*+ BYPASS_RECURSIVE_CHECK */ INTO 
+"SYSTEM"."DS0PROBE_COMPUTED_SUBLEDGER_BALANCE" SELECT     
+sb.account_id,     sb.business_day_start,     sb.business_day_end,     
+sb.account_parent_role,     COALESCE((         SELECT 
+SUM(tx.amount_money)         FROM ds0probe_current_transactions tx      
+   WHERE tx.account_id = sb.account_id           AND tx.status = 
+'Posted'           AND tx.posting <= sb.business_day_end     ), 0) AS 
+computed_balance FROM ds0probe_current_daily_balances sb WHERE 
+sb.account_scope = 'internal'   AND sb.account_parent_role IS NOT NULL
+ 
+Plan hash value: 3933794974
+ 
+---------------------------------------------------------------------------------------------------------------------------------
+| Id  | Operation                                | Name                                 | Rows  | Bytes | Cost (%CPU)| Time     |
+---------------------------------------------------------------------------------------------------------------------------------
+|   0 | INSERT STATEMENT                         |                                      |       |       | 41261 (100)|          |
+|   1 |  LOAD TABLE CONVENTIONAL                 | DS0PROBE_COMPUTED_SUBLEDGER_BALANCE  |       |       |            |          |
+|   2 |   SORT AGGREGATE                         |                                      |     1 |    32 |            |          |
+|*  3 |    MAT_VIEW ACCESS BY INDEX ROWID BATCHED| DS0PROBE_CURRENT_TRANSACTIONS        |     1 |    32 |     3   (0)| 00:00:01 |
+|*  4 |     INDEX RANGE SCAN                     | IDX_DS0PROBE_CURR_TX_ACCOUNT_POSTING |     1 |       |     2   (0)| 00:00:01 |
+|*  5 |   MAT_VIEW ACCESS FULL                   | DS0PROBE_CURRENT_DAILY_BALANCES      | 16464 |   884K|    58   (0)| 00:00:01 |
+---------------------------------------------------------------------------------------------------------------------------------
+ 
+Predicate Information (identified by operation id):
+---------------------------------------------------
+ 
+   3 - filter("TX"."STATUS"='Posted')
+   4 - access("TX"."ACCOUNT_ID"=:B1 AND "TX"."POSTING"<=:B2)
+   5 - filter(("SB"."ACCOUNT_SCOPE"='internal' AND "SB"."ACCOUNT_PARENT_ROLE" IS NOT NULL))
+ 
+
+refresh matviews TOTAL: 17.67s (48 stmts)
+
+== per-statement timing (execution order) ==
+      0.48s  BEGIN DBMS_MVIEW.REFRESH('ds0probe_current_transactions', method => 'C'); END;
+     15.46s  BEGIN DBMS_MVIEW.REFRESH('ds0probe_current_daily_balances', method => 'C'); END;
+      0.19s  BEGIN DBMS_STATS.GATHER_TABLE_STATS(USER, 'ds0probe_current_transactions'); END;
+      0.09s  BEGIN DBMS_STATS.GATHER_TABLE_STATS(USER, 'ds0probe_current_daily_balances'); END;
+      0.04s  BEGIN DBMS_MVIEW.REFRESH('ds0probe_computed_subledger_balance', method => 'C'); END;
+      0.02s  BEGIN DBMS_MVIEW.REFRESH('ds0probe_computed_ledger_balance', method => 'C'); END;
+      0.07s  BEGIN DBMS_MVIEW.REFRESH('ds0probe_effective_balances', method => 'C'); END;
+      0.01s  BEGIN DBMS_MVIEW.REFRESH('ds0probe_data_anchor', method => 'C'); END;
+      0.09s  BEGIN DBMS_MVIEW.REFRESH('ds0probe_drift', method => 'C'); END;
+      0.02s  BEGIN DBMS_MVIEW.REFRESH('ds0probe_ledger_drift', method => 'C'); END;
+      0.04s  BEGIN DBMS_MVIEW.REFRESH('ds0probe_drift_summary', method => 'C'); END;
+      0.03s  BEGIN DBMS_MVIEW.REFRESH('ds0probe_overdraft', method => 'C'); END;
+      0.02s  BEGIN DBMS_MVIEW.REFRESH('ds0probe_expected_eod_balance_breach', method => 'C'); END;
+      0.04s  BEGIN DBMS_MVIEW.REFRESH('ds0probe_balance_cadence_gap', method => 'C'); END;
+      0.04s  BEGIN DBMS_MVIEW.REFRESH('ds0probe_limit_breach', method => 'C'); END;
+      0.03s  BEGIN DBMS_MVIEW.REFRESH('ds0probe_stuck_pending', method => 'C'); END;
+      0.02s  BEGIN DBMS_MVIEW.REFRESH('ds0probe_stuck_unbundled', method => 'C'); END;
+      0.01s  BEGIN DBMS_MVIEW.REFRESH('ds0probe_chain_parent_disagreement', method => 'C'); END;
+      0.02s  BEGIN DBMS_MVIEW.REFRESH('ds0probe_xor_group_violation', method => 'C'); END;
+      0.01s  BEGIN DBMS_MVIEW.REFRESH('ds0probe_transfer_parents', method => 'C'); END;
+      0.03s  BEGIN DBMS_MVIEW.REFRESH('ds0probe_fan_in_disagreement', method => 'C'); END;
+      0.06s  BEGIN DBMS_MVIEW.REFRESH('ds0probe_multi_xor_violation', method => 'C'); END;
+      0.07s  BEGIN DBMS_MVIEW.REFRESH('ds0probe_daily_statement_summary', method => 'C'); END;
+      0.11s  BEGIN DBMS_MVIEW.REFRESH('ds0probe_l1_exceptions', method => 'C'); END;
+      0.02s  BEGIN DBMS_MVIEW.REFRESH('ds0probe_inv_pair_rolling_anomalies', method => 'C'); END;
+      0.08s  BEGIN DBMS_MVIEW.REFRESH('ds0probe_inv_money_trail_edges', method => 'C'); END;
+      0.06s  BEGIN DBMS_STATS.GATHER_TABLE_STATS(USER, 'ds0probe_computed_subledger_balance'); END;
+      0.01s  BEGIN DBMS_STATS.GATHER_TABLE_STATS(USER, 'ds0probe_computed_ledger_balance'); END;
+      0.06s  BEGIN DBMS_STATS.GATHER_TABLE_STATS(USER, 'ds0probe_effective_balances'); END;
+      0.01s  BEGIN DBMS_STATS.GATHER_TABLE_STATS(USER, 'ds0probe_data_anchor'); END;
+      0.03s  BEGIN DBMS_STATS.GATHER_TABLE_STATS(USER, 'ds0probe_drift'); END;
+      0.01s  BEGIN DBMS_STATS.GATHER_TABLE_STATS(USER, 'ds0probe_ledger_drift'); END;
+      0.03s  BEGIN DBMS_STATS.GATHER_TABLE_STATS(USER, 'ds0probe_drift_summary'); END;
+      0.02s  BEGIN DBMS_STATS.GATHER_TABLE_STATS(USER, 'ds0probe_overdraft'); END;
+      0.01s  BEGIN DBMS_STATS.GATHER_TABLE_STATS(USER, 'ds0probe_expected_eod_balance_breach'); END;
+      0.02s  BEGIN DBMS_STATS.GATHER_TABLE_STATS(USER, 'ds0probe_balance_cadence_gap'); END;
+      0.01s  BEGIN DBMS_STATS.GATHER_TABLE_STATS(USER, 'ds0probe_limit_breach'); END;
+      0.01s  BEGIN DBMS_STATS.GATHER_TABLE_STATS(USER, 'ds0probe_stuck_pending'); END;
+      0.01s  BEGIN DBMS_STATS.GATHER_TABLE_STATS(USER, 'ds0probe_stuck_unbundled'); END;
+      0.01s  BEGIN DBMS_STATS.GATHER_TABLE_STATS(USER, 'ds0probe_chain_parent_disagreement'); END;
+      0.01s  BEGIN DBMS_STATS.GATHER_TABLE_STATS(USER, 'ds0probe_xor_group_violation'); END;
+      0.01s  BEGIN DBMS_STATS.GATHER_TABLE_STATS(USER, 'ds0probe_transfer_parents'); END;
+      0.01s  BEGIN DBMS_STATS.GATHER_TABLE_STATS(USER, 'ds0probe_fan_in_disagreement'); END;
+      0.01s  BEGIN DBMS_STATS.GATHER_TABLE_STATS(USER, 'ds0probe_multi_xor_violation'); END;
+      0.02s  BEGIN DBMS_STATS.GATHER_TABLE_STATS(USER, 'ds0probe_daily_statement_summary'); END;
+      0.04s  BEGIN DBMS_STATS.GATHER_TABLE_STATS(USER, 'ds0probe_l1_exceptions'); END;
+      0.01s  BEGIN DBMS_STATS.GATHER_TABLE_STATS(USER, 'ds0probe_inv_pair_rolling_anomalies'); END;
+      0.01s  BEGIN DBMS_STATS.GATHER_TABLE_STATS(USER, 'ds0probe_inv_money_trail_edges'); END;
+SELECT drift: 0.024s (11592 violations)
+SELECT overdraft: 0.012s (5880 violations)
+SELECT expected_eod_balance_breach: 0.010s (5488 violations)
+violation counts py: drift=11592 over=5880 eod=5488  agreement: CLEAN
+
+[reordered] refresh_total=17.67s  EXIT OK
