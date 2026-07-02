@@ -863,7 +863,10 @@ def test_daily_statement_transactions_projects_running_balance() -> None:
         sql = ds.sql
 
         # The running-balance projection (dialect-invariant fragments).
-        assert "SUM(tx.amount_money) OVER (" in sql, (
+        assert (
+        "SUM(CASE WHEN tx.status = 'Posted' "
+        "THEN tx.amount_money ELSE 0 END) OVER ("
+    ) in sql, (
             f"{dialect.name}: missing running-balance window SUM; got "
             f"{sql!r}"
         )
@@ -906,7 +909,10 @@ def test_daily_statement_transactions_projects_running_balance() -> None:
             f"{dialect.name}: opening-balance subquery must correlate on "
             f"account_id; got {sql!r}"
         )
-        assert "+ SUM(tx.amount_money) OVER" in sql, (
+        assert (
+        "+ SUM(CASE WHEN tx.status = 'Posted' "
+        "THEN tx.amount_money ELSE 0 END) OVER"
+    ) in sql, (
             f"{dialect.name}: running_balance must be opening + cumulative "
             f"SUM (COALESCE(opening, 0) + SUM(...) OVER (...)); got {sql!r}"
         )

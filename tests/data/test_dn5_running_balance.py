@@ -75,18 +75,32 @@ _PRIOR_ISO = (_DAY - timedelta(days=1)).isoformat()
 
 # Account A — five legs on the picked day, in posting order.
 # (id, posting_HH:MM:SS, signed cents, direction)
-_ACCT_A_LEGS: list[tuple[int, str, int, str]] = [
-    (101, "08:00:00", 250_00, "Credit"),
-    (102, "09:30:00", -75_00, "Debit"),
-    (103, "11:15:00", 500_00, "Credit"),
-    (104, "14:45:00", -120_00, "Debit"),
-    (105, "16:00:00", -30_00, "Debit"),
+# DS.3.3 — the fixture plants NON-Posted legs (the 4-way's historical
+# blind spot: all-Posted fixtures meant the four copies' status filters
+# could disagree forever without a test firing). The money law: only
+# Posted legs move the running balance; Pending / Failed / the
+# deterministically-random unknown status DISPLAY but don't move it.
+from recon_gen.common.env_keys import RECON_GEN_FUZZ_SEED as _FUZZ_SEED_KEY
+from recon_gen.common.l2.primitives import POSTED_STATUS
+
+_DS33_UNKNOWN_STATUS = "Zz" + __import__("hashlib").sha256(
+    f"ds33-{_FUZZ_SEED_KEY.get_or_none() or '0'}".encode()
+).hexdigest()[:6]
+_ACCT_A_LEGS: list[tuple[int, str, int, str, str]] = [
+    (101, "08:00:00", 250_00, "Credit", "Posted"),
+    (102, "09:30:00", -75_00, "Debit", "Posted"),
+    (110, "10:10:00", -999_00, "Debit", "Pending"),
+    (103, "11:15:00", 500_00, "Credit", "Posted"),
+    (111, "12:20:00", 777_00, "Credit", "Failed"),
+    (104, "14:45:00", -120_00, "Debit", "Posted"),
+    (112, "15:10:00", -555_00, "Debit", _DS33_UNKNOWN_STATUS),
+    (105, "16:00:00", -30_00, "Debit", "Posted"),
 ]
 # Account B — three legs same day; proves PARTITION isolation.
-_ACCT_B_LEGS: list[tuple[int, str, int, str]] = [
-    (201, "08:15:00", 90_00, "Credit"),
-    (202, "12:00:00", -40_00, "Debit"),
-    (203, "15:30:00", 1000_00, "Credit"),
+_ACCT_B_LEGS: list[tuple[int, str, int, str, str]] = [
+    (201, "08:15:00", 90_00, "Credit", "Posted"),
+    (202, "12:00:00", -40_00, "Debit", "Posted"),
+    (203, "15:30:00", 1000_00, "Credit", "Posted"),
 ]
 
 # Opening balances (cents) carried into the picked day for each account.
@@ -103,16 +117,19 @@ def _signed_dollars(cents: int) -> Decimal:
 
 
 def _expected_running(
-    legs: list[tuple[int, str, int, str]], opening_cents: int,
+    legs: list[tuple[int, str, int, str, str]], opening_cents: int,
 ) -> list[Decimal]:
     """Python running-sum over the legs in their fixture order (which is
-    already (posting, id) order), ANCHORED to the opening balance. The
-    window function must reproduce this exactly (DN-followup 2026-06-16:
-    running balance = opening + cumulative, the actual account balance
-    after each posting)."""
+    already (posting, id) order), ANCHORED to the opening balance and
+    accumulating POSTED legs only (DS.3.3 money law) — a Pending /
+    Failed / unknown-status row displays the unchanged balance. One
+    value per displayed row, so the sequences zip 1:1 with the dataset
+    + audit projections."""
     return [
         _signed_dollars(opening_cents + c)
-        for c in accumulate(leg[2] for leg in legs)
+        for c in accumulate(
+            leg[2] if leg[4] == POSTED_STATUS else 0 for leg in legs
+        )
     ]
 
 
@@ -152,11 +169,11 @@ def two_account_duckdb() -> Iterator["Config"]:
         ("acc-A", "Account A", _ACCT_A_LEGS),
         ("acc-B", "Account B", _ACCT_B_LEGS),
     ):
-        for leg_id, hms, signed_cents, direction in legs:
+        for leg_id, hms, signed_cents, direction, status in legs:
             rows.append((
                 str(leg_id), f"xfer-{leg_id}", acct_id, acct_name,
                 "internal", "SomeRail", signed_cents, direction,
-                "Posted", "organic", f"{_DAY_ISO} {hms}", None,
+                status, "organic", f"{_DAY_ISO} {hms}", None,
             ))
     conn.executemany(
         f"INSERT INTO {_PREFIX}_current_transactions VALUES "
@@ -201,14 +218,15 @@ def two_account_duckdb() -> Iterator["Config"]:
         ("acc-A", "Account A", _ACCT_A_LEGS, _ACCT_A_OPENING),
         ("acc-B", "Account B", _ACCT_B_LEGS, _ACCT_B_OPENING),
     ):
-        credits = sum(c for _, _, c, _ in legs if c > 0)
-        debits = -sum(c for _, _, c, _ in legs if c < 0)  # stored positive
+        posted = [leg for leg in legs if leg[4] == POSTED_STATUS]
+        credits = sum(c for _, _, c, _, _ in posted if c > 0)
+        debits = -sum(c for _, _, c, _, _ in posted if c < 0)  # stored positive
         net = credits - debits
         closing_recomputed = opening + net
         summary_rows.append((
             acct_id, acct_name, "dda", None, "internal",
             f"{_DAY_ISO} 00:00:00", f"{_DAY_ISO} 23:59:59",
-            opening, debits, credits, net, len(legs),
+            opening, debits, credits, net, len(posted),
             closing_recomputed, closing_recomputed, 0,
         ))
     conn.executemany(

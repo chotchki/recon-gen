@@ -160,8 +160,10 @@ def test_transactions_status_is_open_enum() -> None:
     """L1 SPEC says Status ⊇ {Posted}. No closed CHECK on status."""
     sql = emit_schema(_instance("st"), prefix="st")
     assert "status               VARCHAR(50)    NOT NULL" in sql
-    # No CHECK constraint on status (would close the enum).
-    assert "status IN" not in sql
+    # No CHECK constraint on status (would close the enum — the
+    # column is purposefully OPEN per the DS.0 sign-off; detector
+    # FILTERS may reference status IN (...), only the DDL may not).
+    assert "CHECK (status IN" not in sql
 
 
 def test_transactions_rail_name_is_open_enum() -> None:
@@ -733,7 +735,7 @@ def test_chain_parent_disagreement_view_ab2_shape() -> None:
     # Filters keep rail-as-child chains + Failed legs out.
     assert "tx.transfer_parent_id IS NOT NULL" in body
     assert "tx.template_name IS NOT NULL" in body
-    assert "tx.status <> 'Failed'" in body
+    assert "tx.status IN ('Posted', 'Pending')" in body
     # GROUP BY (transfer_id, template_name) + HAVING > 1.
     assert "GROUP BY tx.transfer_id, tx.template_name" in body
     assert "HAVING COUNT(DISTINCT tx.transfer_parent_id) > 1" in body
@@ -1163,7 +1165,7 @@ def test_transfer_parents_view_ab4_shape() -> None:
     assert "SELECT DISTINCT" in body
     # Filters: NULL parents + Failed legs out.
     assert "tx.transfer_parent_id IS NOT NULL" in body
-    assert "tx.status <> 'Failed'" in body
+    assert "tx.status IN ('Posted', 'Pending')" in body
     # Two indexes for the dashboard hot paths.
     assert "idx_tp_tp_child" in sql
     assert "idx_tp_tp_parent" in sql
@@ -1220,7 +1222,7 @@ def test_chain_parent_disagreement_filter_empty_when_no_fan_in() -> None:
     # No NOT IN clause in the empty branch.
     assert "NOT IN (" not in body
     # The WHERE chain ends cleanly with status filter; no dangling AND.
-    assert "tx.status <> 'Failed'\nGROUP BY" in body
+    assert "tx.status IN ('Posted', 'Pending')\nGROUP BY" in body
 
 
 def test_fan_in_disagreement_body_is_static_across_l2_chain_shape(

@@ -1199,7 +1199,11 @@ def _render_xor_group_violation_body(
         f"         MIN({date_trunc_day('tx.posting', dialect)})\n"
         f"           OVER (PARTITION BY tx.transfer_id, tx.template_name) AS business_day\n"
         f"  FROM {p}_current_transactions tx\n"
-        f"  WHERE tx.status <> 'Failed'\n"
+        f"  -- DS.3.3 status law: a firing counts on Posted or Pending —\n"
+        f"  -- unknown tail lands on the failed side. This is ALSO the\n"
+        f"  -- existence predicate (operator-pinned): an all-void transfer\n"
+        f"  -- gets no expected cell — invisible, not alarmed.\n"
+        f"  WHERE tx.status IN ('Posted', 'Pending')\n"
         f"    AND tx.template_name IN (SELECT DISTINCT template_name FROM xor_groups)\n"
         f"),\n"
         f"expected AS (\n"
@@ -1226,7 +1230,7 @@ def _render_xor_group_violation_body(
         f"  ON tx.transfer_id = e.transfer_id\n"
         f"  AND tx.template_name = e.template_name\n"
         f"  AND tx.rail_name = g.member_rail_name\n"
-        f"  AND tx.status <> 'Failed'\n"
+        f"  AND tx.status IN ('Posted', 'Pending')\n"
         f"GROUP BY e.transfer_id, e.template_name, e.xor_group_index, e.business_day\n"
         f"HAVING COUNT(tx.transfer_id) <> 1"
     )
@@ -1307,7 +1311,7 @@ def _render_fan_in_disagreement_body(
         f"  JOIN {p}_current_transactions tx\n"
         f"    ON tx.transfer_id = tp.child_transfer_id\n"
         f"   AND tx.template_name IS NOT NULL\n"
-        f"   AND tx.status <> 'Failed'\n"
+        f"   AND tx.status IN ('Posted', 'Pending')\n"
         f"  GROUP BY tp.child_transfer_id\n"
         f")\n"
         f"SELECT\n"
@@ -1412,13 +1416,13 @@ def _render_multi_xor_violation_body(
         f"         {date_trunc_day('tx.posting', dialect)} AS business_day\n"
         f"  FROM {p}_current_transactions tx\n"
         f"  WHERE tx.template_name IN (SELECT name FROM parent_names)\n"
-        f"    AND tx.status <> 'Failed'\n"
+        f"    AND tx.status IN ('Posted', 'Pending')\n"
         f"  UNION\n"
         f"  SELECT DISTINCT tx.transfer_id, tx.rail_name,\n"
         f"         {date_trunc_day('tx.posting', dialect)}\n"
         f"  FROM {p}_current_transactions tx\n"
         f"  WHERE tx.rail_name IN (SELECT name FROM parent_names)\n"
-        f"    AND tx.status <> 'Failed'\n"
+        f"    AND tx.status IN ('Posted', 'Pending')\n"
         f"),\n"
         f"fired_children_distinct AS (\n"
         f"  -- For each parent firing, which declared XOR siblings\n"
@@ -1443,7 +1447,7 @@ def _render_multi_xor_violation_body(
         f"  FROM parent_firings pf\n"
         f"  LEFT JOIN {p}_current_transactions ch\n"
         f"    ON ch.transfer_parent_id = pf.parent_transfer_id\n"
-        f"   AND ch.status <> 'Failed'\n"
+        f"   AND ch.status IN ('Posted', 'Pending')\n"
         f")\n"
         f"SELECT\n"
         f"  fcd.parent_transfer_id,\n"
@@ -3457,7 +3461,7 @@ SELECT
 FROM {p}_current_transactions tx
 WHERE tx.transfer_parent_id IS NOT NULL
   AND tx.template_name IS NOT NULL
-  AND tx.status <> 'Failed'{chain_parent_disagreement_fan_in_filter}
+  AND tx.status IN ('Posted', 'Pending'){chain_parent_disagreement_fan_in_filter}
 GROUP BY tx.transfer_id, tx.template_name
 HAVING COUNT(DISTINCT tx.transfer_parent_id) > 1;
 -- Dashboard hot-path indexes — per-transfer drill (L1 Exceptions
@@ -3538,7 +3542,7 @@ SELECT DISTINCT
     tx.transfer_parent_id AS parent_transfer_id
 FROM {p}_current_transactions tx
 WHERE tx.transfer_parent_id IS NOT NULL
-  AND tx.status <> 'Failed';
+  AND tx.status IN ('Posted', 'Pending');
 -- Dashboard hot-path indexes — child-side drill (AB.4.7
 -- fan_in_disagreement looks up "all parents of this child") + parent-
 -- side drill (Investigation: "all children of this parent firing").
@@ -3708,7 +3712,10 @@ today_flows AS (
            SUM(tx.amount_money) AS net_flow,
            COUNT(*) AS leg_count
     FROM {p}_current_transactions tx
-    WHERE tx.status <> 'Failed'
+    -- DS.3.3 money law: balances move on Posted ONLY (a Pending leg
+    -- is a rail choice, not money) — converged with the dataset
+    -- running balance + the audit walk.
+    WHERE tx.status = 'Posted'
     GROUP BY tx.account_id, {date_trunc_tx_posting}
 )
 SELECT ad.account_id, ad.account_name, ad.account_role,

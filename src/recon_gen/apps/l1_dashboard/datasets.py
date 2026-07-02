@@ -1428,8 +1428,13 @@ def _daily_statement_transactions_sql(prefix: str, dialect: Dialect) -> str:
         f" ORDER BY cdb.business_day_start DESC"
         f" {fetch_first_one_row(dialect)})"
     )
+    # DS.3.3 money law: the running balance accumulates Posted legs
+    # ONLY (the statement still DISPLAYS every leg; a Pending row
+    # shows but does not move the balance). Converged with the
+    # daily_statement_summary net_flow + the audit walk.
     running_balance_cents = (
-        f"(COALESCE({opening_cents_subq}, 0) + SUM(tx.amount_money) OVER ("
+        f"(COALESCE({opening_cents_subq}, 0) + "
+        f"SUM(CASE WHEN tx.status = 'Posted' THEN tx.amount_money ELSE 0 END) OVER ("
         f"PARTITION BY tx.account_id, {business_day} "
         f"ORDER BY tx.posting, tx.id "
         f"ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW))"

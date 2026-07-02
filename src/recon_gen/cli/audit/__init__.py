@@ -1371,8 +1371,12 @@ def _query_daily_statement_walks(
                 f" ORDER BY cdb.business_day_start DESC"
                 f" {fetch_first_one_row(cfg.db.dialect)})"
             )
+            # DS.3.3 money law: Posted legs only move the balance — the
+            # same CASE-filtered window the dataset SQL runs, keeping
+            # the 4-way agreement gate value-identical.
             running_balance_cents = (
-                f"(COALESCE({opening_cents_subq}, 0) + SUM(amount_money) OVER ("
+                f"(COALESCE({opening_cents_subq}, 0) + "
+                f"SUM(CASE WHEN status = 'Posted' THEN amount_money ELSE 0 END) OVER ("
                 f"PARTITION BY account_id, {tx_business_day} "
                 f"ORDER BY posting, id "
                 f"ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW))"
