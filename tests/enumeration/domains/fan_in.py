@@ -22,14 +22,11 @@ landed at all). The engine structurally cannot represent it:
 ``transfer_parents`` only materializes rows for legs with a non-NULL
 ``transfer_parent_id``, and ``child_parent_counts`` builds FROM it,
 so a zero-parent child never reaches the CASE. One-of-two-missing
-alarms; all-missing is INVISIBLE. Fix requires production SQL (seed
-child_parent_counts from the child template's firings, not from the
-parent-claim table) — out of this task's write scope, so the packed
-domain EXCLUDES parent_count 0 and the gate pins the divergence
-executable-and-loud in ``test_fan_in_zero_parent_engine_blind_spot``
-(both sides asserted: engine empty, law says -2). Do NOT silence
-that test by narrowing the residual; the law side is the signed
-DS.0 kit.
+alarms; all-missing WAS invisible — DS.3.3c reseeded the count
+spine from the child template's own firings, so parent_count 0
+materializes and the domain enumerates it like any other count. The
+former blind-spot witness now asserts the row IS emitted
+(``test_fan_in_zero_parent_engine_blind_spot``).
 """
 from __future__ import annotations
 
@@ -79,12 +76,14 @@ def covered_parent_counts(
 ) -> dict[tuple[str, str], frozenset[int]]:
     """Parent counts exercised per declared fan_in child — the
     coverage-lint surface. For a set expectation e that is
-    {e-1, e, e+1}; for the unset (orphan) rule the boundary is at 2:
-    {1, 2, 3}. Count 0 is the documented blind-spot exclusion."""
+    {e-1, e, e+1} PLUS 0; for the unset (orphan) rule the boundary
+    is at 2: {0, 1, 2, 3}. Count 0 re-admitted with the DS.3.3c fix —
+    the count spine now seeds from the child template's own firings,
+    so an all-claims-missing child materializes with parent_count 0."""
     out: dict[tuple[str, str], frozenset[int]] = {}
     for key, expected in profile.fan_in_expected.items():
         boundary = 2 if expected is None else expected
-        out[key] = frozenset({boundary - 1, boundary, boundary + 1})
+        out[key] = frozenset({0, boundary - 1, boundary, boundary + 1})
     return out
 
 

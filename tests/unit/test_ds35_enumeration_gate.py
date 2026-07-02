@@ -231,18 +231,16 @@ def test_threshold_planted_boundary_smoke() -> None:
 
 
 def test_fan_in_zero_parent_engine_blind_spot() -> None:
-    """FINDING (DS.3.5, 2026-07-02) — pinned executable, both sides.
+    """FOUND by the DS.3.5 gate, FIXED at DS.3.3c — kept as the
+    permanent witness.
 
-    A fan_in child transfer with firing legs but ZERO parent claims is
-    INVISIBLE to the engine (transfer_parents only materializes
-    non-NULL parent claims and child_parent_counts builds FROM it),
-    while the signed law says residual = -expected ('missing' — the
-    worst corruption shape: no contribution landed at all). One-of-two
-    missing alarms; all-missing does not. The production fix (seed the
-    count spine from the child template's firings) is outside this
-    task's write scope; when it lands, this test flips to asserting
-    the row IS emitted and the packed fan_in domain re-admits
-    parent_count 0 (drop the exclusion in domains/fan_in.py).
+    A fan_in child transfer with firing legs but ZERO parent claims —
+    the worst corruption shape, no contribution landed at all — was
+    INVISIBLE pre-fix (the count spine built FROM the parent-claim
+    table, so one-of-two-missing alarmed while all-missing produced
+    no row). The spine now seeds from the child template's own
+    firings; the engine emits ('missing', parent_count 0) and agrees
+    with the signed law's residual on this cell.
     """
     cell, law_residual = fan_in.zero_parent_finding_rows()
     assert law_residual == -2, "the law side moved — re-derive the finding"
@@ -253,9 +251,9 @@ def test_fan_in_zero_parent_engine_blind_spot() -> None:
         db.insert(cell.tx_rows, cell.bal_rows)
         db.refresh()
         engine = fan_in.read_engine(db)
-        assert engine == {}, (
-            f"engine now emits the zero-parent fan_in row {engine!r} — "
-            f"the blind spot is FIXED: flip this test per its docstring"
+        assert engine == cell.expected["fan_in"], (
+            f"zero-parent fan_in cell diverged: engine {engine!r} vs "
+            f"law {cell.expected['fan_in']!r}"
         )
     finally:
         db.close()

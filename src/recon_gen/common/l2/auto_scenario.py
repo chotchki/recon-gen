@@ -641,6 +641,17 @@ def default_scenario_for(
     # 'Imbalanced' when the leg's amount alone doesn't sum to the
     # template's expected_net — accurate L1 representation of a bare
     # single-leg cycle without its sibling/closing legs).
+    # DS.3.3c — a fan_in chain child firing STANDALONE (no parent
+    # claims) is the all-contributions-missing violation itself, so a
+    # coverage plant here would seed a permanent 'missing' row. Their
+    # firing coverage comes from the chain emitters, which fire them
+    # WITH parents.
+    fan_in_child_names = {
+        str(child.name)
+        for chain in instance.chains
+        for child in chain.children
+        if child.fan_in
+    }
     tt_plants_list: list[TransferTemplatePlant] = []
     for tt in sorted(
         instance.transfer_templates, key=lambda t: str(t.name)
@@ -649,6 +660,14 @@ def default_scenario_for(
             omitted.append((
                 f"TransferTemplatePlant[{tt.name}]",
                 "template has no leg_rails declared",
+            ))
+            continue
+        if str(tt.name) in fan_in_child_names:
+            omitted.append((
+                f"TransferTemplatePlant[{tt.name}]",
+                "fan_in chain child — a standalone firing IS the "
+                "all-contributions-missing violation (DS.3.3c); "
+                "coverage comes from the chain emitters",
             ))
             continue
         first_rail = _resolve_rail_by_name(tt.leg_rails[0], instance)
