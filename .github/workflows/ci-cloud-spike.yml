@@ -69,10 +69,16 @@ jobs:
         with:
           version: 2.4.14
 
-      - name: Install GNU time
-        # /usr/bin/time (GNU) isn't on ubuntu-latest by default — only the
-        # bash `time` builtin. Needed for the peak-RSS capture below.
-        run: sudo apt-get update && sudo apt-get install -y time
+      - name: Install system tools the box pre-bakes (GNU time + graphviz)
+        # ubuntu-latest lacks two tools the WSL2 box has pre-installed:
+        #   - GNU /usr/bin/time (only the bash `time` builtin ships) — needed
+        #     for the peak-RSS capture below.
+        #   - graphviz `dot` — a TEST-only dep: test_cf3_diagram_regression
+        #     cross-checks the wasm-graphviz product renderer against system
+        #     `dot` (its comment says "re-install graphviz rather than skip").
+        #     The product itself uses @hpcc-js/wasm-graphviz, so this is not a
+        #     runtime dependency, only a CI-parity one.
+        run: sudo apt-get update && sudo apt-get install -y time graphviz
 
       - name: Generate random DB passwords
         # hex 14 = 28 alphanumeric chars — clears Oracle's letter+digit+8char
