@@ -24,12 +24,15 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Final
 
+from pathlib import Path
+
 from tests.enumeration.domains import (
     _assembly,
     cadence_gap,
     fan_in,
     money_trail,
 )
+from tests.enumeration.domains._base import SPEC_EXAMPLE
 from tests.enumeration.harness import PackedDomain
 
 # Lazy builders — construction deferred to first use so collection
@@ -63,3 +66,17 @@ DETECTOR_DOMAINS: Final[dict[str, tuple[str, ...]]] = {
 # The l1_exceptions union check runs on the packed DBs whose cells
 # actually reach its source branches.
 L1_EXCEPTIONS_DOMAINS: Final[tuple[str, ...]] = ("locf", "transfer_keyed")
+
+
+# DS.6 per-dialect lane — the L2 instance each domain emits from, so the
+# replay can re-emit the SAME schema at PG / Oracle (the DuckDB builders
+# above bake Dialect.DUCKDB into their artifacts; the replay needs the
+# path to re-emit at the cfg dialect). Variant domains carry their own
+# generated yaml.
+DOMAIN_L2_PATHS: Final[dict[str, Callable[[], Path]]] = {
+    "locf": lambda: SPEC_EXAMPLE,
+    "transfer_keyed": lambda: SPEC_EXAMPLE,
+    "fan_in_variant": fan_in.variant_l2_path,
+    "money_trail": lambda: SPEC_EXAMPLE,
+    "cadence_gap": cadence_gap.variant_l2_path,
+}

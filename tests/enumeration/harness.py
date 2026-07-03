@@ -325,15 +325,21 @@ class InstanceArtifacts:
     config_sql: str
 
 
-_ARTIFACT_CACHE: dict[tuple[str, str], InstanceArtifacts] = {}
+_ARTIFACT_CACHE: dict[tuple[str, str, str], InstanceArtifacts] = {}
 
 
-def artifacts_for(l2_path: Path, *, prefix: str) -> InstanceArtifacts:
+def artifacts_for(
+    l2_path: Path, *, prefix: str, dialect: Dialect = Dialect.DUCKDB,
+) -> InstanceArtifacts:
     """Emit (and cache) the real schema + refresh + config-populate
-    scripts for ``l2_path``. The config populate carries the REAL
-    serialized instance so ``v_config_*``-reading detectors resolve
-    true declarations."""
-    key = (str(l2_path.resolve()), prefix)
+    scripts for ``l2_path`` at ``dialect``. The config populate carries
+    the REAL serialized instance so ``v_config_*``-reading detectors
+    resolve true declarations. ``dialect`` defaults to DuckDB (the
+    unit-tier enumeration path); the DS.6 per-dialect lane re-emits the
+    SAME domains at PG / Oracle so the boundary states replay on every
+    engine (the SQL emitters branch on Dialect — the enumeration proves
+    engine == residual on each)."""
+    key = (str(l2_path.resolve()), prefix, dialect.value)
     cached = _ARTIFACT_CACHE.get(key)
     if cached is not None:
         return cached
@@ -347,13 +353,13 @@ def artifacts_for(l2_path: Path, *, prefix: str) -> InstanceArtifacts:
     )
     built = InstanceArtifacts(
         prefix=prefix,
-        schema_sql=emit_schema(instance, prefix=prefix, dialect=Dialect.DUCKDB),
+        schema_sql=emit_schema(instance, prefix=prefix, dialect=dialect),
         refresh_sql=refresh_matviews_sql(
-            instance, prefix=prefix, dialect=Dialect.DUCKDB,
+            instance, prefix=prefix, dialect=dialect,
         ),
         config_sql=emit_config_populate_sql(
             prefix=prefix, cfg_json="{}", l2_json=l2_json,
-            as_of=ENUM_AS_OF, dialect=Dialect.DUCKDB,
+            as_of=ENUM_AS_OF, dialect=dialect,
         ),
     )
     _ARTIFACT_CACHE[key] = built
