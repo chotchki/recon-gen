@@ -453,7 +453,10 @@ EXC_DEAD_METADATA_CONTRACT = DatasetContract(columns=[
 EXC_DEAD_LIMIT_SCHEDULES_CONTRACT = DatasetContract(columns=[
     ColumnSpec("parent_role", "STRING"),
     ColumnSpec("rail_name", "STRING"),
-    ColumnSpec("cap", "DECIMAL"),
+    # DQ.4.2b operator call — cap is a money value (the L2-declared limit
+    # cap, authored in DOLLARS so no /100), so render it as $ (currency=True,
+    # default DOLLARS storage). Resolves the 4.2a currency flag.
+    ColumnSpec("cap", "DECIMAL", currency=True),
 ])
 
 
