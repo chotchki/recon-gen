@@ -266,6 +266,7 @@ def data_clean(
 def _build_fresh_semantic_lock(
     instance: "L2Instance", anchor: "date", *, prefix: str,
     dialect: "_DialectT | None" = None,
+    existing_conn: "object | None" = None,
 ) -> str:
     """AZ.1 / CA.6 — build a fresh semantic lock JSON for the given
     (instance, anchor) against an in-process DB (defaults to DuckDB
@@ -287,7 +288,7 @@ def _build_fresh_semantic_lock(
     from recon_gen.common.db import (
         execute_script,
     )
-    from recon_gen.common.l2.config_table import replace_config
+    from recon_gen.common.l2.config_table import emit_config_populate_sql
     from recon_gen.common.l2.schema import (
         emit_schema,
         refresh_matviews_sql,
@@ -307,15 +308,23 @@ def _build_fresh_semantic_lock(
     # support (execute / cursor / close + replace_config's bind shape).
     # Widen to Any so the body type-checks under both branches.
     from typing import Any as _Any  # noqa: PLC0415
+    # DS.7 (AZ.1.b) — a caller-supplied LIVE connection drives the
+    # deployed-DB path (PG / Oracle in the db tier: the same violation
+    # set proven dialect-invariant against the DuckDB lock). Without one
+    # we open the in-process DuckDB (the CLI's own path). We only close
+    # what we opened.
+    _owns_conn = existing_conn is None
     conn: _Any
-    if dialect is Dialect.DUCKDB:
+    if existing_conn is not None:
+        conn = existing_conn
+    elif dialect is Dialect.DUCKDB:
         import duckdb
         conn = duckdb.connect(":memory:")
     else:
         raise ValueError(
-            f"_build_fresh_semantic_lock: in-process build supports "
-            f"DuckDB only; got {dialect!r}. PG / Oracle locks need the "
-            f"deployed-DB path (AZ.1.b extension)."
+            f"_build_fresh_semantic_lock: no live connection given and "
+            f"the in-process build supports DuckDB only; got {dialect!r}. "
+            f"Pass ``existing_conn=`` for the deployed-DB (PG/Oracle) path.",
         )
     try:
         cur = conn.cursor()
@@ -340,11 +349,19 @@ def _build_fresh_semantic_lock(
         l2_dict = _yaml.safe_load(_serialize_l2(instance))
         # Compact-JSON (no indent) — matches the production
         # emit_config_populate_sql shape; the kv walker parses both.
-        replace_config(
-            conn, prefix=prefix,
-            cfg_json="{}",
-            l2_json=_json.dumps(l2_dict, separators=(",", ":")),
-            as_of=_datetime(anchor.year, anchor.month, anchor.day, 12, 0, 0),
+        # DS.7: the SQL-TEXT populate route (not replace_config's ?-bind
+        # path, which is DuckDB/SQLite-only per its own docstring) so the
+        # config table populates on PG / Oracle too.
+        _cfg_cur = conn.cursor()
+        execute_script(
+            _cfg_cur,
+            emit_config_populate_sql(
+                prefix=prefix, cfg_json="{}",
+                l2_json=_json.dumps(l2_dict, separators=(",", ":")),
+                as_of=_datetime(anchor.year, anchor.month, anchor.day, 12, 0, 0),
+                dialect=dialect,
+            ),
+            dialect=dialect,
         )
         # AO.L.gate — emit the 90-day baseline BEFORE plants so the lock
         # detects baseline-derived violations too. Pre-gate, the lock
@@ -360,8 +377,10 @@ def _build_fresh_semantic_lock(
             instance, prefix=prefix,
             window_days=90, anchor=anchor, dialect=dialect,
         )
-        # DuckDB accepts multi-statement scripts via conn.execute().
-        conn.execute(baseline_sql)
+        # execute_script handles multi-statement scripts on every dialect
+        # (DuckDB accepts them via one execute; PG/Oracle need the split).
+        _bcur = conn.cursor()
+        execute_script(_bcur, baseline_sql, dialect=dialect)
         # Compose the production seed via the spine pipeline.
         from recon_gen.cli._helpers import build_default_scenario  # pyright: ignore[reportUnknownVariableType]  # WHY: helper has pending untyped-def waiver
         scenario = build_default_scenario(instance, anchor=anchor)  # pyright: ignore[reportUnknownVariableType]: same helper-untyped waiver propagates to the call
@@ -408,7 +427,8 @@ def _build_fresh_semantic_lock(
             canonical_anchor=anchor,
         )
     finally:
-        conn.close()
+        if _owns_conn:
+            conn.close()
 
 
 def _summarize_lock_drift(on_disk: str, fresh: str) -> list[str]:
