@@ -37,6 +37,7 @@ from recon_gen.apps.investigation.constants import (
     P_INV_MONEY_TRAIL_ROOT,
 )
 from recon_gen.common.config import Config
+from recon_gen.common.contracts import added, contract_from, dollars, keep
 from recon_gen.common.dataset_contract import (
     ColumnShape,
     ColumnSpec,
@@ -113,16 +114,19 @@ def inv_matview_specs(
 # Visuals aggregate to one row per recipient via COUNT_DISTINCT(sender_id)
 # + SUM(amount), so the dataset stays at the legs grain to support both
 # the fanout count and the per-row drill into AR Transactions in K.4.7.
-RECIPIENT_FANOUT_CONTRACT = DatasetContract(columns=[
-    ColumnSpec("recipient_account_id", "STRING", shape=ColumnShape.ACCOUNT_ID),
-    ColumnSpec("recipient_account_name", "STRING"),
-    ColumnSpec("recipient_account_type", "STRING"),
-    ColumnSpec("sender_account_id", "STRING", shape=ColumnShape.ACCOUNT_ID),
-    ColumnSpec("sender_account_name", "STRING"),
-    ColumnSpec("sender_account_type", "STRING"),
-    ColumnSpec("transfer_id", "STRING", shape=ColumnShape.TRANSFER_ID),
-    ColumnSpec("posted_at", "DATETIME"),
-    ColumnSpec("amount", "DECIMAL"),
+# Recipient fanout is a self-join aggregate over the base transactions —
+# recipient/sender/amount columns are computed (sender ≠ recipient join),
+# so only transfer_id resolves against the source (contract_from gates it).
+RECIPIENT_FANOUT_CONTRACT = contract_from("transactions", [
+    added("recipient_account_id", "STRING", shape=ColumnShape.ACCOUNT_ID),
+    added("recipient_account_name", "STRING"),
+    added("recipient_account_type", "STRING"),
+    added("sender_account_id", "STRING", shape=ColumnShape.ACCOUNT_ID),
+    added("sender_account_name", "STRING"),
+    added("sender_account_type", "STRING"),
+    keep("transfer_id", shape=ColumnShape.TRANSFER_ID),
+    added("posted_at", "DATETIME"),
+    added("amount", "DECIMAL"),
     # Y.3.a — window column computed at the DB. Pre-Y.3 this was the
     # `recipient_distinct_sender_count` analysis-level CalcField; pushed
     # down here so the threshold WHERE narrows at the DB and both QS +
@@ -133,7 +137,7 @@ RECIPIENT_FANOUT_CONTRACT = DatasetContract(columns=[
     # as a whole). Cold-read F9 flagged that the auto-titled "Distinct
     # Senders" header read as "the same number as the KPI" even though
     # the column is per-row.
-    ColumnSpec(
+    added(
         "distinct_senders", "INTEGER",
         display_name="Senders Feeding This Recipient",
     ),
@@ -148,21 +152,21 @@ RECIPIENT_FANOUT_CONTRACT = DatasetContract(columns=[
 # 2-day SUM, transfer count, and z-score against the population of all
 # pair-windows. Computed by the ``inv_pair_rolling_anomalies`` matview;
 # see ``schema.sql`` for the windowing CTE.
-VOLUME_ANOMALIES_CONTRACT = DatasetContract(columns=[
-    ColumnSpec("recipient_account_id", "STRING", shape=ColumnShape.ACCOUNT_ID),
-    ColumnSpec("recipient_account_name", "STRING"),
-    ColumnSpec("recipient_account_type", "STRING"),
-    ColumnSpec("sender_account_id", "STRING", shape=ColumnShape.ACCOUNT_ID),
-    ColumnSpec("sender_account_name", "STRING"),
-    ColumnSpec("sender_account_type", "STRING"),
-    ColumnSpec("window_start", "DATETIME"),
-    ColumnSpec("window_end", "DATETIME"),
-    ColumnSpec("window_sum", "DECIMAL"),
-    ColumnSpec("transfer_count", "INTEGER"),
-    ColumnSpec("pop_mean", "DECIMAL"),
-    ColumnSpec("pop_stddev", "DECIMAL"),
-    ColumnSpec("z_score", "DECIMAL"),
-    ColumnSpec("z_bucket", "STRING"),
+VOLUME_ANOMALIES_CONTRACT = contract_from("inv_pair_rolling_anomalies", [
+    keep("recipient_account_id"),
+    keep("recipient_account_name"),
+    keep("recipient_account_type"),
+    keep("sender_account_id"),
+    keep("sender_account_name"),
+    keep("sender_account_type"),
+    keep("window_start"),
+    keep("window_end"),
+    dollars("window_sum"),
+    keep("transfer_count"),
+    keep("pop_mean"),
+    keep("pop_stddev"),
+    keep("z_score"),
+    keep("z_bucket"),
 ])
 
 
@@ -174,27 +178,27 @@ VOLUME_ANOMALIES_CONTRACT = DatasetContract(columns=[
 # external arrivals appear as chain members in the recursive walk but
 # don't surface as visible edges. See ``schema.sql`` for the recursive
 # CTE shape and the multi-leg-only rationale.
-MONEY_TRAIL_CONTRACT = DatasetContract(columns=[
-    ColumnSpec("root_transfer_id", "STRING", shape=ColumnShape.TRANSFER_ID),
-    ColumnSpec("transfer_id", "STRING", shape=ColumnShape.TRANSFER_ID),
-    ColumnSpec("depth", "INTEGER"),
-    ColumnSpec("source_account_id", "STRING", shape=ColumnShape.ACCOUNT_ID),
-    ColumnSpec("source_account_name", "STRING"),
-    ColumnSpec("source_account_type", "STRING"),
-    ColumnSpec("target_account_id", "STRING", shape=ColumnShape.ACCOUNT_ID),
-    ColumnSpec("target_account_name", "STRING"),
-    ColumnSpec("target_account_type", "STRING"),
-    ColumnSpec("hop_amount", "DECIMAL"),
-    ColumnSpec("posted_at", "DATETIME"),
-    ColumnSpec("rail_name", "STRING"),
+MONEY_TRAIL_CONTRACT = contract_from("inv_money_trail_edges", [
+    keep("root_transfer_id"),
+    keep("transfer_id"),
+    keep("depth"),
+    keep("source_account_id"),
+    keep("source_account_name"),
+    keep("source_account_type"),
+    keep("target_account_id"),
+    keep("target_account_name"),
+    keep("target_account_type"),
+    dollars("hop_amount"),
+    keep("posted_at"),
+    keep("rail_name"),
     # Concatenated display labels, computed in the dataset SQL (see
     # ``_money_trail_base_sql``). Used by the Account Network sheet as the
     # walk-the-flow anchor — they're both human-readable AND uniquely
     # keyed (embedded account_id disambiguates name collisions). Money
     # Trail doesn't read these but they project cleanly through its
     # own dataset wrapper and stay zero-cost at query time.
-    ColumnSpec("source_display", "STRING", shape=ColumnShape.ACCOUNT_DISPLAY),
-    ColumnSpec("target_display", "STRING", shape=ColumnShape.ACCOUNT_DISPLAY),
+    added("source_display", "STRING", shape=ColumnShape.ACCOUNT_DISPLAY),
+    added("target_display", "STRING", shape=ColumnShape.ACCOUNT_DISPLAY),
 ])
 
 
@@ -224,8 +228,8 @@ ACCOUNT_NETWORK_CONTRACT = DatasetContract(columns=[
 # source. Single column ``root_transfer_id`` distinct'd over the
 # matview so the dropdown's option fetch is O(distinct chains) instead
 # of O(matview rows). Same shape as ANETWORK_ACCOUNTS_CONTRACT.
-MONEY_TRAIL_ROOTS_CONTRACT = DatasetContract(columns=[
-    ColumnSpec("root_transfer_id", "STRING", shape=ColumnShape.TRANSFER_ID),
+MONEY_TRAIL_ROOTS_CONTRACT = contract_from("inv_money_trail_edges", [
+    keep("root_transfer_id"),
 ])
 
 

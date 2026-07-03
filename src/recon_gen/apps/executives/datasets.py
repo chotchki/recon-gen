@@ -29,6 +29,7 @@ with operational noise.
 from __future__ import annotations
 
 from recon_gen.common.config import Config
+from recon_gen.common.contracts import added, contract_from, keep
 from recon_gen.common.dataset_contract import (
     ColumnShape,
     ColumnSpec,
@@ -158,12 +159,14 @@ def _exec_date_range_clause(date_column: str, cfg: Config) -> str:
 # Contracts
 # ---------------------------------------------------------------------------
 
-EXEC_TRANSACTION_SUMMARY_CONTRACT = DatasetContract(columns=[
-    ColumnSpec("posted_date", "DATETIME"),
-    ColumnSpec("rail_name", "STRING", shape=ColumnShape.RAIL_NAME),
-    ColumnSpec("transfer_count", "INTEGER"),
-    ColumnSpec("gross_amount", "DECIMAL"),
-    ColumnSpec("net_amount", "DECIMAL"),
+# Per (posted_day, rail) rollup over the base transactions; only rail_name
+# resolves against the source (the date + count/gross/net are aggregates).
+EXEC_TRANSACTION_SUMMARY_CONTRACT = contract_from("transactions", [
+    added("posted_date", "DATETIME"),
+    keep("rail_name", shape=ColumnShape.RAIL_NAME),
+    added("transfer_count", "INTEGER"),
+    added("gross_amount", "DECIMAL"),
+    added("net_amount", "DECIMAL"),
 ])
 
 

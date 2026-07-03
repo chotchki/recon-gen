@@ -33,6 +33,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 from recon_gen.common.config import Config
+from recon_gen.common.contracts import added, contract_from, dollars, keep
 from recon_gen.common.dataset_contract import (
     ColumnShape,
     ColumnSpec,
@@ -513,24 +514,24 @@ UNIFIED_L2_EXCEPTIONS_CONTRACT = DatasetContract(columns=[
 # pKey + pValues so the metadata cascade filter applies via QS
 # CustomSql substitution. The Rails sheet's transactions Table reads
 # directly from this dataset.
-POSTINGS_CONTRACT = DatasetContract(columns=[
-    ColumnSpec("id", "STRING"),
-    ColumnSpec("transfer_id", "STRING"),
-    ColumnSpec("transfer_parent_id", "STRING"),
+POSTINGS_CONTRACT = contract_from("current_transactions", [
+    keep("id"),
+    keep("transfer_id"),
+    keep("transfer_parent_id"),
     # rail_name is a drill destination for the L2 Exceptions table's
     # "View in Rails" right-click — see UNIFIED_L2_EXCEPTIONS_CONTRACT.
-    ColumnSpec("rail_name", "STRING", shape=ColumnShape.L2_DECLARED_NAME),
-    ColumnSpec("account_id", "STRING"),
-    ColumnSpec("account_name", "STRING"),
-    ColumnSpec("account_role", "STRING"),
-    ColumnSpec("account_scope", "STRING"),
-    ColumnSpec("posting", "DATETIME"),
-    ColumnSpec("amount_money", "DECIMAL"),
-    ColumnSpec("amount_direction", "STRING"),
-    ColumnSpec("status", "STRING"),
-    ColumnSpec("bundle_id", "STRING"),
-    ColumnSpec("bundle_status", "STRING"),  # 'Bundled' / 'Unbundled' calc
-    ColumnSpec("origin", "STRING"),
+    keep("rail_name", shape=ColumnShape.L2_DECLARED_NAME),
+    keep("account_id"),
+    keep("account_name"),
+    keep("account_role"),
+    keep("account_scope"),
+    keep("posting"),
+    dollars("amount_money"),
+    keep("amount_direction"),
+    keep("status"),
+    keep("bundle_id"),
+    added("bundle_status", "STRING"),  # 'Bundled' / 'Unbundled' calc
+    keep("origin"),
 ])
 
 
