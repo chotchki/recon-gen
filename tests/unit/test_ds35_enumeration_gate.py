@@ -42,6 +42,7 @@ import duckdb
 import pytest
 
 from recon_gen.common.env_keys import RECON_GEN_FUZZ_SEED
+from tests._timing_signal import timing_signal
 from tests.enumeration import harness
 from tests.enumeration.domains import (
     DETECTOR_DOMAINS,
@@ -296,9 +297,7 @@ def test_zz_domain_timings_within_tier_budget() -> None:
             + " ".join(f"{k}={v:.2f}s" for k, v in run.timings.items())
             + f" total={total:.2f}s"
         )
-        assert total < TIER_BUDGET_SECONDS, (
-            f"packed domain {name} took {total:.1f}s — over the "
-            f"{TIER_BUDGET_SECONDS}s unit-tier rule (DS.0 §6.5); "
-            f"re-measure and re-tier"
-        )
+        # EA.3 — timings-as-signal (see tests/_timing_signal.py): record the
+        # unit-tier budget without hard-failing on the box-calibrated absolute.
+        timing_signal(f"ds35_{name}", total, budget_s=TIER_BUDGET_SECONDS)
     print("\n[ds35 enumeration timings]\n" + "\n".join(report))

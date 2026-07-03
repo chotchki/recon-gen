@@ -24,14 +24,15 @@ name: CI cloud spike (EA.2)
 
 # workflow_dispatch is only triggerable once a workflow is on the DEFAULT
 # branch (GitHub rule) — this lives on feature/ea, so it isn't dispatchable
-# yet. The push trigger (path-filtered to THIS file) is the feature-branch
-# lever: pushing a change to the spike workflow runs the spike, while
-# unrelated feature/ea pushes don't. Retire the whole file at EA.4.
+# yet. The push trigger is the feature-branch lever: every feature/ea push
+# re-runs the spike during active EA.2 iteration (I'm the only pusher). The
+# path filter was too narrow — a test-code fix (not a workflow edit) has to
+# re-validate the chain too. Remove this push trigger at EA.2 close so the
+# throwaway workflow goes workflow_dispatch-only; retire the file at EA.4.
 on:
   workflow_dispatch: {}
   push:
     branches: [feature/ea]
-    paths: [".github/workflows/ci-cloud-spike.yml"]
 
 concurrency:
   group: ci-cloud-spike-${{ github.ref }}

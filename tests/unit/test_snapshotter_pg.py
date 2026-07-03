@@ -68,6 +68,7 @@ from recon_gen.common.l2.v_overlay import (
 )
 from recon_gen.common.sql import Dialect
 from tests._marks import Tier, tier
+from tests._timing_signal import timing_signal
 from recon_gen.common.snapshotter import PostgresSchemaSnapshotter
 
 
@@ -512,12 +513,12 @@ class TestRestoreSLA:
         # gw12 (8.7% overshoot under xdist contention) — mirrors the
         # DuckDB sibling SLA's 5× headroom but doubled because PG
         # runs on WSL2 not local APFS.
-        assert elapsed < 1.5, (
-            f"restore took {elapsed:.3f}s, > 1500ms SLA. "
-            "Likely a matview-refresh regression — verify "
-            "refresh_v_overlay_matviews_sql is emitting REFRESH "
-            "MATERIALIZED VIEW, not DROP+CREATE TABLE."
-        )
+        # EA.3 — timings-as-signal (tests/_timing_signal.py): record the
+        # restore SLA (a matview-refresh regression would surface as an
+        # over-budget signal — verify refresh_v_overlay_matviews_sql emits
+        # REFRESH MATERIALIZED VIEW, not DROP+CREATE TABLE) without hard-
+        # failing on the box-calibrated absolute.
+        timing_signal("snapshotter_pg_restore", elapsed, budget_s=1.5)
 
 
 class TestDropIdempotent:

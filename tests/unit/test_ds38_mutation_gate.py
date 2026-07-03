@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import time
 
+from tests._timing_signal import timing_signal
 from tests.enumeration.domains import DOMAIN_BUILDERS
 from tests.enumeration.harness import (
     EnumerationDB,
@@ -116,12 +117,11 @@ def _run_battery(domain_name: str) -> None:
         + "\n".join(f"  {o.mutation_id}: {o.note}" for o in survivors)
         + f"\n\nfull battery:\n{table}"
     )
+    # EA.3 — timings-as-signal: record the tier-placement battery time (the
+    # DS.0 §6.5 unit-tier "keep it fast" budget) without hard-failing on the
+    # absolute, which is calibrated to the box + red-herrings on slower CI.
     total = run.build_seconds + battery_seconds
-    assert total < TIER_BUDGET_SECONDS, (
-        f"{domain_name} battery took {total:.1f}s — over the "
-        f"{TIER_BUDGET_SECONDS}s unit-tier rule (DS.0 §6.5); re-measure "
-        f"and re-tier (demotion is a config change)"
-    )
+    timing_signal(f"ds38_{domain_name}", total, budget_s=TIER_BUDGET_SECONDS)
     # Final integrity sweep: EVERY detector on the packed DB (not just
     # the mutated ones) still reads its pre-battery baseline, so no
     # mutant leaked state into the shared DB.

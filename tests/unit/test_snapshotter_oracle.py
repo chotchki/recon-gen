@@ -48,6 +48,7 @@ from recon_gen.common.l2.v_overlay import (
 from recon_gen.common.sql.dialect import Dialect
 from tests._marks import Dialect as MarkDialect, Need, Tier, dialects, needs, tier
 from tests._test_helpers import make_test_config
+from tests._timing_signal import timing_signal
 from recon_gen.common.snapshotter import (
     OracleGoldenMirrorSnapshotter,
     _V_OVERLAY_BASE_TABLES,
@@ -531,10 +532,10 @@ def test_restore_latency_under_sla(
     # tiny seed (4 base rows + 22 matviews) takes >5s we have a real
     # regression in either DBMS_MVIEW.REFRESH or direct-path INSERT
     # paths.
-    assert elapsed < 5.0, (
-        f"restore took {elapsed:.2f}s > 5s SLA; "
-        "investigate matview refresh or direct-path INSERT fallback."
-    )
+    # EA.3 — timings-as-signal (tests/_timing_signal.py): record the restore
+    # SLA (a real regression in matview refresh / direct-path INSERT shows as
+    # an over-budget signal) without hard-failing on the box-calibrated 5s.
+    timing_signal("snapshotter_oracle_restore", elapsed, budget_s=5.0)
 
 
 def test_restore_without_take_raises(
