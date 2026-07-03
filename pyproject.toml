@@ -158,6 +158,14 @@ dev = [
     # any machine — POLICY 1 by construction, no .hypothesis dir
     # divergence between local and CI.
     "hypothesis>=6.100",
+    # EB (Z3 spec-theorem lane) — the solver that symbolically executes
+    # the REAL residual laws and proves their forall-Z theorems on-chain.
+    # EXACT pin (not a floor like hypothesis): the z3 version is part of
+    # the semantic-fingerprint proof cache key, so a version bump must be
+    # a deliberate re-pin, not a silent float. The solver is a dependency
+    # of unknown reliability (nondeterministic near timeout) — handled
+    # like the browser tier's bounded-timeout, never a policy exception.
+    "z3-solver==4.16.0",
     # The runner uses `pytest -n auto` on every layer. The app2 layer
     # additionally passes `--dist=loadgroup` (see
     # src/recon_gen/_dev/runner.py::_layer_command app2 branch) so the
