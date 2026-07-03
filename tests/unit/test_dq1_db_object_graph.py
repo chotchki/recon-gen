@@ -121,6 +121,53 @@ def test_dq1_l1_and_inv_drop_orders_are_the_graph() -> None:
     assert _INV_MATVIEW_DROP_NAMES == SCHEMA_GRAPH.drop_ids(MatviewGroup.INVESTIGATION)
 
 
+def _emitted_create_order(dialect: Dialect) -> list[str]:
+    """The graph-object ids in the order ``emit_schema`` CREATEs them
+    (TABLE / VIEW / MATERIALIZED VIEW — indexes excluded)."""
+    from recon_gen.common.l2.schema import emit_schema
+
+    sql = emit_schema(_empty_instance(), prefix=_PREFIX, dialect=dialect)
+    known = {str(o.obj_id) for o in SCHEMA_GRAPH.objects}
+    pattern = (
+        rf"CREATE\s+(?:OR\s+REPLACE\s+)?(?:MATERIALIZED\s+VIEW|VIEW|TABLE)\s+"
+        rf"(?:IF\s+NOT\s+EXISTS\s+)?{_PREFIX}_(\w+)"
+    )
+    order: list[str] = []
+    for m in re.finditer(pattern, sql):
+        name = m.group(1)
+        if name in known and name not in order:
+            order.append(name)
+    return order
+
+
+def test_dq2_emit_schema_create_order_respects_the_graph() -> None:
+    """emit_schema CREATEs every object AFTER the objects it reads FROM —
+    the CREATE order is a valid topological order of SCHEMA_GRAPH. This is
+    the last order the graph didn't already govern (drop / refresh /
+    overlay were unified in DQ.1); a dependency inversion (a matview
+    created before its source) now fails HERE, not as 'relation does not
+    exist' on apply. Independent nodes may still appear in any order —
+    topological VALIDITY, not an exact-order match (emit puts Current*
+    before the config arm; both are valid)."""
+    graph_ids = {str(o.obj_id) for o in SCHEMA_GRAPH.objects}
+    created = _emitted_create_order(Dialect.POSTGRES)
+    assert set(created) == graph_ids, (
+        "emit_schema's CREATE set diverged from the graph object set: "
+        f"missing={sorted(graph_ids - set(created))} "
+        f"extra={sorted(set(created) - graph_ids)}"
+    )
+    position = {oid: i for i, oid in enumerate(created)}
+    by_id = {str(o.obj_id): o for o in SCHEMA_GRAPH.objects}
+    for oid in created:
+        for dep in by_id[oid].depends_on:
+            dep_id = str(dep.obj_id)
+            assert position[dep_id] < position[oid], (
+                f"emit_schema CREATEs {oid!r} before its dependency "
+                f"{dep_id!r} — the CREATE order violates SCHEMA_GRAPH "
+                f"(would fail with 'relation does not exist' on apply)."
+            )
+
+
 # -- the graph is topologically valid + the hard edges hold ----------------
 
 
