@@ -76,18 +76,25 @@ _V_OVERLAY_BASE_TABLES: tuple[str, ...] = (
 #: matview reads fresh upstream data. Mirrors the matview names list
 #: in ``common.l2.schema.refresh_matviews_sql`` (post-BV.6, 2026-06-10
 #: matview set). Add / rename / reorder here when the schema changes;
-#: regression surfaces as a snapshot round-trip drift in the dogfood
-#: walk rather than a silent miss. Used by the Oracle impl, which
-#: drives one ``DBMS_MVIEW.REFRESH`` PL/SQL block per matview.
+#: ``test_dq0_overlay_suffixes_match_refresh_order`` pins this against
+#: ``refresh_matviews_sql``'s canonical order so a re-divergence fails
+#: loud (DQ.0 §1 — the dogfood-walk guarantee this comment used to claim
+#: is Oracle-only and never runs in the DuckDB chain, which is exactly how
+#: the DS.3.2 effective_balances mis-order stayed silent). Used by the
+#: Oracle impl, which drives one ``DBMS_MVIEW.REFRESH`` block per matview.
 _V_OVERLAY_MATVIEW_SUFFIXES: tuple[str, ...] = (
     # Leaves: read from base tables only.
     "current_transactions",
     "current_daily_balances",
-    # Helpers: read from current_*.
+    # CL.5 carry-forward effective balance — the spine the computed_*
+    # matviews read FROM (DS.3.2 re-keyed them onto it), so it MUST
+    # refresh BEFORE them. A complete-refresh (DBMS_MVIEW.REFRESH 'C')
+    # doesn't cascade, so computed_* ordered ahead of this would recompute
+    # against stale carry-forward balances — the DQ.0 §1 overlay bug.
+    "effective_balances",
+    # Computed balances: read FROM effective_balances (+ current_*).
     "computed_subledger_balance",
     "computed_ledger_balance",
-    # CL.5 carry-forward effective balance.
-    "effective_balances",
     # DK.1 data_anchor singleton — leaf (reads only from current_*).
     # Regenerated from base tables on snapshot restore so the anchor
     # always reflects the post-restore row set; this is the property
