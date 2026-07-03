@@ -58,3 +58,30 @@ GlossaryAnchor = NewType("GlossaryAnchor", str)
 # anchor MUST resolve to a ``SURFACES_AS`` entry, pinned at
 # sessionstart by ``tests/unit/test_side_panel.py``.
 SurfaceAnchor = NewType("SurfaceAnchor", str)
+# DQ.1.1 — the two names a database object carries. ``DbObjectId`` is the
+# LOGICAL, prefix-free identity of a table / view / matview node
+# (``"drift"``, ``"effective_balances"``, ``"transactions"``) — the key
+# the DbObject dependency graph is built on, stable across deployments
+# regardless of the runtime table prefix. ``MatviewName`` is the PHYSICAL,
+# dialect-facing name that appears in emitted SQL (``"qsgen_duckdb_drift"``)
+# — ``<cfg.db.table_prefix>_<DbObjectId>``. Two NewTypes, not one, because
+# the graph reasons in logical ids while the emitter reasons in physical
+# names, and passing one where the other is expected is exactly the bug
+# ``prefixed_db_object`` below exists to make un-writable. (The name
+# ``MatviewName`` is the historical umbrella — it covers base tables and
+# views too, not only materialized views.)
+DbObjectId = NewType("DbObjectId", str)
+MatviewName = NewType("MatviewName", str)
+
+
+def prefixed_db_object(prefix: str, obj_id: DbObjectId) -> MatviewName:
+    """Physical DB-object name = ``<prefix>_<obj_id>``.
+
+    The DB-object-namespace mirror of ``AwsConfig.prefixed`` (which joins
+    the deployment namespace with ``-`` for AWS resource IDs); here the
+    ``cfg.db.table_prefix`` joins with ``_`` for schema-object names. One
+    typed constructor so ``f"{p}_drift"`` stops being a bare f-string
+    scattered across the emitter — a prefix/leaf swap now fails the type
+    checker, and the physical-name shape lives in exactly one place.
+    """
+    return MatviewName(f"{prefix}_{obj_id}")

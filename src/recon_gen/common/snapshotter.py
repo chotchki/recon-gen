@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from recon_gen.common.config import Config
 from recon_gen.common.db import AsyncConnectionPool, duckdb_path
+from recon_gen.common.db_objects import SCHEMA_GRAPH
 from recon_gen.common.sql import Dialect
 
 if TYPE_CHECKING:
@@ -71,60 +72,15 @@ _V_OVERLAY_BASE_TABLES: tuple[str, ...] = (
 )
 
 
-#: V-overlay matview suffixes (without the ``{prefix}_v_`` envelope) —
-#: refreshed in dependency order after restore so each downstream
-#: matview reads fresh upstream data. Mirrors the matview names list
-#: in ``common.l2.schema.refresh_matviews_sql`` (post-BV.6, 2026-06-10
-#: matview set). Add / rename / reorder here when the schema changes;
-#: ``test_dq0_overlay_suffixes_match_refresh_order`` pins this against
-#: ``refresh_matviews_sql``'s canonical order so a re-divergence fails
-#: loud (DQ.0 §1 — the dogfood-walk guarantee this comment used to claim
-#: is Oracle-only and never runs in the DuckDB chain, which is exactly how
-#: the DS.3.2 effective_balances mis-order stayed silent). Used by the
-#: Oracle impl, which drives one ``DBMS_MVIEW.REFRESH`` block per matview.
-_V_OVERLAY_MATVIEW_SUFFIXES: tuple[str, ...] = (
-    # Leaves: read from base tables only.
-    "current_transactions",
-    "current_daily_balances",
-    # CL.5 carry-forward effective balance — the spine the computed_*
-    # matviews read FROM (DS.3.2 re-keyed them onto it), so it MUST
-    # refresh BEFORE them. A complete-refresh (DBMS_MVIEW.REFRESH 'C')
-    # doesn't cascade, so computed_* ordered ahead of this would recompute
-    # against stale carry-forward balances — the DQ.0 §1 overlay bug.
-    "effective_balances",
-    # Computed balances: read FROM effective_balances (+ current_*).
-    "computed_subledger_balance",
-    "computed_ledger_balance",
-    # DK.1 data_anchor singleton — leaf (reads only from current_*).
-    # Regenerated from base tables on snapshot restore so the anchor
-    # always reflects the post-restore row set; this is the property
-    # that justified matview over config_kv persistence (DK.0 audit).
-    "data_anchor",
-    # L1 invariants.
-    "drift",
-    "ledger_drift",
-    # DL.3.5 — drift_summary UNION ALL'd derivation of drift + ledger_drift;
-    # refresh AFTER both parents are restored so its rows reflect the
-    # snapshot's drift / ledger_drift content.
-    "drift_summary",
-    "overdraft",
-    "expected_eod_balance_breach",
-    "balance_cadence_gap",
-    "limit_breach",
-    "stuck_pending",
-    "stuck_unbundled",
-    "chain_parent_disagreement",
-    "xor_group_violation",
-    "transfer_parents",
-    "fan_in_disagreement",
-    "multi_xor_violation",
-    # Dashboard-shape matviews — depend on L1 invariants.
-    "daily_statement_summary",
-    "l1_exceptions",
-    # Investigation matviews.
-    "inv_pair_rolling_anomalies",
-    "inv_money_trail_edges",
-)
+#: V-overlay matview suffixes (without the ``{prefix}_v_`` envelope),
+#: refreshed in dependency order after an Oracle overlay restore so
+#: each downstream matview reads fresh upstream data. DERIVED from
+#: SCHEMA_GRAPH (DQ.1.4) — the SAME refresh order the PG/DuckDB paths
+#: use, so the overlay copy can no longer drift from the canonical
+#: order (DQ.0 §1: the DS.3.2 effective_balances mis-order that lived
+#: here as a silent hand-copy). Used by the Oracle impl, which drives
+#: one ``DBMS_MVIEW.REFRESH`` block per matview.
+_V_OVERLAY_MATVIEW_SUFFIXES: tuple[str, ...] = SCHEMA_GRAPH.overlay_suffixes()
 
 
 def _validate_snapshot_name(name: str) -> None:

@@ -83,6 +83,7 @@ from .config_table import (
     kv_as_of_as_timestamp_sql,
 )
 from .primitives import L2Instance
+from recon_gen.common.db_objects import SCHEMA_GRAPH, MatviewGroup
 
 
 def emit_schema(
@@ -367,81 +368,7 @@ def refresh_matviews_sql(
     Z.C — ``prefix`` is the cfg.db.table_prefix.
     """
     p = prefix
-    names = [
-        # Leaves: reads from base tables only.
-        f"{p}_current_transactions",
-        f"{p}_current_daily_balances",
-        # CL.5 — carry-forward effective balance: every (account, day)
-        # in scope, with sparse-day gaps filled via LAST_VALUE IGNORE
-        # NULLS window. Drift / ledger_drift / overdraft now read this
-        # so sparse accounts surface the institution's REAL position
-        # (not just emitted rows). Reads from current_daily_balances +
-        # current_transactions; refresh after those two.
-        f"{p}_effective_balances",
-        # Helpers: read from current_* + the carry-forward spine
-        # (DS.3.2 keyed them onto effective_balances so carried days
-        # get a computed side — refresh AFTER it).
-        f"{p}_computed_subledger_balance",
-        f"{p}_computed_ledger_balance",
-        # DK.1 — data_anchor singleton matview: GREATEST over MAX(
-        # transactions.posting) and MAX(daily_balances.business_day_end
-        # WHERE account_scope='internal'). Read by dashboards at
-        # app-build time when cfg.test.generator.end_date is unset
-        # (replaces pre-DK live(wall-clock) fallback). Leaf — reads
-        # only from current_* views; no downstream matview depends
-        # on it. Refresh alongside effective_balances.
-        f"{p}_data_anchor",
-        # L1 invariants: read from current_* + helpers.
-        f"{p}_drift",
-        f"{p}_ledger_drift",
-        # DL.3.5 — drift_summary reads from drift + ledger_drift via
-        # UNION ALL; must refresh AFTER both parents are fresh.
-        f"{p}_drift_summary",
-        f"{p}_overdraft",
-        f"{p}_expected_eod_balance_breach",
-        # CL.6 — cadence-aware missing-balance invariant.
-        f"{p}_balance_cadence_gap",
-        f"{p}_limit_breach",
-        f"{p}_stuck_pending",
-        f"{p}_stuck_unbundled",
-        # AB.2.3 — Chain Parent Disagreement: two-template chains where
-        # leg_rail firings of one child Transfer disagree on which
-        # parent firing they belong to. Reads from current_transactions
-        # (no dependency on other L1 matviews). Sits with the other
-        # L1 invariants in dependency order.
-        f"{p}_chain_parent_disagreement",
-        # AB.3.3 — XOR group violations: per (Transfer, template, XOR
-        # group) firing-cardinality check. Reads current_transactions
-        # + the L2 declaration (inlined); independent of other L1
-        # matviews. Refresh before l1_exceptions so its UNION ALL
-        # branch reads fresh rows.
-        f"{p}_xor_group_violation",
-        # AB.4.3 — Per-child Transfer parent set (long form). Derived
-        # from current_transactions; AB.4.7's fan_in_disagreement
-        # JOINs against this. Refresh before fan_in_disagreement so
-        # the downstream matview sees fresh rows.
-        f"{p}_transfer_parents",
-        # AB.4.7 — Fan-in disagreement L1 invariant. JOINs against
-        # _transfer_parents (AB.4.3) for the parent-count derivation;
-        # MUST refresh AFTER _transfer_parents.
-        f"{p}_fan_in_disagreement",
-        # AB.6.5 — Multi-XOR violation L1 invariant. Reads from
-        # current_transactions + L2 declaration inlined; independent
-        # of other L1 matviews. Refresh before l1_exceptions so
-        # its UNION ALL branch reads fresh rows.
-        f"{p}_multi_xor_violation",
-        # Dashboard-shape matviews: read from current_* +
-        # L1 invariants. MUST refresh AFTER all L1 invariants are
-        # fresh so l1_exceptions's UNION reads up-to-date data.
-        f"{p}_daily_statement_summary",
-        f"{p}_l1_exceptions",
-        # Investigation matviews (N.3.b): read directly from base
-        # ``{p}_transactions``, so they're independent of every L1
-        # matview. Order between the two doesn't matter — they don't
-        # reference each other.
-        f"{p}_inv_pair_rolling_anomalies",
-        f"{p}_inv_money_trail_edges",
-    ]
+    names = list(SCHEMA_GRAPH.refresh_names(p))
     if dialect in (Dialect.DUCKDB):
         # X.3.c — neither SQLite nor DuckDB has native matviews; both
         # land them as plain tables via CREATE TABLE AS SELECT (CA.2
@@ -547,37 +474,7 @@ def _emit_table_based_matview_refresh(
     current_creates = _emit_table_based_current_matview_creates(p, dialect)
     invariants = _emit_l1_invariant_views(instance, prefix=p, dialect=dialect)
     inv_views = _emit_inv_views(instance, prefix=p, dialect=dialect)
-    names = [
-        f"{p}_current_transactions",
-        f"{p}_current_daily_balances",
-        # CL.5 — carry-forward source for drift / ledger_drift / overdraft.
-        f"{p}_effective_balances",
-        # DS.3.2 — the two computed_* helpers read the spine now.
-        f"{p}_computed_subledger_balance",
-        f"{p}_computed_ledger_balance",
-        # DK.1 — data_anchor singleton matview (DuckDB table-based refresh
-        # path; mirrors the PG/Oracle list above).
-        f"{p}_data_anchor",
-        f"{p}_drift",
-        f"{p}_ledger_drift",
-        # DL.3.5 — drift_summary reads drift + ledger_drift via UNION ALL.
-        f"{p}_drift_summary",
-        f"{p}_overdraft",
-        f"{p}_expected_eod_balance_breach",
-        f"{p}_balance_cadence_gap",
-        f"{p}_limit_breach",
-        f"{p}_stuck_pending",
-        f"{p}_stuck_unbundled",
-        f"{p}_chain_parent_disagreement",
-        f"{p}_xor_group_violation",
-        f"{p}_transfer_parents",
-        f"{p}_fan_in_disagreement",
-        f"{p}_multi_xor_violation",
-        f"{p}_daily_statement_summary",
-        f"{p}_l1_exceptions",
-        f"{p}_inv_pair_rolling_anomalies",
-        f"{p}_inv_money_trail_edges",
-    ]
+    names = list(SCHEMA_GRAPH.refresh_names(p))
     analyzes = "\n".join(analyze_table(n, dialect) for n in names)
     return (
         f"-- ===========================================================\n"
@@ -2340,46 +2237,15 @@ CREATE INDEX idx_{p}_curr_db_scope_day
 # supersession is transparent. Drop order is reverse of create order
 # (no view here depends on another in this block, but ordering is
 # conservative).
-# L1 invariant matview names in drop order: dashboard-shape matviews
-# (l1_exceptions, daily_statement_summary) drop FIRST because they
-# read from the L1 invariant matviews (which read from current_* +
-# computed_*). The two helper matviews (computed_ledger_balance,
-# computed_subledger_balance) drop last.
-_L1_INVARIANT_DROP_NAMES: tuple[str, ...] = (
-    "l1_exceptions",
-    "daily_statement_summary",
-    "multi_xor_violation",
-    "fan_in_disagreement",
-    "transfer_parents",
-    "xor_group_violation",
-    "chain_parent_disagreement",
-    "stuck_unbundled",
-    "stuck_pending",
-    "limit_breach",
-    # CL.6 — balance_cadence_gap reads current_daily_balances +
-    # current_transactions only; no dependency on the other L1
-    # invariants, but drops cleanly here alongside them.
-    "balance_cadence_gap",
-    "expected_eod_balance_breach",
-    "overdraft",
-    # DL.3.5 — drift_summary depends on drift + ledger_drift (UNION ALL).
-    # Drop BEFORE its parents so the parent drops don't fail with
-    # "dependent objects" on PG.
-    "drift_summary",
-    "ledger_drift",
-    "drift",
-    # DS.3.2 — the two computed_* helpers read effective_balances now;
-    # drop them BEFORE it or PG refuses with "dependent objects".
-    "computed_ledger_balance",
-    "computed_subledger_balance",
-    # CL.5 — effective_balances is the carry-forward source for the
-    # invariants + helpers above; drop after them all.
-    "effective_balances",
-    # DK.1 — data_anchor is a leaf (reads only from current_*); no
-    # downstream matview depends on it (consumers query at app-build).
-    # Drops alongside effective_balances as another leaf helper.
-    "data_anchor",
-)
+# L1 invariant matview drop order — DERIVED from SCHEMA_GRAPH (DQ.1.4):
+# the reverse of the L1-group refresh order, so dashboard-shape sinks
+# (l1_exceptions, daily_statement_summary) drop FIRST and the
+# effective_balances spine drops after everything that reads it. A
+# free-floating leaf (data_anchor — nothing in the L1 block depends on
+# it) lands at a valid-but-arbitrary reverse-topo slot; the drop is
+# idempotent + order-immaterial for such a node. The four order lists
+# no longer diverge because they all project this one graph (DQ.0 §1).
+_L1_INVARIANT_DROP_NAMES: tuple[str, ...] = SCHEMA_GRAPH.drop_ids(MatviewGroup.L1)
 
 
 _L1_INVARIANT_DROPS_HEADER = """\
@@ -4122,10 +3988,7 @@ CREATE UNIQUE INDEX idx_{p}_l1ex_unique
 # Investigation matview names in drop order. Both read from the base
 # ``{p}_transactions`` only — order between the two doesn't matter, but
 # fixing it keeps emit output deterministic.
-_INV_MATVIEW_DROP_NAMES: tuple[str, ...] = (
-    "inv_money_trail_edges",
-    "inv_pair_rolling_anomalies",
-)
+_INV_MATVIEW_DROP_NAMES: tuple[str, ...] = SCHEMA_GRAPH.drop_ids(MatviewGroup.INVESTIGATION)
 
 
 # CV.2 — minimum number of historical pair-windows a pair must have
