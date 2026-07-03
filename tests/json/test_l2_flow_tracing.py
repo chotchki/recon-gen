@@ -530,8 +530,8 @@ def test_chains_dataset_contract_columns_match_builder() -> None:
     """Every contract column appears in the built SQL — visual ds["col"]
     references resolve cleanly. (``build_chains_dataset`` is a legacy
     builder not wired into ``build_all_l2_flow_tracing_datasets``, so it
-    isn't swept by ``test_dataset_sql_contract_projection``; this is its
-    only column-projection coverage.)"""
+    isn't swept by ``test_dq5_3_dataset_projection_matches_its_contract``;
+    this is its only column-projection coverage.)"""
     from recon_gen.apps.l2_flow_tracing.datasets import (
         CHAINS_CONTRACT, build_chains_dataset,
     )
@@ -1060,8 +1060,8 @@ def test_exc_dataset_contract_columns_match_builder(
     builders are legacy, not wired into
     ``build_all_l2_flow_tracing_datasets`` — replaced by the unified
     UNION-ALL dataset — so they aren't swept by
-    ``test_dataset_sql_contract_projection``; this is their only
-    column-projection coverage.)"""
+    ``test_dq5_3_dataset_projection_matches_its_contract``; this is their
+    only column-projection coverage.)"""
     import recon_gen.apps.l2_flow_tracing.datasets as ds_mod
     contract_name_map = {
         "l2ft-exc-chain-orphans-ds": "EXC_CHAIN_ORPHANS_CONTRACT",

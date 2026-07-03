@@ -150,6 +150,16 @@ prod = [
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
+    # DQ.5 — SQLGlot column-lineage lint (test-tier ONLY, never in the
+    # wheel, never on the emit path per the DQ.0 lock). Parses the DuckDB
+    # render of every dataset + matview body against a MappingSchema built
+    # from the DbObject catalog and fails on any unresolved WHERE/JOIN/
+    # GROUP-BY ref or any projection alias with no declared reader. Guarded
+    # by pytest.importorskip in tests/unit/test_dq5_*, so the wheel-smoke
+    # (prod deps only) skips it as an optional dep while the layered chain
+    # (dev extra installed) runs it — same pattern as starlette/graphviz.
+    # Floor pin: qualify(validate_qualify_columns=...) API is stable since 20.
+    "sqlglot>=25",
     # DS.3.7 — the sampled tail beyond the enumeration domains:
     # int64 magnitudes, cardinalities above domain bounds, the
     # random_l2_yaml topology axis. Runs DERANDOMIZED with the
