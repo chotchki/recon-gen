@@ -67,7 +67,6 @@ from recon_gen.common.sql import (
     matview_options,
     order_by_day_expr,
     range_interval_days,
-    refresh_matview,
     safe_identifier,
     serial_type,
     json_text_type,
@@ -368,7 +367,6 @@ def refresh_matviews_sql(
     Z.C — ``prefix`` is the cfg.db.table_prefix.
     """
     p = prefix
-    names = list(SCHEMA_GRAPH.refresh_names(p))
     if dialect in (Dialect.DUCKDB):
         # X.3.c — neither SQLite nor DuckDB has native matviews; both
         # land them as plain tables via CREATE TABLE AS SELECT (CA.2
@@ -424,13 +422,15 @@ def refresh_matviews_sql(
         for t in (f"{p}_transactions", f"{p}_daily_balances")
     )
     cascade = "\n".join(
-        refresh_matview(
-            n, dialect,
-            concurrently=(dialect is Dialect.POSTGRES and n not in _NON_UNIQUE_MATVIEWS),
+        obj.emit_refresh(
+            p, dialect,
+            concurrently=(
+                dialect is Dialect.POSTGRES and obj.obj_id not in _NON_UNIQUE_MATVIEWS
+            ),
         )
         + "\n"
-        + analyze_table(n, dialect)
-        for n in names
+        + obj.emit_analyze(p, dialect)
+        for obj in SCHEMA_GRAPH.refresh_order()
     )
     return f"{base_table_stats}\n{cascade}\n{money_trail_tripwire_sql(p, dialect)}"
 
@@ -474,8 +474,9 @@ def _emit_table_based_matview_refresh(
     current_creates = _emit_table_based_current_matview_creates(p, dialect)
     invariants = _emit_l1_invariant_views(instance, prefix=p, dialect=dialect)
     inv_views = _emit_inv_views(instance, prefix=p, dialect=dialect)
-    names = list(SCHEMA_GRAPH.refresh_names(p))
-    analyzes = "\n".join(analyze_table(n, dialect) for n in names)
+    analyzes = "\n".join(
+        obj.emit_analyze(p, dialect) for obj in SCHEMA_GRAPH.refresh_order()
+    )
     return (
         f"-- ===========================================================\n"
         f"-- Table-based matview refresh for L2 instance: {p} ({dialect.value})\n"
@@ -2274,8 +2275,8 @@ def _emit_l1_invariant_drops(p: str, dialect: Dialect) -> str:
     first, helpers last).
     """
     drops = "\n".join(
-        drop_matview_if_exists(f"{p}_{name}", dialect)
-        for name in _L1_INVARIANT_DROP_NAMES
+        obj.emit_drop(p, dialect)
+        for obj in SCHEMA_GRAPH.drop_order(MatviewGroup.L1)
     )
     return f"{_L1_INVARIANT_DROPS_HEADER}\n{drops}\n"
 
@@ -4034,8 +4035,8 @@ def _emit_inv_matview_drops(p: str, dialect: Dialect) -> str:
     instance prefix; no ``.format()`` substitution on the body.
     """
     drops = "\n".join(
-        drop_matview_if_exists(f"{p}_{name}", dialect)
-        for name in _INV_MATVIEW_DROP_NAMES
+        obj.emit_drop(p, dialect)
+        for obj in SCHEMA_GRAPH.drop_order(MatviewGroup.INVESTIGATION)
     )
     return f"{_INV_MATVIEW_DROPS_HEADER}\n{drops}\n"
 

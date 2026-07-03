@@ -34,6 +34,14 @@ from enum import Enum
 
 from recon_gen.common.dataset_contract import ColumnSpec
 from recon_gen.common.ids import DbObjectId, MatviewName, prefixed_db_object
+from recon_gen.common.sql import (
+    Dialect,
+    analyze_table,
+    drop_matview_if_exists,
+    drop_table_if_exists,
+    drop_view_if_exists,
+    refresh_matview,
+)
 
 
 class DbObjectKind(Enum):
@@ -108,6 +116,47 @@ class DbObject:
             f"Column {name!r} not declared on DB object {self.obj_id!r}. "
             f"Known: {[c.name for c in self.columns]}"
         )
+
+    # -- DDL dispatch (DQ.2.1) -----------------------------------------
+    # The object knows how to drop / refresh / ANALYZE itself, dispatching
+    # on KIND and DELEGATING every per-dialect decision to
+    # common/sql/dialect.py — this module never branches on ``Dialect``
+    # (the anti-fork lint, DQ.2.3, enforces that; the ~60 hand-won dialect
+    # gotchas live in dialect.py and rot if cloned). ``emit_create`` + the
+    # body template attach in DQ.2.2.
+
+    def emit_drop(self, prefix: str, dialect: Dialect) -> str:
+        """The idempotent ``DROP`` for this object, dispatched on kind —
+        matview / view / table each route to the matching dialect.py
+        helper (PG native ``DROP … IF EXISTS`` / Oracle swallow-block)."""
+        name = self.physical_name(prefix)
+        if self.kind is DbObjectKind.MATVIEW:
+            return drop_matview_if_exists(name, dialect)
+        if self.kind is DbObjectKind.VIEW:
+            return drop_view_if_exists(name, dialect)
+        return drop_table_if_exists(name, dialect)
+
+    def emit_refresh(
+        self, prefix: str, dialect: Dialect, *, concurrently: bool = False
+    ) -> str:
+        """``REFRESH MATERIALIZED VIEW`` for a matview (PG/Oracle). DuckDB
+        has no native matview — its refresh is DROP + CTAS driven at the
+        schema level — so ``refresh_matview`` raises there and the caller
+        takes the table-based path before reaching this. Non-matview kinds
+        have nothing to refresh."""
+        if self.kind is not DbObjectKind.MATVIEW:
+            raise ValueError(
+                f"{self.obj_id!r} is a {self.kind.value}, not a matview — "
+                f"nothing to refresh"
+            )
+        return refresh_matview(
+            self.physical_name(prefix), dialect, concurrently=concurrently
+        )
+
+    def emit_analyze(self, prefix: str, dialect: Dialect) -> str:
+        """Gather planner stats — ``ANALYZE name`` (PG/DuckDB) /
+        ``DBMS_STATS.GATHER_TABLE_STATS`` (Oracle)."""
+        return analyze_table(self.physical_name(prefix), dialect)
 
 
 @dataclass(frozen=True)
