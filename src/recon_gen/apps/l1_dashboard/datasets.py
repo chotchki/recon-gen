@@ -18,6 +18,7 @@ Substep landmarks:
 from __future__ import annotations
 
 from recon_gen.common.config import Config
+from recon_gen.common.contracts import added, contract_from, dollars, keep
 from recon_gen.common.dataset_contract import (
     ColumnShape,
     ColumnSpec,
@@ -422,9 +423,12 @@ def _aging_bucket_case_sql(
     return f"CASE {whens} ELSE '{overflow_label}' END"
 
 
-DRIFT_CONTRACT = DatasetContract(columns=[
-    ColumnSpec("account_id", "STRING", shape=ColumnShape.ACCOUNT_ID),
-    ColumnSpec("account_name", "STRING"),
+# DQ.4.2b — contract_from DERIVES the kept/money columns from the
+# ``drift`` matview's DbObject.columns (a matview rename → KeyError at
+# import); account_display + abs_drift are dataset-computed (added()).
+DRIFT_CONTRACT = contract_from("drift", [
+    keep("account_id"),
+    keep("account_name"),
     # DL.3 — account_display (``"<name> (<id>)"``) is the shape Daily
     # Statement's account picker reads + the shape its WHERE clause
     # matches via ``account_display_expr``. Drills writing
@@ -434,57 +438,51 @@ DRIFT_CONTRACT = DatasetContract(columns=[
     # the WHERE clause expects. Pre-DL.3 the drills wrote raw
     # ``account_id`` → destination's narrowed to 0 rows because
     # ``"external-001" != "Foo (external-001)"``.
-    ColumnSpec(
-        "account_display", "STRING", shape=ColumnShape.ACCOUNT_DISPLAY,
-    ),
-    ColumnSpec("account_role", "STRING"),
-    ColumnSpec("account_parent_role", "STRING"),
-    ColumnSpec("business_day_start", "DATETIME", shape=ColumnShape.DATETIME_DAY),
-    ColumnSpec("business_day_end", "DATETIME", shape=ColumnShape.DATETIME_DAY),
-    ColumnSpec("stored_balance", "DECIMAL"),
-    ColumnSpec("computed_balance", "DECIMAL"),
-    ColumnSpec("drift", "DECIMAL"),
+    added("account_display", "STRING", shape=ColumnShape.ACCOUNT_DISPLAY),
+    keep("account_role"),
+    keep("account_parent_role"),
+    keep("business_day_start"),
+    keep("business_day_end"),
+    dollars("stored_balance"),
+    dollars("computed_balance"),
+    dollars("drift"),
     # BO.4 — magnitude companion to the signed ``drift`` column. Tables
     # keep ``drift`` (operators need direction in detail rows); the
     # "Largest * Drift" KPIs read ``abs_drift`` so the sign convention
     # matches Drift Timelines' precomputed ``abs_drift`` and the
     # subtitle's "Max |drift|" wording matches the underlying SQL.
-    ColumnSpec("abs_drift", "DECIMAL"),
+    added("abs_drift", "DECIMAL"),
 ])
 
 
-LEDGER_DRIFT_CONTRACT = DatasetContract(columns=[
-    ColumnSpec("account_id", "STRING", shape=ColumnShape.ACCOUNT_ID),
-    ColumnSpec("account_name", "STRING"),
+LEDGER_DRIFT_CONTRACT = contract_from("ledger_drift", [
+    keep("account_id"),
+    keep("account_name"),
     # DL.3 — see DRIFT_CONTRACT for account_display rationale.
-    ColumnSpec(
-        "account_display", "STRING", shape=ColumnShape.ACCOUNT_DISPLAY,
-    ),
-    ColumnSpec("account_role", "STRING"),
-    ColumnSpec("business_day_start", "DATETIME", shape=ColumnShape.DATETIME_DAY),
-    ColumnSpec("business_day_end", "DATETIME", shape=ColumnShape.DATETIME_DAY),
-    ColumnSpec("stored_balance", "DECIMAL"),
-    ColumnSpec("computed_balance", "DECIMAL"),
-    ColumnSpec("drift", "DECIMAL"),
+    added("account_display", "STRING", shape=ColumnShape.ACCOUNT_DISPLAY),
+    keep("account_role"),
+    keep("business_day_start"),
+    keep("business_day_end"),
+    dollars("stored_balance"),
+    dollars("computed_balance"),
+    dollars("drift"),
     # BO.4 — same magnitude companion as DRIFT_CONTRACT; see comment there.
-    ColumnSpec("abs_drift", "DECIMAL"),
+    added("abs_drift", "DECIMAL"),
 ])
 
 
 # Overdraft view exposes only the stored balance (no computed/drift) —
 # the violation IS the negative stored balance, no comparison needed.
-OVERDRAFT_CONTRACT = DatasetContract(columns=[
-    ColumnSpec("account_id", "STRING", shape=ColumnShape.ACCOUNT_ID),
-    ColumnSpec("account_name", "STRING"),
+OVERDRAFT_CONTRACT = contract_from("overdraft", [
+    keep("account_id"),
+    keep("account_name"),
     # DL.3 — see DRIFT_CONTRACT for account_display rationale.
-    ColumnSpec(
-        "account_display", "STRING", shape=ColumnShape.ACCOUNT_DISPLAY,
-    ),
-    ColumnSpec("account_role", "STRING"),
-    ColumnSpec("account_parent_role", "STRING"),
-    ColumnSpec("business_day_start", "DATETIME", shape=ColumnShape.DATETIME_DAY),
-    ColumnSpec("business_day_end", "DATETIME", shape=ColumnShape.DATETIME_DAY),
-    ColumnSpec("stored_balance", "DECIMAL"),
+    added("account_display", "STRING", shape=ColumnShape.ACCOUNT_DISPLAY),
+    keep("account_role"),
+    keep("account_parent_role"),
+    keep("business_day_start"),
+    keep("business_day_end"),
+    dollars("stored_balance"),
 ])
 
 
