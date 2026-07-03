@@ -134,10 +134,46 @@ Four surfaces, sharply split by how far typing already reached:
 ## 7. Decisions for the operator (confirm to unlock DQ.1)
 
 1. **Sequencing:** DQ.1 (order graph, deps-only) → DQ.2 (typed columns, incremental). Confirm, or reprioritize?
+  - Comment: Confirm
 2. **Scope limit:** accept that DQ types object boundaries + generates projections where cheap, and that raw WHERE/JOIN body identifiers stay strings until projection-generation reaches them (no typed SQL bodies this phase). Confirm the limit?
+  - Comment: I'd rather you add more tasks to work through it all. We should also create a lint to enforce it.
 3. **DQ.2 first bite:** incremental starting at the matview↔`DatasetContract` boundary (recommended), vs a bigger-bang typed-column pass. Confirm incremental?
+  - Comment: Incremental is fine as long as it FINISHES in DQ.
 4. **The §1 overlay-order fix (already on this branch):** merge it independently as a standalone hotfix (it's an unambiguous correctness fix, Oracle-restore-only, not blocking the DuckDB/CI chain), or let it ride in with DQ.1? Recommend: merge independently — it's a real bug, and DQ.1 supersedes only its interim guard, not the fix.
+  - Comment: I'm fine waiting until DQ lands.
 5. **Node shape:** `DbObject` as a frozen hashable node with `depends_on: tuple[DbObject, ...]` and `obj["col"]` validated against its own `ColumnSpec` list — i.e. `Dataset` one layer down. Confirm the shape before I build it?
+  - Comment: I'd also like you to have DbObject emit the DDLs too.
+
+- Meta Comment: Don't forget about the stats gathering too.
+- Meta Meta Comment: Would it be easier to start grabbing a database library here?
+
+## 8. Spike verdict — the DB-library question, resolved (2026-07-03)
+
+The five §7 decisions came back confirmed, with one real expansion (scope: type ALL column refs + build a lint, not just object boundaries) and one genuine fork the Meta-Meta comment named — **would a database library be easier?** That fork got a dedicated spike: a read of the real emitter to fix the compatibility floor, four candidates scored against it (SQLAlchemy Core / SQLGlot / lightweight-ORM-or-Rust / extended hand-roll), then a synthesis.
+
+**Verdict: hand-roll `DbObject` as the spine; SQLGlot as a narrow, TEST-TIER-ONLY column-lineage lint. Reject SQLAlchemy Core and every ORM / Rust-emitter option.**
+
+The load-bearing fact is that the analysis-side lattice (`Dataset` / `ColumnSpec` / `ColumnShape` / `DatasetContract`) is UNREPLACEABLE — `ColumnShape` is a nominal drill-safety lattice over columns that already share a SQL wire type (two STRINGs that are non-interchangeable; the K.2 no-widen rule), and no database library can express that because they all type on VARCHAR / BIGINT, a strictly coarser axis. So the real question was never "library vs hand-roll" — it's **one type system or two.** A hand-rolled `DbObject` extends the one existing lattice a layer down: its columns ARE the same `ColumnSpec` objects the `DatasetContract` already holds, zero translation boundary. Every library adoption forces a SECOND column type bridged at the `Dataset.source→Matview` seam, re-attaching the five render/drill fields (shape / display_name / currency / storage / hidden) a library `Column` can't hold and re-deriving a `ColumnShape` it can't represent — strictly more machinery for less coverage.
+
+And the two things operator ask #5 + the stats meta-comment most want `DbObject` to newly own — emit the DDL, own the stats cascade — are exactly where a library buys LEAST. SQLAlchemy has no materialized-view construct at all and no ANALYZE primitive (matview-as-CTAS on DuckDB, Oracle BUILD IMMEDIATE REFRESH COMPLETE ON DEMAND, the DS.0a interleaved refresh→analyze cascade all stay hand-written `@compiles`); it FIGHTS the portable-SQL subset (its JSON type defaults to JSONB on PG, the exact forbidden thing); and it stakes the canonical DuckDB semantic-lock determinism gate on third-party `duckdb_engine`. Both the stats cascade AND all four order lists are STRUCTURALLY topo-sort properties — one `DbObject` topo collapses the four hand-kept copies and derives the stats interleave for free, retiring the born-red `test_dq0_overlay_order` guard by deleting its subject.
+
+**Scorecard:**
+
+- **Hand-rolled `DbObject`** — ADOPT (the spine). Clears the DDL / stats-ordering / object-graph / portable-subset floor BY CONSTRUCTION, ONE type system, no bridge. Only gap: in-body ref lineage, which is a parser job (a component decision, not an architecture one).
+- **SQLGlot** — ADOPT, narrow test-tier lint ONLY. The one tool that genuinely resolves WHERE/JOIN/GROUP-BY body identifiers (`qualify(validate_qualify_columns=True)` fired on a real WHERE typo AND a real JOIN-ON typo in the actual matview bodies) + column lineage. REJECT as emitter: it can't parse Oracle PL/SQL, and transpiling one canonical DDL to three dialects gets ~10 of 12 portable-subset constructs wrong (JSON_VALUE stays JSON_VALUE on DuckDB returning quoted form; `encode(digest(canon,'sha256'),'hex')` silently drops the hex arg).
+- **SQLAlchemy Core** — LEAN-AGAINST / reject. Compiles base-table type names (~15 helpers); supplies zero for matviews / the stats cascade / the JSON subset / Oracle idempotent drops / the `<<$param>>` contract; forces two type systems + a bridge and bets the DuckDB determinism gate on a third-party engine.
+- **Lightweight ORM / Rust option** — REJECT. No mature Rust DDL emitter for foreign dialects exists; every lightweight Python ORM lacks DuckDB (the default + only determinism-gated dialect) and models no matview. `sqloxide` survives only as an optional lint tokenizer, strictly weaker than SQLGlot's resolver (a parser with no binder — you'd hand-write the resolution, i.e. most of the value).
+
+**The Meta-Meta, answered honestly:** yes, a library is easier for EXACTLY ONE narrow sub-problem — resolving in-body column refs is name-resolution + lineage, a parser job, and that is what SQLGlot exists for. No for everything else. SQLGlot enters strictly SUBORDINATE: a consumer of the `DbObject` catalog, never the emitter. That is the finishing mechanism that keeps "type every ref + a lint" INSIDE the phase instead of deferring the body-ref tail — the operator's hard "finishes in DQ" constraint.
+
+**Operator decisions confirmed 2026-07-03:**
+
+1. **SQLGlot as a TEST-TIER-ONLY dep** — accepted. It never ships in the wheel and never touches the emit path; only the lint runs it. (It cuts against the Rust/standalone-binary preference — but `sqloxide`, the Rust option, is a tokenizer with no binder, so hand-rolling means re-writing most of `qualify`; a pure-Python dep with no native build is the right trade for a dev/test-only lint.)
+2. **The hand-tuned SELECT bodies stay string templates** — confirmed. "`DbObject` emits the DDL" = owns create/refresh/drop DISPATCH + ORDERING + column-typing by DELEGATING to `dialect.py`; the correlated-subquery `computed_*`, the CONNECT-BY spine, and the recursive `money_trail` bodies are irreducible (a column list cannot regenerate them) and stay the readable source of truth — typed at their BOUNDARIES + resolution-linted, NOT regenerated from the model.
+
+**Convergence trajectory** (operator, 2026-07-03 — QS removed in v16, so App2's `_sql_executor` is the only SQL consumer and the surface simplifies over time): the `DbObject` graph is the right substrate to DRIVE per-dialect collapse (one topo, one column model, per-dialect emit as a delegated leaf), rather than freezing today's three hand-branches into a library's compiler. Flagged as a SEPARATE convergence follow-up (NOT folded into DQ): retire the QS-legacy `<<$param>>` pushdown syntax for native `:param` binds — that touches App2's `_sql_executor`, not the typed-object model.
+
+The reshaped plan — DQ.1 graph + derived order → DQ.2 emit-DDL-by-delegation → DQ.3 stats cascade → DQ.4 typed columns → DQ.5 SQLGlot lint → DQ.6 exit — is in PLAN.md. Full spike provenance (the ground-truth compatibility floor, the four candidate returns, both synthesis passes) is in the phase workflow journal.
 
 ## Appendix — audit provenance
 
