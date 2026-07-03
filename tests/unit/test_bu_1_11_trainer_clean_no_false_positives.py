@@ -31,7 +31,7 @@ What CV.2 *can* deliver — and what this test pins — is two things:
    90-day window, this caps observed-noise z at ≈ 6-7. Plant z (from
    `AnomalyGenerator` with N=20 default + 1 spike) caps at ~4.36 —
    so the plant sits BELOW the noise ceiling. **The real contract**:
-   the plant's z is BOUNDED above the matview's `_INV_MIN_HISTORICAL_WINDOWS`
+   the plant's z is BOUNDED above the matview's `INV_MIN_HISTORICAL_WINDOWS`
    floor and below the structural noise floor on the same seed.
 
 2. **Plant DOES survive**: under per-pair, planted spikes WITH per-
@@ -58,7 +58,7 @@ from recon_gen.common.l2.config_table import replace_config
 from recon_gen.common.l2.loader import load_instance
 from recon_gen.common.l2.primitives import L2Instance
 from recon_gen.common.l2.schema import (
-    _INV_MIN_HISTORICAL_WINDOWS,
+    INV_MIN_HISTORICAL_WINDOWS,
     emit_schema,
     refresh_matviews_sql,
 )
@@ -351,7 +351,7 @@ def test_planted_anomaly_survives_above_min_n_floor(
         f"window_end={gen.anchor_day}) missing from "
         f"{prefix}_inv_pair_rolling_anomalies entirely — CV.1's "
         f"historical-window emission failed to make the spike pair "
-        f"survive the min-n floor ({_INV_MIN_HISTORICAL_WINDOWS})"
+        f"survive the min-n floor ({INV_MIN_HISTORICAL_WINDOWS})"
     )
     z_score, z_bucket = float(row[0]), row[1]
     assert abs(z_score) >= 4.0, (

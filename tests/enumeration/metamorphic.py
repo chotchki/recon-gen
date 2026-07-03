@@ -482,7 +482,7 @@ LIVE_SENDER: Final = "anp3s"
 LIVE_RECIPIENT: Final = "anp3r"
 
 
-def _pair_transfer(
+def pair_transfer(
     b: CellBuilder,
     *,
     transfer: str,
@@ -512,21 +512,21 @@ def anomaly_rows(*, shifted: bool) -> list[EntriedTx]:
     b = CellBuilder()
     day0 = WINDOW_START
     for i, amount in enumerate(DENSE_DAY_SUMS):
-        _pair_transfer(
+        pair_transfer(
             b, transfer=f"anp0t{i}", sender=DENSE_SENDER,
             recipient=DENSE_RECIPIENT, day=day0 + dt.timedelta(days=i),
             amount=amount,
         )
     if shifted:
         for i in range(0, len(DENSE_DAY_SUMS), 2):
-            _pair_transfer(
+            pair_transfer(
                 b, transfer=f"anp0x{i}", sender=DENSE_SENDER,
                 recipient=DENSE_RECIPIENT, day=day0 + dt.timedelta(days=i),
                 amount=LOCATION_SHIFT,
             )
     # Floor pair: two windows, wild spike — pair_n below the floor.
     for i, amount in enumerate((100, 100000)):
-        _pair_transfer(
+        pair_transfer(
             b, transfer=f"anp1t{i}", sender=FLOOR_SENDER,
             recipient=FLOOR_RECIPIENT, day=day0 + dt.timedelta(days=i),
             amount=amount,
@@ -535,7 +535,7 @@ def anomaly_rows(*, shifted: bool) -> list[EntriedTx]:
     # equal, so the sample stddev is exactly zero at pair_n over the
     # floor.
     for i in range(3):
-        _pair_transfer(
+        pair_transfer(
             b, transfer=f"anp2t{i}", sender=GUARD_SENDER,
             recipient=GUARD_RECIPIENT, day=day0 + dt.timedelta(days=2 * i),
             amount=500,
@@ -543,7 +543,7 @@ def anomaly_rows(*, shifted: bool) -> list[EntriedTx]:
     # Live pair: dense three-window history with real variance — the
     # floor's other side.
     for i, amount in enumerate((100, 300, 200)):
-        _pair_transfer(
+        pair_transfer(
             b, transfer=f"anp3t{i}", sender=LIVE_SENDER,
             recipient=LIVE_RECIPIENT, day=day0 + dt.timedelta(days=i),
             amount=amount,
@@ -555,6 +555,7 @@ def anomaly_rows(*, shifted: bool) -> list[EntriedTx]:
 @dataclass(frozen=True, slots=True)
 class AnomalyRow:
     window_sum: int
+    transfer_count: int
     pop_mean: Decimal
     pop_stddev: Decimal
     z_score: Decimal
@@ -574,16 +575,18 @@ def read_anomalies(
 ) -> dict[tuple[str, str, dt.date], AnomalyRow]:
     rows = db.fetchall(
         f"SELECT sender_account_id, recipient_account_id, window_end, "
-        f"window_sum, pop_mean, pop_stddev, z_score, z_bucket "
+        f"window_sum, transfer_count, pop_mean, pop_stddev, z_score, "
+        f"z_bucket "
         f"FROM {db.prefix}_inv_pair_rolling_anomalies",
     )
     return {
         (as_str(row[0]), as_str(row[1]), as_date(row[2])): AnomalyRow(
             window_sum=as_int(row[3]),
-            pop_mean=_as_decimal(row[4]),
-            pop_stddev=_as_decimal(row[5]),
-            z_score=_as_decimal(row[6]),
-            z_bucket=as_str(row[7]),
+            transfer_count=as_int(row[4]),
+            pop_mean=_as_decimal(row[5]),
+            pop_stddev=_as_decimal(row[6]),
+            z_score=_as_decimal(row[7]),
+            z_bucket=as_str(row[8]),
         )
         for row in rows
     }

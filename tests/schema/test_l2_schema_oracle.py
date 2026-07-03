@@ -179,8 +179,11 @@ class TestOracleConstructsPresent:
         "INTERVAL '1' DAY",        # interval_days(1, Oracle)
         # Casts. CV.2 moved the AVG / STDDEV_SAMP from a scalar
         # population-CTE aggregate to a per-pair PARTITION BY window
-        # aggregate; the cast wraps the OVER (...) expression.
-        "CAST(AVG(window_sum) OVER (PARTITION BY recipient_account_id, sender_account_id) AS NUMBER)",
+        # aggregate; the cast wraps the OVER (...) expression. DS.4
+        # moved the target NUMBER → DOUBLE PRECISION (the ANSI alias
+        # Oracle accepts natively) so all three dialects compute the
+        # pair stats in the same binary-float precision.
+        "CAST(AVG(window_sum) OVER (PARTITION BY recipient_account_id, sender_account_id) AS DOUBLE PRECISION)",
         # CV.2 renamed pair_windows alias (pw) → pair_stats alias (ps).
         "CAST((ps.posted_day - 1) AS TIMESTAMP)",
         "CAST(ps.posted_day AS TIMESTAMP)",

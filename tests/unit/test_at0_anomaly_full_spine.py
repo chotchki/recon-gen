@@ -154,7 +154,7 @@ class AnomalyInvariant:
         (ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) so the
         spike's row is excluded from its own divisor. The new
         load-bearing param is `historical_window_count` — the spike
-        pair needs ≥`_INV_MIN_HISTORICAL_WINDOWS=3` prior windows or
+        pair needs ≥`INV_MIN_HISTORICAL_WINDOWS=3` prior windows or
         the matview's min-n floor collapses z to 0. Default 10 sits
         3× the floor (safety margin).
 

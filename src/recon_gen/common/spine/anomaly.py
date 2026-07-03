@@ -34,7 +34,7 @@ busy-pair payday clusters (which trip global-z at z>>4) sit at z≈0
 under per-pair (their "spike" IS their normal traffic).
 
 The min-n floor is enforced in the matview (CV.2): pairs with
-< _INV_MIN_HISTORICAL_WINDOWS observations get z=0 regardless. Default
+< INV_MIN_HISTORICAL_WINDOWS observations get z=0 regardless. Default
 floor is 3; AnomalyGenerator's default N=20 sits comfortably above it.
 
 AT.3 refactored `emit()` onto the `Transfer` / `LedgerSimulation`
@@ -94,7 +94,7 @@ from recon_gen.common.spine.violation import RuleViolation, Violation
 # outlier among N+1 values, z caps at N/sqrt(N+1). For N=20 the
 # ceiling is ≈ 4.36 — clears the 4σ band with margin. For N=10 the
 # ceiling would be ≈ 3.02 — below 4σ. Sits 6× above the matview's
-# `_INV_MIN_HISTORICAL_WINDOWS=3` floor.
+# `INV_MIN_HISTORICAL_WINDOWS=3` floor.
 #
 # `_DEFAULT_HISTORICAL_WINDOW_AMOUNT = 250.0` (~$250) is the CENTER per-
 # window baseline amount on the spike pair. Picked small so the spike

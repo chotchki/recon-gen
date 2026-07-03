@@ -1522,16 +1522,23 @@ def _emit_inv_views(
       ``WINDOW w AS`` clause (added in 21c). The dialect-specific
       ``INTERVAL`` form ships inside the RANGE clause: PG ``INTERVAL
       '1 day'`` / Oracle ``INTERVAL '1' DAY``.
-    - ``{cast_pair_mean_numeric}`` / ``{cast_pair_stddev_numeric}`` —
-      ``::NUMERIC`` on Postgres / ``CAST(... AS NUMBER)`` on Oracle,
-      wrapped around ``AVG(...) OVER (PARTITION BY ...)`` and
-      ``COALESCE(STDDEV_SAMP(...) OVER (PARTITION BY ...), 0)``
+    - ``{cast_pair_mean_double}`` / ``{cast_pair_stddev_double}`` —
+      ``::DOUBLE PRECISION`` (all dialects; Oracle spells the same
+      ANSI alias), wrapped around ``AVG(...) OVER (PARTITION BY ...)``
+      and ``COALESCE(STDDEV_SAMP(...) OVER (PARTITION BY ...), 0)``
       respectively. CV.2 switched these from global population
-      aggregates to per-pair PARTITION BY.
+      aggregates to per-pair PARTITION BY. DS.4 switched the cast
+      target from NUMERIC: DuckDB reads bare ``NUMERIC`` as
+      ``DECIMAL(18,3)``, silently quantizing mean / stddev / z to
+      three decimals while PG kept arbitrary precision — same SQL
+      text, divergent semantics (caught by the DS.4 tolerance
+      contract). DOUBLE PRECISION is the honest convergence point:
+      every dialect computes the same ~1e-15-relative binary floats,
+      inside the contract's ε on all lanes.
     - ``{pair_partition}`` — the ``PARTITION BY recipient_account_id,
       sender_account_id`` clause inlined into the OVER (...) shape.
     - ``{min_n_floor}`` — minimum number of historical pair-windows
-      before z is non-zero (CV.2 ``_INV_MIN_HISTORICAL_WINDOWS``).
+      before z is non-zero (CV.2 ``INV_MIN_HISTORICAL_WINDOWS``).
     - ``{window_start_expr}`` / ``{window_end_expr}`` — date arithmetic
       + cast to TIMESTAMP, dialect-specific interval form.
     - ``{with_recursive_kw}`` — ``WITH RECURSIVE`` on Postgres / ``WITH``
@@ -1582,16 +1589,16 @@ def _emit_inv_views(
         recipient_posting_to_date=to_date("recipient.posting", dialect),
         rolling_window=rolling_window,
         pair_partition=pair_partition,
-        cast_pair_mean_numeric=cast(
+        cast_pair_mean_double=cast(
             f"AVG(window_sum) OVER ({pair_partition})",
-            "NUMERIC", dialect,
+            "DOUBLE PRECISION", dialect,
         ),
-        cast_pair_stddev_numeric=cast(
+        cast_pair_stddev_double=cast(
             f"COALESCE(STDDEV_SAMP(window_sum) "
             f"OVER ({pair_partition}), 0)",
-            "NUMERIC", dialect,
+            "DOUBLE PRECISION", dialect,
         ),
-        min_n_floor=str(_INV_MIN_HISTORICAL_WINDOWS),
+        min_n_floor=str(INV_MIN_HISTORICAL_WINDOWS),
         window_start_expr=cast(
             date_minus_days("ps.posted_day", 1, dialect),
             "TIMESTAMP", dialect,
@@ -4052,7 +4059,7 @@ _INV_MATVIEW_DROP_NAMES: tuple[str, ...] = (
 # emits get N=10 observations + the spike day = 11 windows, well above
 # the floor. Customer-ETL pairs with <3 days of activity correctly
 # sit at z=0 (not enough signal to call an anomaly anyway).
-_INV_MIN_HISTORICAL_WINDOWS: Final[int] = 3
+INV_MIN_HISTORICAL_WINDOWS: Final[int] = 3
 
 # DS.3.1 — money_trail recursion bound. `transfer_parent_id` is customer
 # ETL data with no FK and no cycle guard at the DDL level; a cycle made
@@ -4216,7 +4223,7 @@ pair_stats AS (
     --
     -- `pair_n` (COUNT(*) OVER same partition) drives the min-n floor
     -- in the final SELECT: pairs with fewer than
-    -- ``_INV_MIN_HISTORICAL_WINDOWS`` observations get z=0 regardless
+    -- ``INV_MIN_HISTORICAL_WINDOWS`` observations get z=0 regardless
     -- of magnitude (insufficient signal to discriminate).
     --
     -- Window aggregates (AVG/STDDEV_SAMP/COUNT OVER PARTITION BY)
@@ -4232,8 +4239,8 @@ pair_stats AS (
         posted_day,
         window_sum,
         transfer_count,
-        {cast_pair_mean_numeric}      AS pair_mean,
-        {cast_pair_stddev_numeric}    AS pair_stddev,
+        {cast_pair_mean_double}       AS pair_mean,
+        {cast_pair_stddev_double}     AS pair_stddev,
         -- pair_n counts ALL windows for the pair (matches the AVG /
         -- STDDEV_SAMP partition). The min-n floor (CV.2 default 3)
         -- collapses z to 0 when the pair has fewer than this many

@@ -33,8 +33,9 @@ Laws (the DS.0 §5 supersession/LOCF lemma assignments):
   so a per-day shift moves windows unevenly and a new active day
   mints a new population row); the min-n floor and the stddev=0 guard
   asserted EXACTLY (integer guards). Bucket-level SCALE claims are
-  OUT of scope here — band-edge epsilon semantics are DS.4's
-  tolerance contract, not a metamorphic law.
+  OUT of scope here — band-edge epsilon semantics live in DS.4's
+  tolerance contract (test_ds4_anomaly_tolerance.py), not a
+  metamorphic law.
 """
 from __future__ import annotations
 
@@ -304,7 +305,8 @@ def test_dedup_commute() -> None:
 
 # ---------------------------------------------------------------------------
 # Anomaly z-invariances (probabilistic detector — the integer window
-# layer only; tolerance bands and band-edge epsilon are DS.4's).
+# layer only; tolerance bands and band-edge epsilon live in
+# test_ds4_anomaly_tolerance.py).
 
 
 def _anomaly_maps(
