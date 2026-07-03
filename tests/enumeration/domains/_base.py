@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Final
 
 from recon_gen.common.l2.loader import load_instance
-from recon_gen.common.l2.primitives import L2Instance
+from recon_gen.common.l2.primitives import SCOPE_INTERNAL, L2Instance
 
 SPEC_EXAMPLE: Final = (
     Path(__file__).resolve().parent.parent.parent / "l2" / "spec_example.yaml"
@@ -61,6 +61,13 @@ class BoundaryProfile:
     multi_xor_children: Mapping[str, frozenset[str]]
     #: fan_in child template names — excluded from chain_parent scope.
     chain_parent_excluded: frozenset[str]
+    #: DS.5.1 — declared balance cadences, INTERNAL entities only,
+    #: same precedence shape the emitter's CASE arms use (CL.0 Lock 3:
+    #: singleton account_id wins over template role; undeclared falls
+    #: through to sparse). Keys mirror ``expected_cadence_gaps``'s
+    #: params.
+    singleton_cadences: Mapping[str, str]
+    role_cadences: Mapping[str, str]
 
     @classmethod
     def from_instance(cls, instance: L2Instance) -> "BoundaryProfile":
@@ -106,6 +113,19 @@ class BoundaryProfile:
                     frozenset(str(m) for m in group)
                     for group in template.leg_rail_xor_groups
                 )
+        singleton_cadences: dict[str, str] = {}
+        for account in instance.accounts:
+            if (
+                account.balance_cadence is not None
+                and account.scope == SCOPE_INTERNAL
+            ):
+                singleton_cadences[str(account.id)] = str(
+                    account.balance_cadence,
+                )
+        role_cadences: dict[str, str] = {}
+        for tmpl in instance.account_templates:
+            if tmpl.balance_cadence is not None:
+                role_cadences[str(tmpl.role)] = str(tmpl.balance_cadence)
         return cls(
             limit_caps_cents=limit_caps,
             pending_age_caps=pending,
@@ -114,6 +134,8 @@ class BoundaryProfile:
             xor_groups=xor,
             multi_xor_children=multi_xor,
             chain_parent_excluded=frozenset(excluded),
+            singleton_cadences=singleton_cadences,
+            role_cadences=role_cadences,
         )
 
 

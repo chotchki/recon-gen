@@ -233,6 +233,7 @@ def test_every_promoted_invariant_is_reachable_by_a_real_scenario() -> None:
     # that ALL of them must be in this single sweep.
     from recon_gen.common.spine import (
         AnomalyInvariant as _Anom,
+        BalanceCadenceGapInvariant as _BCG,
         ChainParentDisagreementInvariant as _CPD,
         DriftInvariant as _Drift,
         ExpectedEodBalanceInvariant as _Eod,
@@ -257,6 +258,9 @@ def test_every_promoted_invariant_is_reachable_by_a_real_scenario() -> None:
         _SU().scenario_for("SubledgerCharge", as_of=_AS_OF, overshoot_seconds=60),
         _LB().scenario_for("CustomerLedger", "ExternalRailOutbound",
                             direction="Outbound", overshoot=100.0),
+        # DS.5.1 — balance_cadence_gap: the declared explicit_daily
+        # account (ClearingSuspense) skips the middle of three days.
+        _BCG().scenario_for(anchor_day=_ANCHOR),
         # L2-shape integrity (4 invariants; 6 generators — XOR/multi-XOR
         # each have missed+overlap variants; fan_in has healthy too).
         # Pick the variant that produces a matview row per invariant.

@@ -798,20 +798,53 @@ def _render_balance_cadence_gap_section(
     # fleet-quiet days disappear from the balance_cadence_gap surface;
     # under sparse cadence + an explicit_daily account that missed a
     # quiet day, the gap silently went undetected.
+    #
+    # DS.5.1 — the frame opens from EITHER feed. Balance days alone
+    # meant a period where transactions flowed but the balance feed
+    # was broken ENTIRELY produced an empty spine and zero alarms —
+    # the loudest gap of all, silent. UNION-of-MINs (not LEAST) —
+    # Oracle's LEAST returns NULL when ANY argument is NULL, PG's
+    # skips NULLs; the UNION shape behaves identically on all three.
+    def _frame_edge(agg: str) -> str:
+        return (
+            f"(SELECT {agg}(d) FROM ("
+            f"SELECT {agg}({to_date('business_day_start', dialect)}) AS d "
+            f"FROM {p}_current_daily_balances "
+            f"WHERE account_scope = 'internal' "
+            f"UNION ALL "
+            f"SELECT {agg}({to_date('posting', dialect)}) "
+            f"FROM {p}_current_transactions "
+            f"WHERE account_scope = 'internal' AND status <> 'Failed'"
+            f") frame_days)"
+        )
+
     in_scope_spine = calendar_day_spine_cte(
         cte_name="in_scope_days",
         column_alias="business_day_start",
-        start_expr=(
-            f"(SELECT MIN({to_date('business_day_start', dialect)}) "
-            f"FROM {p}_current_daily_balances "
-            f"WHERE account_scope = 'internal')"
-        ),
-        end_expr=(
-            f"(SELECT MAX({to_date('business_day_start', dialect)}) "
-            f"FROM {p}_current_daily_balances "
-            f"WHERE account_scope = 'internal')"
-        ),
+        start_expr=_frame_edge("MIN"),
+        end_expr=_frame_edge("MAX"),
         dialect=dialect,
+    )
+
+    # DS.5.1 — the account universe (born-red witnesses CG2 + CG3 in
+    # tests/data/kats/cadence_gap.json). Pre-fix it came from balance
+    # rows alone, so a declared explicit_daily account with ZERO rows
+    # anywhere and a transactions-only sparse account with activity
+    # were both invisible — all-missing silent while one-missing
+    # alarmed (the DS.3.3c blind-spot class). Three sources now:
+    # balance-observed, non-failed-leg-observed and L2-DECLARED
+    # singletons (the declaration binds even when the account never
+    # appears in either feed). MAX() collapses the denormalized
+    # columns per the BV.6 FD-by-account_id argument.
+    from_dual = " FROM dual" if dialect is Dialect.ORACLE else ""
+    null_role = typed_null(varchar_type(100, dialect), dialect)
+    declared_rows = "".join(
+        f"        UNION ALL\n"
+        f"        SELECT '{a.id}', '{a.name}', '{a.role}', "
+        + (f"'{a.parent_role}'" if a.parent_role is not None else null_role)
+        + f"{from_dual}\n"
+        for a in instance.accounts
+        if a.balance_cadence is not None and a.scope == "internal"
     )
 
     return (
@@ -828,10 +861,26 @@ def _render_balance_cadence_gap_section(
         "-- ---------------------------------------------------------------------\n"
         f"{mv_kw} {p}_balance_cadence_gap{mv_opt} AS\n"
         "WITH all_internal AS (\n"
-        "    SELECT DISTINCT\n"
-        "        account_id, account_name, account_role, account_parent_role\n"
-        f"    FROM {p}_current_daily_balances\n"
-        "    WHERE account_scope = 'internal'\n"
+        "    -- DS.5.1 universe: balance-observed + non-failed-leg-\n"
+        "    -- observed + L2-declared-cadence singletons. See the\n"
+        "    -- born-red witnesses CG2/CG3 (cadence_gap KATs).\n"
+        "    SELECT account_id,\n"
+        "           MAX(account_name) AS account_name,\n"
+        "           MAX(account_role) AS account_role,\n"
+        "           MAX(account_parent_role) AS account_parent_role\n"
+        "    FROM (\n"
+        "        SELECT account_id, account_name, account_role,\n"
+        "               account_parent_role\n"
+        f"        FROM {p}_current_daily_balances\n"
+        "        WHERE account_scope = 'internal'\n"
+        "        UNION ALL\n"
+        "        SELECT account_id, account_name, account_role,\n"
+        "               account_parent_role\n"
+        f"        FROM {p}_current_transactions\n"
+        "        WHERE account_scope = 'internal' AND status <> 'Failed'\n"
+        f"{declared_rows}"
+        "    ) universe_sources\n"
+        "    GROUP BY account_id\n"
         "),\n"
         f"{in_scope_spine},\n"
         "spine AS (\n"

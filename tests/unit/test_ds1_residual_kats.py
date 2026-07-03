@@ -20,9 +20,11 @@ import pytest
 from recon_gen.common.money import Cents
 from recon_gen.common.spine.residuals import (
     BalanceRow,
+    CadenceGap,
     LegRow,
     ResidualState,
     TrailEdge,
+    cadence_gap_residual,
     chain_parent_residual,
     drift_residual,
     expected_eod_residual,
@@ -90,6 +92,10 @@ def _edge(raw: list[Any]) -> TrailEdge:
     return TrailEdge(str(raw[0]), str(raw[1]), str(raw[2]), int(raw[3]))
 
 
+def _gap(raw: list[Any]) -> CadenceGap:
+    return CadenceGap(str(raw[0]), date.fromisoformat(str(raw[1])), str(raw[2]))
+
+
 def _run_vector(invariant: str, vec: dict[str, Any]) -> object:
     """Dispatch one KAT vector to its residual; returns the raw result."""
     cell = vec.get("cell", {})
@@ -135,6 +141,12 @@ def _run_vector(invariant: str, vec: dict[str, Any]) -> object:
     if invariant == "money_trail":
         emitted = frozenset(_edge(e) for e in vec["emitted"])
         return money_trail_residual(state, emitted)
+    if invariant == "cadence_gap":
+        emitted_gaps = frozenset(_gap(g) for g in vec["emitted"])
+        return cadence_gap_residual(
+            state, params["singleton_cadences"], params["role_cadences"],
+            emitted_gaps,
+        )
     raise AssertionError(f"no dispatcher for invariant {invariant!r}")
 
 
@@ -143,6 +155,10 @@ def _expected_value(invariant: str, kind: str, raw: object) -> object:
         assert isinstance(raw, list)
         edges = cast("list[list[Any]]", raw)
         return frozenset(_edge(e) for e in edges)
+    if invariant == "cadence_gap":
+        assert isinstance(raw, list)
+        gaps = cast("list[list[Any]]", raw)
+        return frozenset(_gap(g) for g in gaps)
     if kind == "MONEY":
         assert raw is None or isinstance(raw, int)
         return _cents_or_none(raw)

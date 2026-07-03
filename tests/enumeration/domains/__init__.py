@@ -24,7 +24,12 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Final
 
-from tests.enumeration.domains import _assembly, fan_in, money_trail
+from tests.enumeration.domains import (
+    _assembly,
+    cadence_gap,
+    fan_in,
+    money_trail,
+)
 from tests.enumeration.harness import PackedDomain
 
 # Lazy builders — construction deferred to first use so collection
@@ -34,6 +39,7 @@ DOMAIN_BUILDERS: Final[dict[str, Callable[[], PackedDomain]]] = {
     "transfer_keyed": _assembly.build_transfer_keyed_domain,
     "fan_in_variant": fan_in.build_variant_domain,
     "money_trail": money_trail.build_money_trail_domain,
+    "cadence_gap": cadence_gap.build_cadence_gap_domain,
 }
 
 # detector -> packed domains that answer for it (the gate asserts
@@ -51,6 +57,7 @@ DETECTOR_DOMAINS: Final[dict[str, tuple[str, ...]]] = {
     "fan_in": ("transfer_keyed", "fan_in_variant"),
     "multi_xor": ("transfer_keyed",),
     "money_trail": ("money_trail",),
+    "balance_cadence_gap": ("cadence_gap",),
 }
 
 # The l1_exceptions union check runs on the packed DBs whose cells

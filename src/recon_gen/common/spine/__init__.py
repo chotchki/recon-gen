@@ -68,6 +68,10 @@ from recon_gen.common.spine.limit_breach import (
     LimitBreachGenerator,
     LimitBreachInvariant,
 )
+from recon_gen.common.spine.balance_cadence_gap import (
+    BalanceCadenceGapGenerator,
+    BalanceCadenceGapInvariant,
+)
 from recon_gen.common.spine.overdraft import OverdraftGenerator, OverdraftInvariant
 from recon_gen.common.spine.stuck_pending import (
     StuckPendingGenerator,
@@ -168,6 +172,8 @@ __all__ = [
     "ExpectedEodBalanceInvariant",
     "ExpectedEodBalanceGenerator",
     # Stuck-Pending family — first transaction-based + L2-coupled (AU.3.b)
+    "BalanceCadenceGapInvariant",
+    "BalanceCadenceGapGenerator",
     "StuckPendingInvariant",
     "StuckPendingGenerator",
     # Stuck-Unbundled family — twin of stuck_pending (AU.3.c)

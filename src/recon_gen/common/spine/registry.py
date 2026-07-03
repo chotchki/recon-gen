@@ -103,6 +103,10 @@ from recon_gen.common.spine.multi_xor_violation import (
     MultiXorOverlapGenerator,
     MultiXorViolationInvariant,
 )
+from recon_gen.common.spine.balance_cadence_gap import (
+    BalanceCadenceGapGenerator,
+    BalanceCadenceGapInvariant,
+)
 from recon_gen.common.spine.overdraft import OverdraftGenerator, OverdraftInvariant
 from recon_gen.common.spine.stuck_pending import (
     StuckPendingGenerator,
@@ -162,6 +166,12 @@ INVARIANT_GENERATOR_EDGES: Final[
     # AU.4 — single-edge: Posted transaction with no balance row ⇒
     # no drift JOIN match ⇒ no drift fire.
     LimitBreachGenerator: (LimitBreachInvariant,),
+    # DS.5.1 — single-edge: the plant emits balance rows ONLY (no legs)
+    # on the flanking days of a skipped middle day, so the declared
+    # explicit_daily account gaps the middle day. Balance rows that
+    # exist (flanks) net zero legs → no drift; the gap day has no row
+    # so nothing else keys on it.
+    BalanceCadenceGapGenerator: (BalanceCadenceGapInvariant,),
     # AX.1 — chain_parent_disagreement: transfers-only emit (no
     # balance rows) → single-edge to its own invariant.
     ChainParentDisagreementGenerator: (ChainParentDisagreementInvariant,),
@@ -242,9 +252,12 @@ ALL_L1_INVARIANTS: Final[tuple[type[Invariant], ...]] = (
     StuckPendingInvariant,
     StuckUnbundledInvariant,
     LimitBreachInvariant,
+    BalanceCadenceGapInvariant,
 )
 """L1 accounting / audit-trail invariants — the regulator-facing
-matview surface that the audit PDF covers."""
+matview surface that the audit PDF covers. DS.5.1 added
+``BalanceCadenceGapInvariant`` (inventory row 14 — emitted + unioned
+but registry-uncovered until the completeness gate forced it in)."""
 
 
 ALL_L2_SHAPE_INVARIANTS: Final[tuple[type[Invariant], ...]] = (
@@ -286,6 +299,7 @@ ALL_L1_GENERATORS: Final[tuple[type[ViolationGenerator], ...]] = (
     StuckPendingGenerator,
     StuckUnbundledGenerator,
     LimitBreachGenerator,
+    BalanceCadenceGapGenerator,
 )
 """L1 accounting generators — match `ALL_L1_INVARIANTS`."""
 

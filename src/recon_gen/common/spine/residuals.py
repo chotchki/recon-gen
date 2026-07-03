@@ -30,6 +30,7 @@ Threshold / cardinality / derivation residuals are plain Python — their
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from enum import Enum, auto
@@ -125,6 +126,21 @@ class TrailEdge:
     src_account_id: str
     tgt_account_id: str
     depth: int
+
+
+@dataclass(frozen=True, slots=True)
+class CadenceGap:
+    """One cadence-gap cell: an (account, day) the institution's
+    declared balance cadence says MUST reconcile, with no current
+    balance claim that day. ``gap_kind`` names the firing mode —
+    ``declared_daily_missing`` or ``sparse_with_activity``."""
+
+    account_id: str
+    day: date
+    gap_kind: str
+
+
+_NO_DAYS: frozenset[date] = frozenset()
 
 
 def when(cond: bool, then: T, otherwise: T) -> T:
@@ -578,3 +594,106 @@ def money_trail_residual(
     the law derives and the edges the detector emitted. Empty = law
     holds."""
     return expected_trail_edges(state) ^ emitted
+
+
+def expected_cadence_gaps(
+    state: ResidualState,
+    singleton_cadences: Mapping[str, str],
+    role_cadences: Mapping[str, str],
+) -> frozenset[CadenceGap]:
+    """Law 14 (balance cadence, CL.0 audit §4 / CL.6 lock — authored
+    from the WRITTEN lock, not the matview):
+
+    - **In-scope days** — every calendar day in ``[min, max]`` over the
+      observed institutional frame: internal current-balance business
+      days UNION posting days of internal non-failed current legs.
+      Either feed opens the frame — a period where transactions flow
+      but the balance feed is broken ENTIRELY is the loudest gap of
+      all, not an empty spine.
+    - **Account universe** — internal accounts observed in current
+      balances, internal accounts observed in non-failed current legs,
+      and every singleton the L2 DECLARES a cadence for (the
+      institution's declaration binds even when the account never
+      appears in either feed — all-missing must alarm, not vanish;
+      the DS.3.3c precedent).
+    - **Cadence resolution** — declared singleton (by account_id) wins
+      over declared template role; everything else defaults to
+      ``sparse`` (CL.0 Lock 3 ordering).
+    - **A gap fires** at (account, day) with no current balance claim
+      when the cadence is ``explicit_daily`` (declared: every day must
+      report), or when it is ``sparse`` and the account had non-failed
+      leg activity that day (something happened with no close to
+      reconcile against).
+
+    The activity predicate is ``status != 'Failed'`` — an EXISTENCE
+    predicate, deliberately distinct from the firing-count status law
+    (operator-pinned at the DS.3.3 sweep): an unknown status counts as
+    activity, so corrupt status data cannot silence the alarm.
+
+    Callers pass L2-RESOLVED cadence maps for INTERNAL entities only
+    (the BoundaryProfile route); role lookup uses the account's
+    observed role, balances first then legs.
+    """
+    balances = [
+        b for b in current_balances(state) if b.account_scope == "internal"
+    ]
+    legs = [
+        leg for leg in current_legs(state)
+        if leg.account_scope == "internal" and leg.status != "Failed"
+    ]
+    days = {b.day for b in balances} | {leg.posting.date() for leg in legs}
+    if not days:
+        return frozenset()
+    start, end = min(days), max(days)
+    universe = (
+        {b.account_id for b in balances}
+        | {leg.account_id for leg in legs}
+        | set(singleton_cadences)
+    )
+    roles: dict[str, str | None] = {}
+    for b in balances:
+        roles.setdefault(b.account_id, b.account_role)
+    for leg in legs:
+        roles.setdefault(leg.account_id, leg.account_role)
+    has_claim = {(b.account_id, b.day) for b in balances}
+    activity: dict[str, set[date]] = {}
+    for leg in legs:
+        activity.setdefault(leg.account_id, set()).add(leg.posting.date())
+    gaps: set[CadenceGap] = set()
+    for account in sorted(universe):
+        cadence = singleton_cadences.get(account)
+        if cadence is None:
+            role = roles.get(account)
+            cadence = (
+                role_cadences.get(role, "sparse")
+                if role is not None else "sparse"
+            )
+        day = start
+        while day <= end:
+            if (account, day) not in has_claim:
+                if cadence == "explicit_daily":
+                    gaps.add(CadenceGap(
+                        account, day, "declared_daily_missing",
+                    ))
+                elif (
+                    cadence == "sparse"
+                    and day in activity.get(account, _NO_DAYS)
+                ):
+                    gaps.add(CadenceGap(
+                        account, day, "sparse_with_activity",
+                    ))
+            day = day + timedelta(days=1)
+    return frozenset(gaps)
+
+
+def cadence_gap_residual(
+    state: ResidualState,
+    singleton_cadences: Mapping[str, str],
+    role_cadences: Mapping[str, str],
+    emitted: frozenset[CadenceGap],
+) -> frozenset[CadenceGap]:
+    """Derivation residual: symmetric difference between the gaps the
+    law derives and the gaps the detector emitted. Empty = law holds."""
+    return expected_cadence_gaps(
+        state, singleton_cadences, role_cadences,
+    ) ^ emitted

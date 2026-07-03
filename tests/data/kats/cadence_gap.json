@@ -1,0 +1,190 @@
+{
+  "invariant": "cadence_gap",
+  "kind": "DERIVATION",
+  "_comment": "Law 14 (balance cadence, CL.0 audit s4 / CL.6 lock). Hand-derived from the written lock; derivations in docs/audits/ds_1_kat_derivations.md. CG2 + CG3 are the DS.5.1 born-red witnesses: the pre-fix engine universe came from balance rows only, so an all-missing declared account and a transactions-only account were invisible.",
+  "vectors": [
+    {
+      "name": "CG1-explicit-daily-misses-middle-day",
+      "comment": "Declared singleton on explicit_daily has rows d0 + d2, nothing d1; its own rows open the [d0,d2] frame.",
+      "state": {
+        "legs": [],
+        "balances": [
+          {"account_id": "X", "entry": 1, "day": "2030-01-01", "money": 0},
+          {"account_id": "X", "entry": 2, "day": "2030-01-03", "money": 0}
+        ]
+      },
+      "params": {
+        "singleton_cadences": {"X": "explicit_daily"},
+        "role_cadences": {}
+      },
+      "emitted": [],
+      "expected": [["X", "2030-01-02", "declared_daily_missing"]]
+    },
+    {
+      "name": "CG2-declared-singleton-zero-rows-fires-whole-frame",
+      "comment": "BORN-RED WITNESS (all-missing must alarm): X is DECLARED explicit_daily and appears in NEITHER feed; a sparse bystander opens a two-day frame; the declaration binds — X gaps both days.",
+      "state": {
+        "legs": [],
+        "balances": [
+          {"account_id": "A", "entry": 1, "day": "2030-01-01", "money": 100},
+          {"account_id": "A", "entry": 2, "day": "2030-01-02", "money": 100}
+        ]
+      },
+      "params": {
+        "singleton_cadences": {"X": "explicit_daily"},
+        "role_cadences": {}
+      },
+      "emitted": [],
+      "expected": [
+        ["X", "2030-01-01", "declared_daily_missing"],
+        ["X", "2030-01-02", "declared_daily_missing"]
+      ]
+    },
+    {
+      "name": "CG3-transactions-only-sparse-activity",
+      "comment": "BORN-RED WITNESS (sparse_with_activity's strongest case): T posts a leg on d0, never emits a balance row at all — activity with no close to reconcile against.",
+      "state": {
+        "legs": [
+          {"id": "L1", "entry": 1, "account_id": "T", "amount": 500, "status": "Posted", "posting": "2030-01-01T12:00:00", "transfer_id": "t1"}
+        ],
+        "balances": [
+          {"account_id": "A", "entry": 1, "day": "2030-01-01", "money": 100}
+        ]
+      },
+      "params": {
+        "singleton_cadences": {},
+        "role_cadences": {}
+      },
+      "emitted": [],
+      "expected": [["T", "2030-01-01", "sparse_with_activity"]]
+    },
+    {
+      "name": "CG4-failed-only-activity-is-not-activity",
+      "comment": "The existence predicate is status != Failed (operator-pinned, DS.3.3): a Failed-only account neither joins the universe nor counts as activity.",
+      "state": {
+        "legs": [
+          {"id": "L1", "entry": 1, "account_id": "T", "amount": 500, "status": "Failed", "posting": "2030-01-01T12:00:00", "transfer_id": "t1"}
+        ],
+        "balances": [
+          {"account_id": "A", "entry": 1, "day": "2030-01-01", "money": 100}
+        ]
+      },
+      "params": {
+        "singleton_cadences": {},
+        "role_cadences": {}
+      },
+      "emitted": [],
+      "expected": []
+    },
+    {
+      "name": "CG5-role-cadence-and-singleton-precedence",
+      "comment": "Y (role R, explicit_daily by template) misses d2 of the [d1,d2] frame. Z shares role R but its SINGLETON declaration says sparse and Z has no d2 activity — the singleton wins (CL.0 Lock 3 ordering), so Z stays silent.",
+      "state": {
+        "legs": [],
+        "balances": [
+          {"account_id": "A", "entry": 1, "day": "2030-01-01", "money": 100},
+          {"account_id": "A", "entry": 2, "day": "2030-01-02", "money": 100},
+          {"account_id": "Y", "entry": 3, "day": "2030-01-01", "money": 0, "account_role": "R"},
+          {"account_id": "Z", "entry": 4, "day": "2030-01-01", "money": 0, "account_role": "R"}
+        ]
+      },
+      "params": {
+        "singleton_cadences": {"Z": "sparse"},
+        "role_cadences": {"R": "explicit_daily"}
+      },
+      "emitted": [],
+      "expected": [["Y", "2030-01-02", "declared_daily_missing"]]
+    },
+    {
+      "name": "CG6-pending-counts-as-activity",
+      "comment": "Sparse account S: d1 has a balance row + activity (no gap); d2 has a PENDING leg and no row — unknown/in-flight is still activity, corrupt or in-flight status cannot silence the alarm.",
+      "state": {
+        "legs": [
+          {"id": "L1", "entry": 1, "account_id": "S", "amount": 100, "status": "Posted", "posting": "2030-01-01T09:00:00", "transfer_id": "t1"},
+          {"id": "L2", "entry": 2, "account_id": "S", "amount": 200, "status": "Pending", "posting": "2030-01-02T09:00:00", "transfer_id": "t2"}
+        ],
+        "balances": [
+          {"account_id": "S", "entry": 3, "day": "2030-01-01", "money": 100}
+        ]
+      },
+      "params": {
+        "singleton_cadences": {},
+        "role_cadences": {}
+      },
+      "emitted": [],
+      "expected": [["S", "2030-01-02", "sparse_with_activity"]]
+    },
+    {
+      "name": "CG7-supersession-flows-through",
+      "comment": "S's d2 leg is superseded Posted -> Failed (higher entry wins): the activity vanishes and the d2 gap with it. The d1 balance row superseded to a new money value is still a PRESENT claim — no gap either.",
+      "state": {
+        "legs": [
+          {"id": "L1", "entry": 1, "account_id": "S", "amount": 100, "status": "Posted", "posting": "2030-01-01T09:00:00", "transfer_id": "t1"},
+          {"id": "L2", "entry": 2, "account_id": "S", "amount": 200, "status": "Posted", "posting": "2030-01-02T09:00:00", "transfer_id": "t2"},
+          {"id": "L2", "entry": 3, "account_id": "S", "amount": 200, "status": "Failed", "posting": "2030-01-02T09:00:00", "transfer_id": "t2"}
+        ],
+        "balances": [
+          {"account_id": "S", "entry": 4, "day": "2030-01-01", "money": 100},
+          {"account_id": "S", "entry": 5, "day": "2030-01-01", "money": 150}
+        ]
+      },
+      "params": {
+        "singleton_cadences": {},
+        "role_cadences": {}
+      },
+      "emitted": [],
+      "expected": []
+    },
+    {
+      "name": "CG8-legs-alone-open-the-frame",
+      "comment": "No balance rows exist ANYWHERE (the balance feed is broken entirely — the loudest failure): the frame opens from leg posting days alone and the sparse activity gap fires.",
+      "state": {
+        "legs": [
+          {"id": "L1", "entry": 1, "account_id": "T", "amount": 500, "status": "Posted", "posting": "2030-01-01T12:00:00", "transfer_id": "t1"}
+        ],
+        "balances": []
+      },
+      "params": {
+        "singleton_cadences": {},
+        "role_cadences": {}
+      },
+      "emitted": [],
+      "expected": [["T", "2030-01-01", "sparse_with_activity"]]
+    },
+    {
+      "name": "CG9-agreeing-emission-zeroes-the-residual",
+      "comment": "Same state as CG1 with the detector emitting exactly the law's gap — symmetric difference empty.",
+      "state": {
+        "legs": [],
+        "balances": [
+          {"account_id": "X", "entry": 1, "day": "2030-01-01", "money": 0},
+          {"account_id": "X", "entry": 2, "day": "2030-01-03", "money": 0}
+        ]
+      },
+      "params": {
+        "singleton_cadences": {"X": "explicit_daily"},
+        "role_cadences": {}
+      },
+      "emitted": [["X", "2030-01-02", "declared_daily_missing"]],
+      "expected": []
+    },
+    {
+      "name": "CG10-external-scope-is-out-of-scope",
+      "comment": "An external-scope account with activity and no balance row never enters the universe — the cadence contract binds internal accounts only.",
+      "state": {
+        "legs": [
+          {"id": "L1", "entry": 1, "account_id": "E", "amount": 500, "status": "Posted", "posting": "2030-01-01T12:00:00", "transfer_id": "t1", "account_scope": "external"}
+        ],
+        "balances": [
+          {"account_id": "A", "entry": 1, "day": "2030-01-01", "money": 100}
+        ]
+      },
+      "params": {
+        "singleton_cadences": {},
+        "role_cadences": {}
+      },
+      "emitted": [],
+      "expected": []
+    }
+  ]
+}
