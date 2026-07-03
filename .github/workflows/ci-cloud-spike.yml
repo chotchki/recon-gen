@@ -192,7 +192,7 @@ jobs:
           db:
             dialect: "${D}"
             url: "${DB_URL}"
-            table_prefix: "recon_spike_${{ github.run_id }}_${D:0:2}"
+            table_prefix: "rc_${{ github.run_id }}_${D:0:2}"
             default_l2_instance: "tests/l2/sasquatch_pr.yaml"
           auth:
             oidc:
