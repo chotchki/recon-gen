@@ -5657,3 +5657,58 @@ After DV ships (v15.0.0) and soaks one release cycle, excise QuickSight entirely
 
 
 
+---
+
+## 2026-07-02
+
+## Phase DM - Daily Statement App2-only cascade + day-availability picker (draft 2026-06-16)
+
+**Why:** App2's server-rendered model can dynamically query "what data exists for this account" cheaply per request; QS can't (dataset-parameter cross-wiring hits `[[project_qs_url_parameter_no_control_sync]]`). This is the right kind of symmetry break — driven by renderer capability, not arbitrary preference. Per `[[feedback_qs_convention_origin]]` ("App2 may break the rule when a better affordance exists"), this is the second authorized App2-over-QS divergence.
+
+**Principle (prominent in DM.0):** App2 cascades on search/filter; the DATA stays consistent with QS. The symmetry break is UX-of-finding-the-row, not what-the-row-shows. Motivation: every tester gets burned by QS's cascade-that-doesn't (cascading dataset parameters silently failing, control-sync quirks).
+
+**Locks (operator-confirmed 2026-06-16):**
+- **Picker order**: Role → Account → Day (top-to-bottom in sidebar; left-to-right in horizontal layout). Reads as a natural drill-down progression.
+- **Role → Account cascade** via the existing BR.1 cascade-refresh endpoint pattern.
+- **Account → Day filter — DECORATION not RESTRICTION.** Sparse accounts mean any day up to `as_of` stays valid as a pick target. Flatpickr's `onDayCreate` callback adds CSS classes (`.has-transactions`, `.has-balance`, `.has-both`) based on a server-supplied date map. No `enable:`/`disable:` arrays — full date space stays clickable.
+- **QS keeps Account + Day pickers, no work, just document the divergence** via structured triple (quirks.md + memory file).
+- **Renderer-gate primitive: strongly typed in core trees** (per operator preference, not a registry side-table; tree-walking already pays off in DL.1's `iter_cross_sheet_drills` + DA.5's `Table.__post_init__` type-system gate). If no primitive exists, add `app2_only: bool` field to relevant tree primitives (Filter / ParameterControl) + branch in QS emitter walk to skip those nodes — that's DM.0.5 (prereq).
+- **One commit per leaf**; release ships as v14.5.0.
+
+- [x] DM.0 - **Audit + design lock** at `docs/audits/dm_0_daily_statement_app2_cascade.md` (shipped overnight, commit `03769610`; 43KB doc covers the principle, cascade chain, BR.1 cascade-endpoint contract, day-availability endpoint contract, decoration-not-restriction rationale, empty-state UX, and the DM.0.5 renderer-gate scout). Box was left untick'd by the overnight run.
+- [x] DM.0.5 - **Renderer-gate primitive** (if scout shows none exists) — add typed `app2_only: bool` field to relevant tree primitives (Filter / ParameterControl), branch in QS emitter walk to skip them. Tree-walking unit test asserts QS-side surface count vs App2-side surface count when any `app2_only` nodes exist.
+- [x] DM.1 - **Add Role picker to Daily Statement** (App2-only via the renderer-gate primitive). Wire as third picker between Account and Day.
+- [x] DM.2 - **Role → Account cascade** via the existing BR.1 cascade-refresh endpoint. Reuse `dropdown-options/...` route pattern.
+- [x] DM.3 - **Day picker decoration**: server endpoint returns `{date: ['transactions'|'balance']}` map; Flatpickr `onDayCreate` adds CSS classes; CSS rules for the markers (dot / underline / bullet — pick at design time in DM.0).
+- [x] DM.4 - **Document the QS divergence** (structured triple): append to `docs/reference/quicksight-quirks.md` (`2e3bc6f2`) + file `project_qs_no_searchfilter_cascading.md` memory cross-linking the rationale. Plus DM polish this session: day markers fill=transactions/ring=balance + legend (`c635f603`), KPI fit-to-width + bottom-align (`a613398c`), cascade clear-on-source-change (`64396f49`), pre-existing biome/typing-smell debt cleared (`e358104c`/`162c7671`). gl-1010 weekend-balance question → Backlog.
+- [x] DM.5 - **Tests**: unit (cascade SQL emit, day-availability projection, empty-state hint); E2E App2-only (pick role → account narrows; pick account → day decorations match seed; pick account with no data → empty-state hint shown). QS branch is a no-op assertion that Role picker doesn't exist on QS.
+- [x] DM.6 - **Phase exit + v14.5.0 release cut** (operator-driven — release notes + version bump + tag at operator's discretion).
+
+
+---
+
+## 2026-07-02
+
+## Phase DP - qs_browser regression sweep (overnight DL.3/DK fallout, 2026-06-16)
+
+Main went red at the v14.4.0 cut: the qs_browser layer hung (stdout-stuck >900s → SIGKILL → exit 247) on top of picker/drill failures. Root: DL.3.1/DL.3.7 `_spine_plant` zero-amount marker tx (recent `posting` via the carry-day sweep) won picker anchors + led drill-source rows. Operator decision 2026-06-16: plants ARE user-facing errors and won't round-trip cleanly; tests must exercise VALID rows; pickers selecting errors is a backlog enhancement.
+
+- [x] DP.0 - Picker-anchor fix: exclude `_spine_plant` from the L1 Transactions + L2FT Rails additive-picker anchors (anchor a valid transfer). Resolves the 4 picker failures + the exit-247 hang. Committed `96bae2ab`; verified on a narrowed qs_browser run (31 passed, hang gone).
+- [x] DP.1 - QS driver hardening: convert the BO.1 one-shot 800ms empty-state re-check into a bounded condition-poll (`_visual_settled_empty`) on both `table_row_count` + `table_rows`, fixing the flaky `dropdown_pickers_inverse_excludes_anchor[qs-*]` restore step (DOM paint lag > 800ms under concurrent-worker load). Verified: every `dropdown_inverse` test passes (incl. the previously-hard-failed `[qs-Pending Aging]` `assert 0==1` and the formerly-flaky `[qs-Drift]`/`[qs-Transactions]`), no reruns needed.
+- [x] DP.2 - Drill guardrail `Stuck Unbundled Detail → Transactions` (app2). **Root cause (triage):** the drilled transfer is the oldest stuck one (legs at the window start, 2026-03-18); App2's `_serialize_table_row_drills` DROPPED the drill's `DrillStaticDateTime` date-widen (its premise "App2 date filter defaults to all rows" went false at the DK data-anchor refactor), so the old legs fell outside the destination's as_of window → empty (confirmed: wide date → 4 rows). **Fix:** emit static-`value` drill params (render.py) + `rowDrillUrl` uses them (bootstrap.js) — fixes every Pending/Unbundled/Supersession → Transactions date-widen drill. JS unit test added; e2e verify pending in the full run.
+- [x] DP.3 - Drill guardrail `L2 Violation Detail → Chains` (app2): row 0's entity_a is `_spine_plant` (the DL.3.1 marker rail surfacing as an L2FT violation) → "View in Chains" writes a non-existent chain → empty. **Operator decision 2026-06-16: keep the marker visible (plants ARE errors); test-side exempt** — the guardrail `pytest.skip`s the populated/narrowed contract when row 0's drilled value carries `_PLANT_ERROR_SENTINEL` (`_spine_plant`), mirroring the picker-anchor exemption. e2e verify pending in the full run.
+- [x] DP.5 - App2 trainer-apply timeout bump (120s → 300s). The full-chain run aborted at the app2 layer on `test_trainer_dogfood_per_kind[or-expected_eod_balance_breach]` — `trainer_apply`'s `_trainer_wait_until_finished` hit the 120s ceiling on Oracle's matview refresh (heavier since DK added the `data_anchor` matview; the docstring already said "oracle ~few min" but defaulted to 2 min). Passed in CI, timed out locally (slower Oracle). Operator-directed: it's a timeout we control → raise it (sibling `trainer_start_session` already uses 10 min). Unrelated to the DP picker/drill fixes.
+- [x] DP.4 - Full `up_to=qs_browser` green + push the batch — pushed (origin/main `46523d05..6224a83b`), CI green (run 27637281875), cut **v14.4.1**. Backlog filed: enhance pickers to select planted-error values. Open follow-ups: DP.5-revert (timeout was the wrong instinct; real cause was the stale Oracle container), DG container-recycle gap, Phase DQ (typed dependency order).
+
+
+---
+
+## 2026-07-02
+
+## Phase EB - Z3 spec-theorem lane — symbolically execute the REAL residual laws + prove their forall-Z theorems on-chain (formerly DST; promoted from the DS backlog after DS-core landed green in v16.1.0)
+- [x] EB.0 - Setup + decisions: pin z3-solver==4.16.0 in the dev extra (exact — the version is part of the semantic fingerprint); write docs/audits/eb_0_z3_lane.md resolving the flags — the symbolic-Cents TWO-seam finding (Cents order=True raises on z3 terms, so the adapter needs a symbolic-Cents wrapper AND symbolic when, not just when), whether MONEY theorems add additivity/sign beyond the doc's set (failed-leg inertness / supersession idempotence / AU.2 composition / scale-homogeneity at {-1,2,3}), recover the AU.2 composition lemma's exact statement from the AU-phase record, money_trail k-unroll scope + depth, tier-by-measurement, verdict-pin + SolverInconclusive rules, the canon semantic-fingerprint discipline.
+- [x] EB.1 - Symbolic-execution adapter + dual-run KAT canary. Build the symbolic-Cents wrapper (.value is a z3 ArithRef; <,>,<=,==,+,-,neg,*int emit z3 terms/BoolRefs) + the symbolic when (z3.If on BoolRef, normal select on bool) + inject both at the residual module's execution seam, so the ACTUAL MONEY_FAMILY_RESIDUALS bodies run over z3 terms with ZERO transliteration (no fifth copy). Dual-run canary: reuse the DS.1 KAT loader, inject money values as symbolic constants, assert concrete residual == model.eval(symbolic residual) on every money KAT vector. MONEY family only (threshold //-floor, cardinality set-ops, derivation BFS stay concrete by design).
+- [x] EB.2 - Claim-1 forall-Z theorems + on-chain solver + semantic-fingerprint cache. Theorems over EB.1's symbolic executor (NOT the spike's encoding-equiv shape): failed-leg inertness, supersession idempotence, AU.2 composition lemma, scale-homogeneity at concrete scalars {-1,2,3}; money_trail k-unrolled BFS; anomaly excluded by name. Productionize canon/obligations.py::solve_bounded as the on-chain runner (per-obligation pinned expected verdict; off-pin = ordinary failure; sat-on-law prints the witness, never xfail-able; unknown/timeout = SolverInconclusive -> ordinary failure -> operator triage -> hand-set raises=SolverInconclusive xfail only, never auto; pinned z3 4.16.0 + rlimit 500M + wall-cap). Productionize canon/canon.py as the cache (canonical SMT + z3 version + budget; STALE-on-miss re-solves; share normalization helpers with DS.7's --check). Tier MEASURED (<30s avg -> unit else agreement).
+- [>] EB.3 - Z3 domain-repair loop — DEFERRED (operator-decided: build only after hand-triage of a surviving mutant has hurt TWICE). Law-expressible mutants only; closed verdict vocab {discriminator-found, none-within-k, unknown-budget}; non-residual-image mutants (UNION-vs-UNION-ALL, JOIN-flavor, index/refresh-order) route to engine-side domain search, not here. Placeholder until the pain threshold hits.
+- [x] EB.4 - Phase exit + release. Full chain green (the on-chain solver step at its measured tier) + docs; sweep EB to PLAN_ARCHIVE.md; RELEASE_NOTES entry (ask before cut per always-ask-before-release). Then the formal-methods blog draft can honestly cover the Z3 lane as built, not backlogged.
+

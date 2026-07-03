@@ -12,6 +12,29 @@
 > `--help`) against the code. The v14.6.0 → v13.14.4 entries below predate that
 > pass and are left as written.
 
+## v16.2.0 — the invariant laws now carry machine-checked ∀-integer theorems
+
+Minor. v16.1.0 tied each invariant law to the SQL that detects it by EXHAUSTIVE ENUMERATION — every cell in a finite boundary domain, real engine, keys and magnitudes. That proves the detector matches the law wherever the domain reaches. It says nothing about the infinity of inputs outside it. This release closes that half: the structural properties a law has to satisfy for ALL integers — scale it and the residual scales, add an account-disjoint batch and the residual doesn't move, supersede a leg and the min-clamp is unchanged — are now proven by z3, on the chain, against the REAL law code.
+
+The part that makes it trustworthy rather than a second transcription to drift against: z3 runs the ACTUAL `residuals.py` body. There's no hand-written SMT copy of the drift law sitting next to the Python one waiting to disagree — the money residuals execute over z3 integer terms through a symbolic-Cents wrapper injected at the same execution seam the concrete run uses, so the formula the solver quantifies over IS the code, symbolically evaluated. A dual-run canary pins that: every known-answer money vector runs concrete and symbolic, and the two results have to be identical or the adapter is lying.
+
+What gets proven: for the five money laws (drift, ledger drift, expected-EOD, overdraft, limit breach), thirty-four ∀-ℤ obligations — homogeneity at concrete scalars, additivity where the law is linear, positive-only homogeneity plus a non-homogeneity discriminator where it's clamped, and the AU.2 composition lemma (a cell's residual is unchanged by adding any account-disjoint batch — interference-freedom, the property that lets the detector run per-account without the rest of the ledger leaking in). Each obligation pins its expected verdict; a law obligation that comes back `sat` is a real counterexample, prints its witnessing model, and can never be waved off with an xfail. The solver itself is pinned — z3 4.16.0, a deterministic rlimit, a wall-clock backstop — because a proof under one solver version isn't automatically a proof under the next.
+
+Honest about the edge: this is the MONEY family only. The threshold, cardinality and derivation laws stay concretely enumerated by design — their combinators (floor division, set operations, a recursive walk) don't lower cleanly into linear-integer arithmetic, and forcing them would mean exactly the hand-transcription this lane exists to avoid. The anomaly law is excluded too (its z-score is irrational). And enumeration stays the primary gate — the theorems are the ∀-ℤ layer on top, not a replacement. Nothing user-facing changes; this is verification depth, and it runs in the unit tier (thirty-four obligations in under half a second).
+
+### Added
+
+- A symbolic-execution adapter (`tests/prover/symbolic.py`): a z3-Int-backed Cents lookalike plus a symbolic `when` combinator, injected at the residual module's execution seam so the real money-law bodies run over z3 terms with zero transcription (no "fifth copy" of the law to drift).
+- A dual-run canary (`tests/prover/test_eb1_dual_run_canary.py`): every money known-answer vector executed both concrete and symbolic, results asserted identical — proves the z3 term computes the law it claims to.
+- Thirty-four ∀-integer theorems (`tests/prover/theorems.py`) discharged on-chain: scale-homogeneity, additivity, clamped-law discriminators, and the AU.2 interference-freedom lemma, per money residual.
+- An on-chain solver runner (`tests/prover/solver.py`) with a pinned verdict per obligation: `sat` on a law prints the counterexample and fails unmissably; `unknown` / timeout raises `SolverInconclusive` and fails, triaged by hand, never auto-xfail'd. Pinned z3 4.16.0 + rlimit 500M + wall-cap.
+- A semantic-fingerprint proof cache (`tests/prover/canon.py`): the canonicalized SMT formula plus solver version and budget, one-sided error (only ever a spurious stale, never a spurious fresh), sharing the canonicalizer with the semantic-lock discipline.
+- `z3-solver==4.16.0` pinned exactly in the dev extra (the version is part of the proof fingerprint).
+
+### Changed
+
+- Nothing in the shipped product. This release is entirely verification infrastructure (test tier plus one dev dependency); the runtime, the schema, the dashboards and the audit PDF are byte-identical to v16.1.0.
+
 ## v16.1.0 — the invariant laws are formally tied to the SQL that detects them
 
 Minor. The whole phase is one idea: every accounting invariant is written ONCE as a law — Cents-native, persona-blind, authored from the written spec and nothing else — and the SQL matview that detects violations of it is checked AGAINST that law, exhaustively, on the real engine. Before this the same law lived three or four times over (the simulation, the detector matview, the generator's planted magnitude, the audit-PDF walk) with nothing forcing them to agree, so two whole bug classes — generator-vs-detector magnitude drift, detector-vs-law semantic drift — were just trusted. They aren't anymore.
