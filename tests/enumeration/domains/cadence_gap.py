@@ -130,15 +130,19 @@ def _anchor(profile: BoundaryProfile) -> CellBuilder:
 
 def _explicit_cell(
     prefix: str, present_offsets: tuple[int, ...],
+    *, start_time: dt.time = dt.time(0, 0),
 ) -> CellBuilder:
     """An explicit_daily account (role-resolved) with balance rows on
-    the given window offsets; every other window day is a gap."""
+    the given window offsets; every other window day is a gap.
+    ``start_time`` stamps a non-midnight business_day_start (an EOD
+    cutover) — the residual still keys on the calendar day, so a
+    compliant offset account gaps nothing (DS.5.4 witness)."""
     b = CellBuilder()
     account = f"{prefix}a"
     for offset in present_offsets:
         b.balance(
             account=account, day=_DAYS[offset], money=0,
-            role=_DAILY_ROLE, parent_role=None,
+            role=_DAILY_ROLE, parent_role=None, start_time=start_time,
         )
     return b
 
@@ -233,8 +237,14 @@ CHECK: Final = DetectorCheck(
 def _cells(profile: BoundaryProfile, anchor: CellBuilder) -> list[PackedCell]:
     out: list[PackedCell] = []
 
-    def explicit(prefix: str, present: tuple[int, ...]) -> None:
-        out.append(_cell(profile, anchor, _explicit_cell(prefix, present), prefix))
+    def explicit(
+        prefix: str, present: tuple[int, ...],
+        *, start_time: dt.time = dt.time(0, 0),
+    ) -> None:
+        out.append(_cell(
+            profile, anchor,
+            _explicit_cell(prefix, present, start_time=start_time), prefix,
+        ))
 
     # explicit_daily neighborhood: gaps at every position + healthy.
     explicit("cg00", (0, 1, 2, 3))          # healthy — no gap
@@ -244,6 +254,13 @@ def _cells(profile: BoundaryProfile, anchor: CellBuilder) -> list[PackedCell]:
     explicit("cg04", (0, 2))                # d1 + d3 gap
     explicit("cg05", ())                    # role-account, zero rows:
     #   NOT a singleton, so out of the universe — no gap either side.
+    # DS.5.4 born-red witnesses: an EOD-cutover account (17:00
+    # business_day_start) reporting EVERY day gaps NOTHING (the residual
+    # keys on the calendar day); a partial one gaps only the day it
+    # actually misses. Pre-fix, the timestamp-vs-DATE join reported
+    # phantom gaps on every compliant day.
+    explicit("cg06", (0, 1, 2, 3), start_time=dt.time(17, 0))  # compliant offset — silent
+    explicit("cg07", (0, 1, 3), start_time=dt.time(17, 0))     # offset, misses d2 only
 
     def sparse(prefix: str, builder: CellBuilder) -> None:
         out.append(_cell(profile, anchor, builder, prefix))

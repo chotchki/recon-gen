@@ -228,10 +228,17 @@ class CellBuilder:
         role: str | None = "CustomerSubledger",
         parent_role: str | None = "CustomerLedger",
         scope: str = SCOPE_INTERNAL,
+        start_time: dt.time = dt.time(0, 0, 0),
         end_time: dt.time = dt.time(23, 59, 59),
     ) -> None:
+        # DS.5.4 — ``start_time`` lets a cell emit a NON-midnight
+        # business_day_start (an account's business_day_offset / EOD
+        # cutover). The residual twin still keys on the calendar ``day``,
+        # so a 17:00 balance claims its own day exactly as the law says —
+        # the enumeration can now witness the timestamp-vs-DATE join class
+        # that the all-midnight harness was structurally blind to.
         self._entry += 1
-        start = dt.datetime.combine(day, dt.time(0, 0, 0))
+        start = dt.datetime.combine(day, start_time)
         end = dt.datetime.combine(day, end_time)
         self._bal.append(BalRow(
             account_id=account, account_name=account, account_role=role,

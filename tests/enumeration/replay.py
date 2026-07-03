@@ -23,6 +23,7 @@ identically local and on CI, dialect chosen by the cfg.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 from recon_gen.common.db import SyncConnection, execute_script
 from recon_gen.common.spine._emit_helpers import _bulk_insert
@@ -81,16 +82,47 @@ class DialectReplayDB:
 
     def insert(self, tx_rows: list[TxRow], bal_rows: list[BalRow]) -> None:
         if tx_rows:
-            _bulk_insert(
-                self._conn, f"{self.prefix}_transactions", TX_COLS,
-                [r.as_tuple() for r in tx_rows], _NO_COERCE,
+            self._load(
+                f"{self.prefix}_transactions", TX_COLS,
+                [r.as_tuple() for r in tx_rows],
             )
         if bal_rows:
-            _bulk_insert(
-                self._conn, f"{self.prefix}_daily_balances", DB_COLS,
-                [r.as_tuple() for r in bal_rows], _NO_COERCE,
+            self._load(
+                f"{self.prefix}_daily_balances", DB_COLS,
+                [r.as_tuple() for r in bal_rows],
             )
         self._conn.commit()
+
+    def _load(
+        self, table: str, cols: tuple[str, ...],
+        rows: list[tuple[object, ...]],
+    ) -> None:
+        """Raw bulk load with no money coercion (cell rows carry cents).
+
+        DuckDB gets the Arrow path (EnumerationDB's route): its
+        ``_bulk_insert`` fast path renders a VALUES-literal string via
+        ``render_sql_literal``, which rejects native ``datetime`` — so
+        the plant helpers' bind-based load can't serve the harness's
+        datetime-bearing rows here. PG / Oracle bind through
+        ``executemany``, which takes datetimes directly."""
+        if self._dialect is Dialect.DUCKDB:
+            import duckdb  # noqa: PLC0415 — DuckDB path only
+            import pyarrow as pa  # noqa: PLC0415
+
+            tbl = pa.table(
+                {c: [r[i] for r in rows] for i, c in enumerate(cols)},
+            )
+            duck = cast("duckdb.DuckDBPyConnection", self._conn)
+            duck.register("replay_arrow", tbl)
+            try:
+                duck.execute(
+                    f"INSERT INTO {table} ({', '.join(cols)}) "
+                    f"SELECT * FROM replay_arrow",
+                )
+            finally:
+                duck.unregister("replay_arrow")
+            return
+        _bulk_insert(self._conn, table, cols, rows, _NO_COERCE)
 
     def refresh(self) -> None:
         self._script(self._refresh_sql)

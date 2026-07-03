@@ -757,7 +757,11 @@ def _render_balance_cadence_gap_section(
     config-kv-walk overhead isn't justified.
     """
     from recon_gen.common.l2.primitives import (  # noqa: PLC0415
+        Account,
         BalanceCadence,
+    )
+    from recon_gen.common.sql.literals import (  # noqa: PLC0415
+        render_sql_literal,
     )
     mv_kw = matview_create_keyword(dialect)
     mv_opt = matview_options(dialect)
@@ -769,20 +773,26 @@ def _render_balance_cadence_gap_section(
     # cadence; templates fan-out applies to the rest of the role's
     # population). Inner references use ``s.`` (the spine alias the
     # CASE sits inside) — CTEs can't self-reference column aliases.
+    # DS.5.5 — operator-authored account ids / roles / cadences flow
+    # into SQL literals here; ``render_sql_literal`` escapes embedded
+    # apostrophes (an "O'Brien Holdings" role would otherwise break the
+    # emit) instead of the raw f-string interpolation.
     case_arms: list[str] = []
     for a in instance.accounts:
         if a.balance_cadence is not None:
             cad: BalanceCadence = a.balance_cadence
             case_arms.append(
-                f"        WHEN s.account_id = '{a.id}' "
-                f"THEN '{cad}'"
+                f"        WHEN s.account_id = "
+                f"{render_sql_literal(str(a.id), dialect)} "
+                f"THEN {render_sql_literal(str(cad), dialect)}"
             )
     for tmpl in instance.account_templates:
         if tmpl.balance_cadence is not None:
             cad_t: BalanceCadence = tmpl.balance_cadence
             case_arms.append(
-                f"        WHEN s.account_role = '{tmpl.role}' "
-                f"THEN '{cad_t}'"
+                f"        WHEN s.account_role = "
+                f"{render_sql_literal(str(tmpl.role), dialect)} "
+                f"THEN {render_sql_literal(str(cad_t), dialect)}"
             )
     # SQL requires CASE to have ≥1 WHEN before ELSE; when no entity
     # declares a cadence (instance defaults across the board) we
@@ -837,12 +847,27 @@ def _render_balance_cadence_gap_section(
     # appears in either feed). MAX() collapses the denormalized
     # columns per the BV.6 FD-by-account_id argument.
     from_dual = " FROM dual" if dialect is Dialect.ORACLE else ""
-    null_role = typed_null(varchar_type(100, dialect), dialect)
+
+    def _declared_row(a: Account) -> str:
+        # DS.5.5 — render_sql_literal escapes apostrophes AND emits a
+        # bare NULL for parent_role=None (dropping the typed-null special
+        # case). The parent_role NULL still needs its column type on
+        # Oracle for UNION type-alignment, so keep the typed cast there.
+        parent = (
+            render_sql_literal(str(a.parent_role), dialect)
+            if a.parent_role is not None
+            else typed_null(varchar_type(100, dialect), dialect)
+        )
+        return (
+            f"        UNION ALL\n"
+            f"        SELECT {render_sql_literal(str(a.id), dialect)}, "
+            f"{render_sql_literal(str(a.name), dialect)}, "
+            f"{render_sql_literal(str(a.role), dialect)}, "
+            f"{parent}{from_dual}\n"
+        )
+
     declared_rows = "".join(
-        f"        UNION ALL\n"
-        f"        SELECT '{a.id}', '{a.name}', '{a.role}', "
-        + (f"'{a.parent_role}'" if a.parent_role is not None else null_role)
-        + f"{from_dual}\n"
+        _declared_row(a)
         for a in instance.accounts
         if a.balance_cadence is not None and a.scope == "internal"
     )
@@ -922,7 +947,15 @@ def _render_balance_cadence_gap_section(
         "FROM accts a\n"
         f"LEFT JOIN {p}_current_daily_balances db\n"
         "  ON db.account_id = a.account_id\n"
-        " AND db.business_day_start = a.business_day_start\n"
+        # DS.5.4 (review-found bug): the spine `a.business_day_start` is a
+        # DATE (calendar_day_spine_cte); the stored `db.business_day_start`
+        # is a TIMESTAMP carrying the account's business_day_offset (e.g.
+        # a 17:00 EOD cutover). Comparing them raw never matches for a
+        # non-midnight account, so a fully-compliant explicit_daily
+        # account with an offset would fire declared_daily_missing on
+        # EVERY day. DATE-truncate the stored side — the same to_date the
+        # effective_balances matview applies to its own balance join.
+        f" AND {to_date('db.business_day_start', dialect)} = a.business_day_start\n"
         "LEFT JOIN today_postings tp\n"
         "  ON tp.account_id = a.account_id\n"
         " AND tp.business_day = a.business_day_start\n"
