@@ -88,7 +88,7 @@ def dollars(name: str, **overrides: object) -> _Sourced:
 
 def added(name: str, type_: str, **kw: object) -> _Added:
     """A dataset-computed column (no source; not name-checked)."""
-    return _Added(ColumnSpec(name, type_, **kw))  # type: ignore[arg-type]
+    return _Added(ColumnSpec(name, type_, **kw))  # type: ignore[arg-type]: heterogeneous ColumnSpec field overrides forwarded, dataclass validates names at runtime
 
 
 def contract_from(source: str, entries: Sequence[_Entry]) -> DatasetContract:
@@ -115,11 +115,11 @@ def contract_from(source: str, entries: Sequence[_Entry]) -> DatasetContract:
                 )
             columns.append(replace(
                 src_col,
-                type=overrides.pop("type", "DECIMAL"),  # type: ignore[arg-type]
+                type=overrides.pop("type", "DECIMAL"),  # type: ignore[arg-type]: override value is a type-string by the dollars() factory contract
                 currency=bool(overrides.pop("currency", False)),
                 storage=Storage.DOLLARS,
-                **overrides,  # type: ignore[arg-type]
+                **overrides,  # type: ignore[arg-type]: remaining heterogeneous field overrides forwarded to replace(), field names validated at runtime
             ))
         else:
-            columns.append(replace(src_col, **overrides))  # type: ignore[arg-type]
+            columns.append(replace(src_col, **overrides))  # type: ignore[arg-type]: heterogeneous field overrides forwarded to replace(), field names validated at runtime
     return DatasetContract(columns=columns)

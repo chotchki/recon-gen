@@ -49,6 +49,16 @@ This is why the recon's 16 flagged "inconsistencies" are NOT `_COLUMNS` bugs —
 
 **Operator flag (non-gating):** `EXC_DEAD_LIMIT_SCHEDULES.cap` flips `currency` True(source)→False(contract) with NO `/100` (same DOLLARS storage). Either the blanket contract-money `currency=False` convention is a latent formatting smell across ALL money columns, or `cap` specifically should render as `$`. Surfaced for chotchki; the automated gate treats currency as advisory so it blocks neither.
 
+### DQ.4.2b landed — `contract_from` rename-gate (`common/contracts.py`)
+
+The mechanism (B was the passive gate; A is this active one): `contract_from(source, [keep()/dollars()/added()])` DERIVES each sourced column from `SCHEMA_GRAPH[source].columns`, resolving the name at construction → **KeyError at import on a matview column rename**. Proven end-to-end: dropping `drift_summary.stored_balance` makes `import recon_gen.apps.l1_dashboard.datasets` raise immediately (the contracts are module-level `contract_from(...)` calls). This closes the exact gap 4.2a couldn't see — a renamed source column's now-orphaned contract name reconciles with nothing, so 4.2a skips it as dataset-computed and stays green.
+
+**Source is DERIVED, not guessed.** Each contract's source = the matview its dataset actually reads `FROM`/`JOIN`s (an auto-classifier over the built SQL; hand-guessing bit once — DRIFT/LEDGER read `drift_summary`, the per-account + class rollup, not the `drift`/`ledger_drift` matviews they byte-matched by shared column names). Every migration byte-verified column-by-column against the pre-migration literal (0 mismatches vs git).
+
+**Coverage.** All single-source contracts carrying ≥1 sourced (keep/dollars) column across the four apps: 14 in l1_dashboard, 4 in investigation, 1 each in l2_flow_tracing + executives. `ACCOUNT_NETWORK` inherits the gate via `*MONEY_TRAIL_CONTRACT.columns`. Deliberately NOT migrated: pure-aggregate contracts (every column a GROUP BY output — EXEC_PROGRAM_HEALTH/DAILY/LEGS, ANETWORK_ACCOUNTS, META_VALUES) where `contract_from` would gate only the source-object name; and JOIN-sourced contracts (DAILY_STATEMENT_*, L1_ACCOUNTS, etc.) — the 4.2a reconciliation gate remains their backstop.
+
+**Column kinds:** `keep(name, **over)` inherits the source's emitted spec (rename-gated; overrides apply 4.2a shape-enrich, e.g. base tables emit `account_id` shapeless so the contract re-tags `ACCOUNT_ID`); `dollars(name)` the money cents→dollars widen (source must be money-CENTS); `added(name, type_)` a dataset-computed column (no source, unchecked). Gate + guard: `test_dq4_2b_contract_from.py`.
+
 ## DQ.4.1b — the `emit_create` carve (per-object bodies, graph-ordered)
 
 The two monolithic matview templates (`_L1_INVARIANT_VIEWS_TEMPLATE` ~1300 lines / 20 objects, `_INV_MATVIEWS_TEMPLATE` ~320 lines / 2 objects) each rendered via ONE `.format()` — a second CREATE-order surface that could drift from the graph's refresh/drop lists. DQ.4.1b carves them into per-object bodies so `emit_schema` (and the DuckDB table-refresh, which re-emits every matview-as-table) walk `SCHEMA_GRAPH.create_order(group)` and emit each object's slice via `DbObject.emit_create`. Create is now the **fifth derived order** — the forward graph walk, exact reverse of drop.
