@@ -32,7 +32,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 
-from recon_gen.common.dataset_contract import ColumnSpec
+from recon_gen.common.dataset_contract import ColumnShape, ColumnSpec, Storage
 from recon_gen.common.ids import DbObjectId, MatviewName, prefixed_db_object
 from recon_gen.common.sql import (
     Dialect,
@@ -244,6 +244,190 @@ class DbObjectGraph:
 
 
 # ---------------------------------------------------------------------------
+# DQ.4.1 — the EMITTED columns each object's CREATE body outputs, in
+# projection order. The authoritative map from the DQ.4 recon
+# (docs/audits/dq_4_column_map.md); read from the real CREATE bodies, NOT
+# the downstream DatasetContract (which adds dataset-computed columns,
+# drops synthetic ones, and re-types money after /100 — reconciled at
+# DQ.4.2). Guarded by tests/unit/test_dq4_columns_match_emitted_schema.py,
+# which applies the schema to DuckDB and introspects the ACTUAL emitted
+# columns, so a name/order/type slip fails loud against the real schema.
+#
+# Storage rule: ``storage=CENTS`` iff the column is money the matview
+# emits as raw BIGINT cents (the ``_money`` shorthand). Everything else is
+# DOLLARS. Statistical moments (pop_mean / pop_stddev / z_score) are plain
+# non-currency DECIMAL floats (operator-confirmed 2026-07-03).
+# ---------------------------------------------------------------------------
+
+_S, _I, _DT, _DEC = "STRING", "INTEGER", "DATETIME", "DECIMAL"
+_AID, _DAY = ColumnShape.ACCOUNT_ID, ColumnShape.DATETIME_DAY
+_RAIL, _TID, _ADISP = ColumnShape.RAIL_NAME, ColumnShape.TRANSFER_ID, ColumnShape.ACCOUNT_DISPLAY
+
+
+def _c(
+    name: str, type_: str = _S, *, shape: ColumnShape | None = None,
+    currency: bool = False, storage: Storage = Storage.DOLLARS,
+) -> ColumnSpec:
+    return ColumnSpec(name, type_, shape=shape, currency=currency, storage=storage)
+
+
+def _money(name: str) -> ColumnSpec:
+    """A money measure the matview emits as raw BIGINT cents."""
+    return ColumnSpec(name, _I, currency=True, storage=Storage.CENTS)
+
+
+def _money_dec(name: str) -> ColumnSpec:
+    """A money measure emitted as DECIMAL cents rather than raw BIGINT —
+    a dollars*100 lift (limit_breach.cap) or a DECIMAL aggregate over
+    cents (l1_exceptions.magnitude_amount)."""
+    return ColumnSpec(name, _DEC, currency=True, storage=Storage.CENTS)
+
+
+# The base-table / Current* column shape (v6). Current* are SELECT * over
+# the base tables, so they mirror them exactly.
+_TX_COLS: tuple[ColumnSpec, ...] = (
+    _c("entry", _I), _c("id"), _c("account_id"), _c("account_name"),
+    _c("account_role"), _c("account_scope"), _c("account_parent_role"),
+    _money("amount_money"), _c("amount_direction"), _c("status"), _c("posting", _DT),
+    _c("transfer_id"), _c("transfer_completion", _DT), _c("transfer_parent_id"),
+    _c("rail_name"), _c("template_name"), _c("bundle_id"), _c("supersedes"),
+    _c("origin"), _c("metadata"),
+)
+_DB_COLS: tuple[ColumnSpec, ...] = (
+    _c("entry", _I), _c("account_id"), _c("account_name"), _c("account_role"),
+    _c("account_scope"), _c("account_parent_role"), _money("expected_eod_balance"),
+    _c("business_day_start", _DT), _c("business_day_end", _DT), _money("money"),
+    _c("metadata"), _c("supersedes"),
+)
+
+_COLUMNS: dict[str, tuple[ColumnSpec, ...]] = {
+    # -- base tables + Current* mirrors --
+    "transactions": _TX_COLS,
+    "daily_balances": _DB_COLS,
+    "config_kv": (_c("node_id"), _c("parent_id"), _c("key"), _c("value")),
+    "current_transactions": _TX_COLS,
+    "current_daily_balances": _DB_COLS,
+    # -- config typed views --
+    "v_config_rails": (_c("name"), _c("max_pending_age_seconds", _I), _c("max_unbundled_age_seconds", _I)),
+    "v_config_limit_schedules": (_c("parent_role"), _c("rail"), _c("direction"), _c("cap", _DEC, currency=True)),
+    "v_config_chain_children": (_c("parent_name"), _c("child_name"), _c("fan_in", _I), _c("expected_parent_count", _I)),
+    "v_config_transfer_templates": (_c("name"), _c("expected_net", _DEC, currency=True), _c("completion")),
+    "v_config_account_roles": (_c("account_role"),),
+    "v_config_rail_metadata_keys": (_c("rail_name"), _c("metadata_key")),
+    # -- spine + computed --
+    "effective_balances": (
+        _c("account_id"), _c("account_name"), _c("account_role"), _c("account_parent_role"),
+        _c("account_scope"), _c("business_day_start", _DT), _c("business_day_end", _DT),
+        _money("emitted_money"), _money("effective_money"), _money("expected_eod_balance"),
+        _c("carried_from_day", _DT), _c("source"),
+    ),
+    "computed_subledger_balance": (
+        _c("account_id"), _c("business_day_start", _DT), _c("business_day_end", _DT),
+        _c("account_parent_role"), _money("computed_balance"),
+    ),
+    "computed_ledger_balance": (
+        _c("account_id"), _c("account_role"), _c("business_day_start", _DT),
+        _c("business_day_end", _DT), _money("computed_balance"),
+    ),
+    "data_anchor": (_c("row_marker", _I), _c("data_anchor", _DT)),
+    # -- L1 invariant detectors --
+    "drift": (
+        _c("account_id", shape=_AID), _c("account_name"), _c("account_role"),
+        _c("account_parent_role"), _c("business_day_start", _DT, shape=_DAY),
+        _c("business_day_end", _DT, shape=_DAY), _money("stored_balance"),
+        _money("computed_balance"), _money("drift"), _c("source"),
+    ),
+    "ledger_drift": (
+        _c("account_id", shape=_AID), _c("account_name"), _c("account_role"),
+        _c("business_day_start", _DT, shape=_DAY), _c("business_day_end", _DT, shape=_DAY),
+        _money("stored_balance"), _money("computed_balance"), _money("drift"), _c("source"),
+    ),
+    "drift_summary": (
+        _c("account_id", shape=_AID), _c("account_name"), _c("account_display", shape=_ADISP),
+        _c("account_role"), _c("account_parent_role"), _c("business_day_start", _DT, shape=_DAY),
+        _c("business_day_end", _DT, shape=_DAY), _money("stored_balance"), _money("computed_balance"),
+        _money("drift"), _money("abs_drift"), _c("account_class"),
+    ),
+    "overdraft": (
+        _c("account_id", shape=_AID), _c("account_name"), _c("account_role"),
+        _c("account_parent_role"), _c("business_day_start", _DT, shape=_DAY),
+        _c("business_day_end", _DT, shape=_DAY), _money("stored_balance"), _c("source"),
+    ),
+    "expected_eod_balance_breach": (
+        _c("account_id", shape=_AID), _c("account_name"), _c("account_role"),
+        _c("business_day_start", _DT, shape=_DAY), _c("business_day_end", _DT, shape=_DAY),
+        _money("stored_balance"), _money("expected_eod_balance"), _money("variance"),
+    ),
+    "balance_cadence_gap": (
+        _c("account_id", shape=_AID), _c("account_name"), _c("account_role"),
+        _c("account_parent_role"), _c("business_day_start", _DT, shape=_DAY),
+        _c("balance_cadence"), _money("gap_day_net_flow"), _c("gap_day_leg_count", _I), _c("gap_kind"),
+    ),
+    "limit_breach": (
+        _c("account_id", shape=_AID), _c("account_name"), _c("account_role"),
+        _c("account_parent_role"), _c("business_day", _DT, shape=_DAY), _c("rail_name", shape=_RAIL),
+        _c("direction"), _money("outbound_total"), _money_dec("cap"),
+    ),
+    "stuck_pending": (
+        _c("transaction_id"), _c("account_id", shape=_AID), _c("account_name"), _c("account_role"),
+        _c("account_parent_role"), _c("transfer_id", shape=_TID), _c("rail_name", shape=_RAIL),
+        _money("amount_money"), _c("amount_direction"), _c("posting", _DT),
+        _c("max_pending_age_seconds", _I), _c("age_seconds", _DEC),
+    ),
+    "stuck_unbundled": (
+        _c("transaction_id"), _c("account_id", shape=_AID), _c("account_name"), _c("account_role"),
+        _c("account_parent_role"), _c("transfer_id", shape=_TID), _c("rail_name", shape=_RAIL),
+        _money("amount_money"), _c("amount_direction"), _c("posting", _DT),
+        _c("max_unbundled_age_seconds", _I), _c("age_seconds", _DEC),
+    ),
+    "chain_parent_disagreement": (
+        _c("transfer_id"), _c("child_template_name"), _c("business_day", _DT),
+        _c("distinct_parent_count", _I), _c("parent_transfer_id_min"), _c("parent_transfer_id_max"),
+    ),
+    "xor_group_violation": (
+        _c("transfer_id"), _c("template_name"), _c("xor_group_index", _I),
+        _c("firing_count", _I), _c("fired_rails"), _c("business_day", _DT),
+    ),
+    "transfer_parents": (_c("child_transfer_id"), _c("parent_transfer_id")),
+    "fan_in_disagreement": (
+        _c("child_transfer_id"), _c("chain_parent_name"), _c("child_template_name"),
+        _c("parent_count", _I), _c("expected_parent_count", _I), _c("disagreement_kind"),
+        _c("business_day", _DT),
+    ),
+    "multi_xor_violation": (
+        _c("parent_transfer_id"), _c("parent_rail_or_template_name"), _c("child_count", _I),
+        _c("fired_children"), _c("disagreement_kind"), _c("business_day", _DT),
+    ),
+    "daily_statement_summary": (
+        _c("account_id", shape=_AID), _c("account_name"), _c("account_role"),
+        _c("account_parent_role"), _c("account_scope"), _c("business_day_start", _DT, shape=_DAY),
+        _c("business_day_end", _DT, shape=_DAY), _money("opening_balance"), _money("total_debits"),
+        _money("total_credits"), _money("net_flow"), _c("leg_count", _I),
+        _money("closing_balance_stored"), _money("closing_balance_recomputed"), _money("drift"),
+        _c("closing_balance_source"), _c("closing_carried_from_date", _DT), _c("opening_balance_source"),
+    ),
+    "l1_exceptions": (
+        _c("check_type"), _c("account_id", shape=_AID), _c("account_name"), _c("account_role"),
+        _c("account_parent_role"), _c("business_day", _DT, shape=_DAY), _c("rail_name", shape=_RAIL),
+        _c("transfer_id", shape=_TID), _money_dec("magnitude_amount"), _c("magnitude_count", _I), _c("seq", _I),
+    ),
+    # -- Investigation --
+    "inv_pair_rolling_anomalies": (
+        _c("recipient_account_id", shape=_AID), _c("recipient_account_name"), _c("recipient_account_type"),
+        _c("sender_account_id", shape=_AID), _c("sender_account_name"), _c("sender_account_type"),
+        _c("window_start", _DT), _c("window_end", _DT), _money("window_sum"), _c("transfer_count", _I),
+        _c("pop_mean", _DEC), _c("pop_stddev", _DEC), _c("z_score", _DEC), _c("z_bucket"),
+    ),
+    "inv_money_trail_edges": (
+        _c("root_transfer_id", shape=_TID), _c("transfer_id", shape=_TID), _c("depth", _I),
+        _c("source_account_id", shape=_AID), _c("source_account_name"), _c("source_account_type"),
+        _c("target_account_id", shape=_AID), _c("target_account_name"), _c("target_account_type"),
+        _money("hop_amount"), _c("posted_at", _DT), _c("rail_name"), _c("edge_seq", _I),
+    ),
+}
+
+
+# ---------------------------------------------------------------------------
 # The canonical graph. Declared in dependency (== refresh) order so the
 # declaration reads top-to-bottom as the refresh order AND the
 # ``DbObjectGraph`` validator proves that order is dependency-respecting.
@@ -261,6 +445,7 @@ def _obj(
     return DbObject(
         obj_id=DbObjectId(obj_id),
         kind=kind,
+        columns=_COLUMNS.get(DbObjectId(obj_id), ()),
         depends_on=tuple(deps),
         group=group,
     )
