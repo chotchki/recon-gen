@@ -70,8 +70,19 @@ from recon_gen.common.spine.violation import (
     Violation,
     identity_dollars,
 )
+from recon_gen.common.spine.math_invariant import math_invariant
+from recon_gen.common.spine.residuals import (
+    MathKind,
+    overdraft_residual,
+)
 
 
+@math_invariant(
+    matview="overdraft",
+    kind=MathKind.MONEY,
+    residual=overdraft_residual,
+    kat_file="tests/data/kats/overdraft.json",
+)
 @dataclass(frozen=True)
 class OverdraftInvariant:
     """Non-negative-stored-balance detector. Persona-blind — the matview

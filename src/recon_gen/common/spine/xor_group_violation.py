@@ -51,8 +51,19 @@ from recon_gen.common.spine._emit_helpers import (
     ts,
 )
 from recon_gen.common.spine.violation import RuleViolation, Violation
+from recon_gen.common.spine.math_invariant import math_invariant
+from recon_gen.common.spine.residuals import (
+    MathKind,
+    xor_group_residual,
+)
 
 
+@math_invariant(
+    matview="xor_group_violation",
+    kind=MathKind.CARDINALITY,
+    residual=xor_group_residual,
+    kat_file="tests/data/kats/xor_group.json",
+)
 @dataclass(frozen=True)
 class XorGroupViolationInvariant:
     """Detector for the AB.3.3 matview.

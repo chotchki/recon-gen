@@ -41,8 +41,19 @@ from recon_gen.common.spine.ledger_simulation import (
     TransferLeg,
 )
 from recon_gen.common.spine.violation import RuleViolation, Violation
+from recon_gen.common.spine.math_invariant import math_invariant
+from recon_gen.common.spine.residuals import (
+    MathKind,
+    money_trail_residual,
+)
 
 
+@math_invariant(
+    matview="inv_money_trail_edges",
+    kind=MathKind.DERIVATION,
+    residual=money_trail_residual,
+    kat_file="tests/data/kats/money_trail.json",
+)
 @dataclass(frozen=True)
 class MoneyTrailInvariant:
     """Money-trail edge detector. Reads

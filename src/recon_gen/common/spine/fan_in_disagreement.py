@@ -57,8 +57,19 @@ from recon_gen.common.spine.violation import (
     RuleViolation,
     Violation,
 )
+from recon_gen.common.spine.math_invariant import math_invariant
+from recon_gen.common.spine.residuals import (
+    MathKind,
+    fan_in_residual,
+)
 
 
+@math_invariant(
+    matview="fan_in_disagreement",
+    kind=MathKind.CARDINALITY,
+    residual=fan_in_residual,
+    kat_file="tests/data/kats/fan_in.json",
+)
 @dataclass(frozen=True)
 class FanInDisagreementInvariant:
     """Detector for the AB.4.7 matview.

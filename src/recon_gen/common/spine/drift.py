@@ -61,8 +61,20 @@ from recon_gen.common.spine.violation import (
     Violation,
     identity_dollars,
 )
+from recon_gen.common.spine.math_invariant import math_invariant
+from recon_gen.common.spine.residuals import (
+    MathKind,
+    drift_residual,
+    ledger_drift_residual,
+)
 
 
+@math_invariant(
+    matview="drift",
+    kind=MathKind.MONEY,
+    residual=drift_residual,
+    kat_file="tests/data/kats/drift.json",
+)
 @dataclass(frozen=True)
 class DriftInvariant:
     """Sub-ledger drift detector. Persona-blind (no L2 join in the
@@ -153,6 +165,12 @@ class DriftInvariant:
         )
 
 
+@math_invariant(
+    matview="ledger_drift",
+    kind=MathKind.MONEY,
+    residual=ledger_drift_residual,
+    kat_file="tests/data/kats/ledger_drift.json",
+)
 @dataclass(frozen=True)
 class LedgerDriftInvariant:
     """Parent-ledger drift detector. Fires when a parent's stored money

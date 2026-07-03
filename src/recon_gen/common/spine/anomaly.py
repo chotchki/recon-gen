@@ -64,6 +64,10 @@ from recon_gen.common.spine.ledger_simulation import (
     TransferLeg,
 )
 from recon_gen.common.spine.violation import RuleViolation, Violation
+from recon_gen.common.spine.math_invariant import math_invariant
+from recon_gen.common.spine.residuals import (
+    MathKind,
+)
 
 
 # CV.1 — defaults for the per-pair z geometry.
@@ -124,6 +128,11 @@ _DEFAULT_HISTORICAL_WINDOW_AMOUNT = 250.0
 _HISTORICAL_VARIANCE_FRACTION = 0.10
 
 
+@math_invariant(
+    matview="inv_pair_rolling_anomalies",
+    kind=MathKind.PROBABILISTIC,
+    note="DS.4 exact-Q tolerance contract in anomaly_contract.py",
+)
 @dataclass(frozen=True)
 class AnomalyInvariant:
     """Pair-rolling-anomaly detector. Reads

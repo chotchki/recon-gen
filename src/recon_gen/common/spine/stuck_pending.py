@@ -54,11 +54,22 @@ from recon_gen.common.spine._emit_helpers import (
     load_spec_example,
 )
 from recon_gen.common.spine.violation import RuleViolation, Violation
+from recon_gen.common.spine.math_invariant import math_invariant
+from recon_gen.common.spine.residuals import (
+    MathKind,
+    stuck_pending_residual,
+)
 
 # Either rail subtype is acceptable — both carry `max_pending_age`.
 _RailWithPendingAge = TwoLegRail | SingleLegRail
 
 
+@math_invariant(
+    matview="stuck_pending",
+    kind=MathKind.THRESHOLD,
+    residual=stuck_pending_residual,
+    kat_file="tests/data/kats/stuck_pending.json",
+)
 @dataclass(frozen=True)
 class StuckPendingInvariant:
     """Stuck-Pending detector. The matview gates on

@@ -45,10 +45,21 @@ from recon_gen.common.spine._emit_helpers import (
     load_spec_example,
 )
 from recon_gen.common.spine.violation import RuleViolation, Violation
+from recon_gen.common.spine.math_invariant import math_invariant
+from recon_gen.common.spine.residuals import (
+    MathKind,
+    stuck_unbundled_residual,
+)
 
 _RailWithUnbundledAge = TwoLegRail | SingleLegRail
 
 
+@math_invariant(
+    matview="stuck_unbundled",
+    kind=MathKind.THRESHOLD,
+    residual=stuck_unbundled_residual,
+    kat_file="tests/data/kats/stuck_unbundled.json",
+)
 @dataclass(frozen=True)
 class StuckUnbundledInvariant:
     """Stuck-Unbundled detector. The matview gates on

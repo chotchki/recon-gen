@@ -51,8 +51,19 @@ from recon_gen.common.spine._emit_helpers import (
     ts,
 )
 from recon_gen.common.spine.violation import RuleViolation, Violation
+from recon_gen.common.spine.math_invariant import math_invariant
+from recon_gen.common.spine.residuals import (
+    MathKind,
+    chain_parent_residual,
+)
 
 
+@math_invariant(
+    matview="chain_parent_disagreement",
+    kind=MathKind.CARDINALITY,
+    residual=chain_parent_residual,
+    kat_file="tests/data/kats/chain_parent.json",
+)
 @dataclass(frozen=True)
 class ChainParentDisagreementInvariant:
     """Detector for the AB.2.3 matview.

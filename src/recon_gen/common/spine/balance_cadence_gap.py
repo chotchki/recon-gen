@@ -47,10 +47,21 @@ from recon_gen.common.l2.primitives import BalanceCadence, L2Instance
 from recon_gen.common.spine._db import fetch_all
 from recon_gen.common.spine._emit_helpers import insert_balance, load_spec_example
 from recon_gen.common.spine.violation import RuleViolation, Violation
+from recon_gen.common.spine.math_invariant import math_invariant
+from recon_gen.common.spine.residuals import (
+    MathKind,
+    cadence_gap_residual,
+)
 
 _EXPLICIT_DAILY: BalanceCadence = "explicit_daily"
 
 
+@math_invariant(
+    matview="balance_cadence_gap",
+    kind=MathKind.DERIVATION,
+    residual=cadence_gap_residual,
+    kat_file="tests/data/kats/cadence_gap.json",
+)
 @dataclass(frozen=True)
 class BalanceCadenceGapInvariant:
     """Balance-cadence-gap detector. Reads ``<prefix>_balance_cadence_gap``

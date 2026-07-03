@@ -51,8 +51,19 @@ from recon_gen.common.spine.residuals import (
     expected_eod_residual,
 )
 from recon_gen.common.spine.violation import RuleViolation, Violation, identity_dollars
+from recon_gen.common.spine.math_invariant import math_invariant
+from recon_gen.common.spine.residuals import (
+    MathKind,
+    expected_eod_residual,
+)
 
 
+@math_invariant(
+    matview="expected_eod_balance_breach",
+    kind=MathKind.MONEY,
+    residual=expected_eod_residual,
+    kat_file="tests/data/kats/expected_eod.json",
+)
 @dataclass(frozen=True)
 class ExpectedEodBalanceInvariant:
     """Expected-EOD-balance detector. Persona-blind — the matview SQL

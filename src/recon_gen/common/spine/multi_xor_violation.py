@@ -51,8 +51,19 @@ from recon_gen.common.spine._emit_helpers import (
     ts,
 )
 from recon_gen.common.spine.violation import RuleViolation, Violation
+from recon_gen.common.spine.math_invariant import math_invariant
+from recon_gen.common.spine.residuals import (
+    MathKind,
+    multi_xor_residual,
+)
 
 
+@math_invariant(
+    matview="multi_xor_violation",
+    kind=MathKind.CARDINALITY,
+    residual=multi_xor_residual,
+    kat_file="tests/data/kats/multi_xor.json",
+)
 @dataclass(frozen=True)
 class MultiXorViolationInvariant:
     """Detector for the AB.6.5 matview.

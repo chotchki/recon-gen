@@ -56,8 +56,19 @@ from recon_gen.common.spine._emit_helpers import (
     ts,
 )
 from recon_gen.common.spine.violation import RuleViolation, Violation
+from recon_gen.common.spine.math_invariant import math_invariant
+from recon_gen.common.spine.residuals import (
+    MathKind,
+    limit_breach_residual,
+)
 
 
+@math_invariant(
+    matview="limit_breach",
+    kind=MathKind.MONEY,
+    residual=limit_breach_residual,
+    kat_file="tests/data/kats/limit_breach.json",
+)
 @dataclass(frozen=True)
 class LimitBreachInvariant:
     """Per-rail per-direction flow-cap detector. The matview gates on
