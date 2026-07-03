@@ -538,42 +538,41 @@ def _run_cross_sheet_drill_guardrail(
     # so the source populates before row 0 is read. See _SRC_REQUIRED_PICKS.
     preselect = _SRC_REQUIRED_PICKS.get(str(site.src_sheet.sheet_id))
     if preselect is not None:
-        if not preselect(driver):
-            pytest.skip(
-                f"Source sheet {src_sheet_name!r} needs a required-filter "
-                f"preselect to populate, but no pickable value exists on "
-                f"the seed (e.g. no account with an active business day) — "
-                f"genuine data gap, not a drill-mechanics bug."
-            )
+        assert preselect(driver), (
+            f"Source sheet {src_sheet_name!r} needs a required-filter "
+            f"preselect to populate, but no pickable value exists on the "
+            f"seed (e.g. no account with an active business day). The seed "
+            f"MUST exercise every drill site — a missing pickable value is "
+            f"a seed regression to fix seed-side (production-honest "
+            f"invariants), not a skip."
+        )
         driver.wait_loaded(src_visual_title)
 
     # Step 2: choose the row to drill (row 0 unless the source hangs
     # multiple destination-specific drills on one column — see
     # _select_source_row_index) and read its drilled-column values.
     row_index = _select_source_row_index(driver, site, src_visual_title)
-    if row_index is None:
-        pytest.skip(
-            f"Source visual {src_visual_title!r} on {src_sheet_name!r} has "
-            f"no row valid for the {dst_sheet_name!r} drill "
-            f"({site.drill.name!r}) — e.g. no rail-keyed / chain-orphan row "
-            f"to drill for this destination. Test-data gap, not a bug."
-        )
+    assert row_index is not None, (
+        f"Source visual {src_visual_title!r} on {src_sheet_name!r} has no "
+        f"row valid for the {dst_sheet_name!r} drill ({site.drill.name!r}) "
+        f"— e.g. no rail-keyed / chain-orphan row to drill for this "
+        f"destination. The seed MUST provide one: a missing drillable row "
+        f"is a seed regression to fix seed-side, not a skip."
+    )
     writes = _resolve_drill_writes(site.drill)
     source_values: dict[str, str] = {}
     if writes:
         result = _read_source_row_values(
             driver, src_visual_title, writes, row_index=row_index,
         )
-        if result is None:
-            pytest.skip(
-                f"Source visual {src_visual_title!r} on "
-                f"{src_sheet_name!r} is empty OR doesn't surface "
-                f"the drilled columns "
-                f"({[w.source_column for w in writes]}) in its rendered "
-                f"cells at row {row_index} — no row to drill from. This is "
-                f"a test-data gap (seed needs a row exercising this drill), "
-                f"not a drill-mechanics bug."
-            )
+        assert result is not None, (
+            f"Source visual {src_visual_title!r} on {src_sheet_name!r} is "
+            f"empty OR doesn't surface the drilled columns "
+            f"({[w.source_column for w in writes]}) in its rendered cells "
+            f"at row {row_index} — no row to drill from. The seed MUST "
+            f"surface a drillable row here: a missing one is a seed "
+            f"regression to fix seed-side, not a skip."
+        )
         source_values = result
 
     # Step 3: fire the drill from the selected row.
