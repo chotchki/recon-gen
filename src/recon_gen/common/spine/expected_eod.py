@@ -50,7 +50,7 @@ from recon_gen.common.spine.residuals import (
     drift_residual,
     expected_eod_residual,
 )
-from recon_gen.common.spine.violation import RuleViolation, Violation, identity_dollars
+from recon_gen.common.spine.violation import RuleViolation, Violation, identity_cents
 from recon_gen.common.spine.math_invariant import math_invariant
 from recon_gen.common.spine.residuals import (
     MathKind,
@@ -86,9 +86,7 @@ class ExpectedEodBalanceInvariant:
                 "expected_eod_balance_breach",
                 account_id=aid,
                 business_day=to_date(bds),
-                variance=round(
-                    float(Cents.from_db(int(var)).to_dollars()), 2,
-                ),
+                variance=int(var),
             )
             for aid, bds, var in rows
         }
@@ -186,7 +184,7 @@ class ExpectedEodBalanceGenerator:
             "expected_eod_balance_breach",
             account_id=self.account_id,
             business_day=self.anchor_day,
-            variance=identity_dollars(residual),
+            variance=identity_cents(residual),
         )
 
     @property
@@ -211,7 +209,7 @@ class ExpectedEodBalanceGenerator:
             "drift",
             account_id=self.account_id,
             business_day=self.anchor_day,
-            drift=identity_dollars(residual),
+            drift=identity_cents(residual),
         )
 
     @property

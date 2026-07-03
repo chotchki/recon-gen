@@ -86,15 +86,16 @@ def _drift_for(account_id: str) -> DriftInvariant:
     return DriftInvariant()
 
 
-def _drift_days_for(detected: set[Violation], account_id: str) -> dict[date, float]:
-    """Project drift Violations to {day: drift_value} for one account."""
-    out: dict[date, float] = {}
+def _drift_days_for(detected: set[Violation], account_id: str) -> dict[date, int]:
+    """Project drift Violations to {day: drift_cents} for one account.
+    DS.7 — the drift identity is exact integer CENTS, not float dollars."""
+    out: dict[date, int] = {}
     for v in detected:
         items = dict(v.identity)
         if items.get("account_id") == account_id:
             day = items.get("business_day")
             drift = items.get("drift")
-            if isinstance(day, date) and isinstance(drift, float):
+            if isinstance(day, date) and isinstance(drift, int):
                 out[day] = drift
     return out
 
@@ -144,7 +145,7 @@ def test_state_snapshot_blip_is_local() -> None:
         )
     finally:
         conn.close()
-    assert drift == {_D1: 7.0}, (
+    assert drift == {_D1: 700}, (
         f"a one-day stored blip must stay LOCAL (detector memoryless "
         f"in stored); got {drift}"
     )
@@ -168,7 +169,7 @@ def test_unrecorded_flow_propagates_forward() -> None:
         )
     finally:
         conn.close()
-    assert drift == {_D1: -13.0, _D2: -13.0}, (
+    assert drift == {_D1: -1300, _D2: -1300}, (
         f"an unrecorded flow must PROPAGATE forward from its day; "
         f"got {drift}"
     )
@@ -233,7 +234,7 @@ def test_correction_closes_forward_propagation() -> None:
         )
     finally:
         conn.close()
-    assert drift == {_D1: -13.0}, (
+    assert drift == {_D1: -1300}, (
         f"correction must leave only the past breach (D1) and stop "
         f"forward propagation (D2 clean); got {drift}"
     )
@@ -265,7 +266,7 @@ def test_stacked_violations_accumulate_without_interference() -> None:
         )
     finally:
         conn.close()
-    assert drift == {_D1: 7.0, _D2: 9.0}, (
+    assert drift == {_D1: 700, _D2: 900}, (
         f"stacked violations should accumulate, each keeping identity; "
         f"got {drift}"
     )
@@ -300,6 +301,6 @@ def test_violation_trajectory_tracks_carried_state() -> None:
     ]
     assert days_at == [
         {},
-        {_D1: -13.0},
-        {_D1: -13.0, _D2: -13.0},
+        {_D1: -1300},
+        {_D1: -1300, _D2: -1300},
     ], f"trajectory should evolve clean → D1 → D1+D2; got {days_at}"

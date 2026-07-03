@@ -492,7 +492,8 @@ def test_overdraft_on_a_leaf_account_also_trips_drift() -> None:
         account_id=gen.account_id,
         business_day=gen.anchor_day,
         # Drift magnitude = stored − Σ legs = −magnitude − 0 = −magnitude.
-        drift=round(-gen.magnitude, 2),
+        # DS.7: the identity carries exact CENTS (−$magnitude × 100).
+        drift=int(round(-gen.magnitude * 100)),
     )
     assert expected_drift in drift_detected, (
         f"OverdraftGenerator should trip DriftInvariant on a leaf account; "

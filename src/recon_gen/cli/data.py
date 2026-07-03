@@ -21,7 +21,7 @@ import subprocess
 import sys
 from datetime import date
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import click
 
@@ -411,6 +411,53 @@ def _build_fresh_semantic_lock(
         conn.close()
 
 
+def _summarize_lock_drift(on_disk: str, fresh: str) -> list[str]:
+    """DS.7 — a per-invariant violation-count delta between two lock
+    JSON strings. When a lock drifts by thousands of rows (a universe
+    fix, a status-law change), the raw unified diff is unreadable; this
+    names each invariant that moved and by how much. Falls back to a
+    single line if either side won't parse as the expected shape."""
+    import json  # noqa: PLC0415 — only on the drift path
+
+    def _counts(text: str) -> dict[str, int] | None:
+        try:
+            payload: object = json.loads(text)
+        except ValueError:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        violations: object = cast("dict[str, object]", payload).get("violations")
+        if not isinstance(violations, dict):
+            return None
+        out: dict[str, int] = {}
+        typed = cast("dict[str, object]", violations)
+        for k, v in typed.items():
+            out[k] = len(cast("list[object]", v)) if isinstance(v, list) else 0
+        return out
+
+    old = _counts(on_disk)
+    new = _counts(fresh)
+    if old is None or new is None:
+        return ["  (could not parse both locks for a summary)"]
+    names = sorted(set(old) | set(new))
+    lines = ["  per-invariant violation-count delta:"]
+    moved = 0
+    for name in names:
+        before, after = old.get(name, 0), new.get(name, 0)
+        if before == after:
+            continue
+        moved += 1
+        sign = "+" if after > before else ""
+        lines.append(
+            f"    {name}: {before} -> {after} ({sign}{after - before})",
+        )
+    if moved == 0:
+        # Counts match everywhere — the drift is in identities / order,
+        # not cardinality. The raw diff below carries it.
+        lines.append("    (no cardinality change — identity / value drift)")
+    return lines
+
+
 @data.command("semantic-lock")
 @l2_instance_option()
 @click.option(
@@ -483,6 +530,19 @@ def data_semantic_lock(
                 f"  [ok] {locked_path.name} matches fresh emit", err=True,
             )
             return
+        click.echo(
+            f"  [error] semantic lock drifted from {locked_path.name} "
+            f"(run without --check to refresh):\n",
+            err=True,
+        )
+        # DS.7 — a per-invariant COUNT summary first (a raw 50-line
+        # unified diff is useless when one invariant's violation set
+        # shifts by thousands of rows — e.g. the cadence universe fix).
+        # The summary names WHICH invariants moved and by how much; the
+        # bounded raw sample below shows the exact shape for the small
+        # ones.
+        for summary_line in _summarize_lock_drift(on_disk, fresh):
+            click.echo(summary_line, err=True)
         diff = list(difflib.unified_diff(
             on_disk.splitlines(keepends=True),
             fresh.splitlines(keepends=True),
@@ -490,17 +550,13 @@ def data_semantic_lock(
             tofile=f"fresh/{locked_path.name}",
             n=2,
         ))
-        click.echo(
-            f"  [error] semantic lock drifted from {locked_path.name}:\n"
-            f"  Showing first 50 diff lines (run without --check to "
-            f"refresh):\n",
-            err=True,
-        )
-        for line in diff[:50]:
+        click.echo("\n  first 40 raw diff lines:", err=True)
+        for line in diff[:40]:
             click.echo(line.rstrip("\n"), err=True)
-        if len(diff) > 50:
+        if len(diff) > 40:
             click.echo(
-                f"  ... ({len(diff) - 50} more diff lines truncated)",
+                f"  ... ({len(diff) - 40} more raw diff lines — see the "
+                f"summary above for the full per-invariant delta)",
                 err=True,
             )
         raise SystemExit(1)

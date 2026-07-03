@@ -316,6 +316,8 @@ def test_violation_identity_matches_detect_projection() -> None:
         "expected_eod_balance_breach",
         account_id=gen.account_id,
         business_day=gen.anchor_day,
-        variance=5.0,
+        # DS.7: the identity magnitude is EXACT CENTS — $5.00 variance
+        # is 500 cents (the detect side reads the same BIGINT column).
+        variance=500,
     )
     assert gen.intended == expected

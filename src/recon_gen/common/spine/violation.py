@@ -157,13 +157,19 @@ class AuditFixture(Violation):
         )
 
 
-def identity_dollars(cents: "Cents") -> float:
-    """Project a Cents residual into the Violation-identity currency —
-    rounded float dollars, matching the detect-side projection every
-    ``detect()`` uses when reading matview magnitudes. DS.7 upgrades
-    the identity currency to exact cents; until then this is the ONE
-    place the projection lives (DS.2: generators derive identity
-    magnitudes from residuals, so the rounding must match detect's
-    exactly or the set-equality gates chase phantom deltas).
+def identity_cents(cents: "Cents") -> int:
+    """Project a Cents residual into the Violation-identity currency:
+    EXACT integer cents (DS.7). The detect side reads the same BIGINT
+    cents straight off the matview, so both sides carry the exact
+    magnitude with zero float rounding — a drift that moves by a single
+    cent (but keeps its account/day key) now shows in the semantic
+    lock, where the old ``round(float(to_dollars()), 2)`` projection
+    silently collapsed sub-cent and rounding-boundary differences.
+
+    This is the ONE place the projection lives (DS.2: generators derive
+    identity magnitudes from residuals, so it must match detect's read
+    exactly or the set-equality gates chase phantom deltas). ``float``
+    is deliberately absent — money never round-trips through binary
+    floating point (the no-float lint, ``test_typing_smells``).
     """
-    return round(float(cents.to_dollars()), 2)
+    return cents.value

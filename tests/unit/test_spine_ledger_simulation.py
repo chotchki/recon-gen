@@ -74,14 +74,15 @@ def _refresh(conn: duckdb.DuckDBPyConnection) -> None:
     conn.commit()
 
 
-def _ledger_drift_days(detected: set[Violation], account_id: str) -> dict[date, float]:
-    out: dict[date, float] = {}
+def _ledger_drift_days(detected: set[Violation], account_id: str) -> dict[date, int]:
+    # DS.7 — ledger_drift identity is exact integer CENTS.
+    out: dict[date, int] = {}
     for v in detected:
         items = dict(v.identity)
         if items.get("account_id") == account_id:
             day = items.get("business_day")
             drift = items.get("drift")
-            if isinstance(day, date) and isinstance(drift, float):
+            if isinstance(day, date) and isinstance(drift, int):
                 out[day] = drift
     return out
 
@@ -237,7 +238,7 @@ def test_child_state_blip_fires_parent_ledger_drift_local_to_that_day() -> None:
     # Child stored is +7 on D1; parent stored is clean; Σ child.money
     # exceeds parent.stored by 7 on D1 → ledger_drift = parent.stored −
     # Σ child = −7 on D1, and clean on D0/D2.
-    assert ld == {_D1: -7.0}, (
+    assert ld == {_D1: -700}, (
         f"child state_blip on D1 must drive parent's ledger_drift to "
         f"−7 on D1 only; got {ld}"
     )
@@ -303,8 +304,8 @@ def test_vector_trajectory_carries_parent_ledger_drift_per_day() -> None:
     per_day = [_ledger_drift_days(s, "acct-vec-parent") for s in traj]
     assert per_day == [
         {},
-        {_D1: -7.0},
-        {_D1: -7.0},  # The historical breach stays in the carried set.
+        {_D1: -700},
+        {_D1: -700},  # The historical breach stays in the carried set.
     ], f"trajectory should be clean → D1 open → D1 still open; got {per_day}"
 
 

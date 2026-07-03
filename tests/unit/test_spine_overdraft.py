@@ -481,8 +481,8 @@ def test_overdraft_detect_does_not_cross_a_sql_pushdown_surface() -> None:
 def test_overdraft_violation_identity_matches_detect_projection() -> None:
     # The generator's `intended` and the detector's projected Violation
     # must be EQUAL — same invariant name, same identity columns, same
-    # rounding. Pinning this protects against drift in either side's
-    # identity shape.
+    # exact-cents magnitude. Pinning this protects against drift in
+    # either side's identity shape.
     gen = OverdraftInvariant().scenario_for("CustomerSubledger", magnitude=5.0)
     intended = gen.intended
     # Hand-build the expected detector projection and compare.
@@ -490,6 +490,7 @@ def test_overdraft_violation_identity_matches_detect_projection() -> None:
         "overdraft",
         account_id=gen.account_id,
         business_day=gen.anchor_day,
-        stored_balance=-5.0,
+        # DS.7: exact cents — a $5.00 overdraft is -500 cents.
+        stored_balance=-500,
     )
     assert intended == expected

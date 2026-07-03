@@ -2382,6 +2382,53 @@ class NoRawEnumEqualityCheck(Check):
         return v.smells
 
 
+# ---------------------------------------------------------------------------
+# Check: no-float-money (DS.7 — operator: "lint against use of float")
+# ---------------------------------------------------------------------------
+
+
+_NO_FLOAT_MONEY_MESSAGE = (
+    "``float`` in a money-exact module. Money is integer CENTS end to "
+    "end (``common/money.py::Cents``); the residual laws are Cents- / "
+    "Fraction-native (the DST z3 lane symbolically executes them — "
+    "binary floats can't be), and Violation identities carry exact "
+    "cents (DS.7). A ``float`` here is a silent precision leak: $0.10 is "
+    "not representable in binary64, and a cents value that round-trips "
+    "through float can land a cent off. Use ``Cents`` / ``int`` / "
+    "``Fraction`` / ``Decimal``. Suppress with ``# typing-smell: "
+    "ignore[no-float-money]: <reason>`` only for a genuinely-real "
+    "quantity (a ratio, a probability) that is not money."
+)
+
+
+class _NoFloatMoneyVisitor(ast.NodeVisitor):
+    """Flag every ``float`` NAME reference — a ``float(...)`` call or a
+    ``: float`` / ``-> float`` annotation — in the money-exact modules.
+    Reads the AST (not the source text), so the word "float" in a
+    docstring or comment is ignored; only real uses trip."""
+
+    def __init__(self, file: Path) -> None:
+        self.file = file
+        self.smells: list[Smell] = []
+
+    def visit_Name(self, node: ast.Name) -> None:
+        if node.id == "float":
+            self.smells.append(Smell(
+                file=self.file,
+                lineno=node.lineno,
+                checker="no-float-money",
+                message=_NO_FLOAT_MONEY_MESSAGE,
+            ))
+        self.generic_visit(node)
+
+
+class NoFloatMoneyCheck(Check):
+    def find_smells(self, src: str, tree: ast.AST, file: Path) -> Iterable[Smell]:
+        v = _NoFloatMoneyVisitor(file)
+        v.visit(tree)
+        return v.smells
+
+
 def _build_checks() -> list[Check]:
     pyright_scope = _read_pyright_include()
     # Tighter scope for explicit-any: the freshest async files where
@@ -2542,6 +2589,26 @@ def _build_checks() -> list[Check]:
                 REPO_ROOT / "src/recon_gen/common/l2/auto_scenario.py",
                 REPO_ROOT / "src/recon_gen/apps",
             ]),
+        ),
+        NoFloatMoneyCheck(
+            name="no-float-money",
+            description=(
+                "``float`` in a money-exact module (the Cents-native "
+                "residual laws + the Violation identity currency) is a "
+                "silent precision leak — money is integer cents end to "
+                "end (DS.7). Extend the file scope as more modules are "
+                "made float-free"
+            ),
+            # DS.7 initial scope: the residual LAW (Cents / Fraction
+            # native, symbolically executed by the DST z3 lane) + the
+            # Violation IDENTITY currency (exact cents). Both are
+            # float-free today; the lint keeps them so. The broader
+            # ``float(x.to_dollars())`` round-trip cleanup across the
+            # generator emit sites is tracked separately (DS.7.followup).
+            files=[
+                REPO_ROOT / "src/recon_gen/common/spine/residuals.py",
+                REPO_ROOT / "src/recon_gen/common/spine/violation.py",
+            ],
         ),
         NoBoto3Check(
             name="no-boto3",

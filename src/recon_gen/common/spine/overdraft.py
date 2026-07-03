@@ -68,7 +68,7 @@ from recon_gen.common.spine.residuals import (
 from recon_gen.common.spine.violation import (
     RuleViolation,
     Violation,
-    identity_dollars,
+    identity_cents,
 )
 from recon_gen.common.spine.math_invariant import math_invariant
 from recon_gen.common.spine.residuals import (
@@ -105,17 +105,15 @@ class OverdraftInvariant:
             f"SELECT account_id, business_day_start, stored_balance "
             f"FROM {self.prefix}_overdraft",
         )
-        # AO.1: stored_balance is BIGINT cents — project to dollars at
-        # the detect boundary so violation identities still round-trip
-        # against generators that author in dollars.
+        # DS.7: stored_balance is BIGINT cents — carry it into the
+        # identity as cents (int), matching the generator's
+        # identity_cents projection. No float.
         return {
             RuleViolation.of(
                 "overdraft",
                 account_id=aid,
                 business_day=to_date(bds),
-                stored_balance=round(
-                    float(Cents.from_db(int(sb)).to_dollars()), 2,
-                ),
+                stored_balance=int(sb),
             )
             for aid, bds, sb in rows
         }
@@ -302,7 +300,7 @@ class OverdraftGenerator:
             "overdraft",
             account_id=self.account_id,
             business_day=self.anchor_day,
-            stored_balance=identity_dollars(residual),
+            stored_balance=identity_cents(residual),
         )
 
     @property
@@ -327,7 +325,7 @@ class OverdraftGenerator:
             "drift",
             account_id=self.account_id,
             business_day=self.anchor_day,
-            drift=identity_dollars(residual),
+            drift=identity_cents(residual),
         )
 
     @property

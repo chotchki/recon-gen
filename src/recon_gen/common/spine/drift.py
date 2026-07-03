@@ -59,7 +59,7 @@ from recon_gen.common.spine.rng import scenario_rng
 from recon_gen.common.spine.violation import (
     RuleViolation,
     Violation,
-    identity_dollars,
+    identity_cents,
 )
 from recon_gen.common.spine.math_invariant import math_invariant
 from recon_gen.common.spine.residuals import (
@@ -97,15 +97,16 @@ class DriftInvariant:
             f"SELECT account_id, business_day_start, drift "
             f"FROM {self.prefix}_drift",
         )
-        # AO.1: matview math runs on BIGINT cents (integer-exact). Project
-        # back to dollars at the detect boundary so violation identities
-        # still round-trip against generators that author in dollars.
+        # DS.7: the matview drift column is BIGINT cents; carry it into
+        # the identity AS cents (int) — no float, no round. The generator
+        # side derives its magnitude from the same residual via
+        # identity_cents, so the two agree exactly.
         return {
             RuleViolation.of(
                 "drift",
                 account_id=aid,
                 business_day=to_date(bds),
-                drift=round(float(Cents.from_db(int(d)).to_dollars()), 2),
+                drift=int(d),
             )
             for aid, bds, d in rows
         }
@@ -186,13 +187,14 @@ class LedgerDriftInvariant:
             f"SELECT account_id, business_day_start, drift "
             f"FROM {self.prefix}_ledger_drift",
         )
-        # AO.1: see DriftInvariant.detect note on cents → dollars projection.
+        # DS.7: carry the BIGINT cents column into the identity as cents
+        # (int); see DriftInvariant.detect.
         return {
             RuleViolation.of(
                 "ledger_drift",
                 account_id=aid,
                 business_day=to_date(bds),
-                drift=round(float(Cents.from_db(int(d)).to_dollars()), 2),
+                drift=int(d),
             )
             for aid, bds, d in rows
         }
@@ -341,7 +343,7 @@ class DriftGenerator:
             "drift",
             account_id=self.child_account_id,
             business_day=self.anchor_day,
-            drift=identity_dollars(residual),
+            drift=identity_cents(residual),
         )
 
     @property
@@ -369,7 +371,7 @@ class DriftGenerator:
             "ledger_drift",
             account_id=self.parent_account_id,
             business_day=self.anchor_day,
-            drift=identity_dollars(residual),
+            drift=identity_cents(residual),
         )
 
     @property
@@ -651,7 +653,7 @@ class LedgerDriftGenerator:
             "ledger_drift",
             account_id=self.parent_account_id,
             business_day=self.anchor_day,
-            drift=identity_dollars(residual),
+            drift=identity_cents(residual),
         )
 
     @property
