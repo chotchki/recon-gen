@@ -44,6 +44,7 @@ the base layer. Add them then.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Final
 
 from recon_gen.common.sql import (
@@ -264,6 +265,71 @@ def emit_schema_drop_sql(
 # BASE_DAILY_BALANCES_COLUMNS — the step_2_pull was the only consumer.
 # The schema's CREATE TABLE blocks (below) are the source of truth for
 # column shape; ETL authors read them or PRAGMA the live tables.
+
+
+def _split_matview_template(
+    template: str,
+    template_order: tuple[str, ...],
+    section_markers: Mapping[str, str],
+) -> tuple[str, dict[str, str]]:
+    """Carve a monolithic matview-block template into per-object CREATE
+    bodies (DQ.4.1b).
+
+    Splits ``template`` at the line that starts each object's CREATE —
+    ``{matview_create_kw} {p}_<obj>{matview_options}`` for a regular
+    matview, or the object's rendered-section placeholder (e.g.
+    ``{balance_cadence_gap_section}``) for the five bodies rendered by a
+    helper — pulling each object's leading ``--`` comment block into its
+    own chunk so the chunk is self-contained and REORDERABLE. Returns the
+    leading header (text before the first object) plus an
+    ``{obj_id: body_template}`` map, each still carrying its ``{...}``
+    substitution slots for the shared ``.format(**fmt)`` at emit time.
+
+    Byte-safety is guaranteed BY CONSTRUCTION: the chunks are contiguous
+    line-aligned slices of the original, and the closing assertion proves
+    ``header + "".join(chunks in template order) == template``. So the
+    ONLY observable change downstream is whatever the graph create-walk
+    reorders (independent matviews whose relative CREATE slot the template
+    fixed arbitrarily) — verified against the byte-golden.
+    """
+    lines = template.splitlines(keepends=True)
+    starts: list[int] = []
+    for obj_id in template_order:
+        marker = section_markers.get(obj_id) or (
+            "{matview_create_kw} {p}_" + obj_id + "{matview_options}"
+        )
+        hits = [i for i, ln in enumerate(lines) if ln.startswith(marker)]
+        if len(hits) != 1:
+            raise ValueError(
+                f"template split: {obj_id!r} marker {marker!r} matched "
+                f"{len(hits)} lines (expected exactly 1)"
+            )
+        # Pull the immediately-preceding contiguous comment block into this
+        # object's chunk (comments sit directly above their CREATE; a blank
+        # line separates one object's trailing whitespace from the next
+        # object's leading comment).
+        j = hits[0]
+        while j - 1 >= 0 and lines[j - 1].lstrip().startswith("--"):
+            j -= 1
+        starts.append(j)
+    if starts != sorted(starts):
+        raise ValueError(
+            f"template split: chunk starts not in ascending order {starts} "
+            f"— template_order must match textual appearance order"
+        )
+    header = "".join(lines[: starts[0]])
+    bodies: dict[str, str] = {}
+    for k, obj_id in enumerate(template_order):
+        end = starts[k + 1] if k + 1 < len(template_order) else len(lines)
+        bodies[obj_id] = "".join(lines[starts[k] : end])
+    recon = header + "".join(bodies[o] for o in template_order)
+    if recon != template:
+        raise ValueError(
+            "template split is not byte-exact — the carve dropped or "
+            "duplicated content (this is a bug in _split_matview_template, "
+            "not the template)"
+        )
+    return header, bodies
 
 
 def wipe_demo_data_sql(
@@ -949,7 +1015,7 @@ def _emit_l1_invariant_views(
     )
     csb_section = _render_computed_subledger_balance_section(p, dialect)
     bcg_section = _render_balance_cadence_gap_section(instance, p, dialect)
-    return _L1_INVARIANT_VIEWS_TEMPLATE.format(
+    fmt: dict[str, object] = dict(
         p=p,
         computed_subledger_balance_section=csb_section,
         balance_cadence_gap_section=bcg_section,
@@ -1028,6 +1094,16 @@ def _emit_l1_invariant_views(
         # Route through ``typed_null`` so the alias maps to NUMBER(19)
         # on Oracle, BIGINT on PG, INTEGER on SQLite.
         null_bigint=typed_null("bigint", dialect),
+    )
+    # DQ.4.1b — emit the header, then each object's carved CREATE body in
+    # graph create-order. The single behavioral change vs the old whole-
+    # template ``.format()`` is that the graph walk canonicalizes the
+    # balance_cadence_gap / expected_eod_balance_breach pair (independent
+    # matviews) to create-in-refresh-order; every other object keeps its
+    # textual slot, so the output is byte-identical modulo that swap.
+    return _L1_HEADER.format(**fmt) + "".join(
+        obj.emit_create(fmt, body=_L1_CREATE_BODIES[str(obj.obj_id)])
+        for obj in SCHEMA_GRAPH.create_order(MatviewGroup.L1)
     )
 
 
@@ -1562,7 +1638,7 @@ def _emit_inv_views(
     pair_partition = (
         "PARTITION BY recipient_account_id, sender_account_id"
     )
-    return _INV_MATVIEWS_TEMPLATE.format(
+    fmt: dict[str, object] = dict(
         p=p,
         matview_options=matview_options(dialect),
         matview_create_kw=matview_create_keyword(dialect),
@@ -1586,6 +1662,13 @@ def _emit_inv_views(
         window_end_expr=cast("ps.posted_day", "TIMESTAMP", dialect),
         with_recursive_kw=with_recursive(dialect),
         trail_depth_cap=str(MONEY_TRAIL_DEPTH_CAP),
+    )
+    # DQ.4.1b — header + per-object carved bodies in graph create-order
+    # (identical to textual order here: the two Inv matviews are mutually
+    # independent, so no reorder — byte-identical to the old .format()).
+    return _INV_HEADER.format(**fmt) + "".join(
+        obj.emit_create(fmt, body=_INV_CREATE_BODIES[str(obj.obj_id)])
+        for obj in SCHEMA_GRAPH.create_order(MatviewGroup.INVESTIGATION)
     )
 
 
@@ -3986,6 +4069,37 @@ CREATE UNIQUE INDEX idx_{p}_l1ex_unique
 """
 
 
+# DQ.4.1b — carve the monolithic L1 template into per-object CREATE bodies
+# so ``emit_schema`` walks ``SCHEMA_GRAPH.create_order`` and emits each
+# object's slice, making create ORDER a graph property (the forward walk,
+# exact reverse of drop) instead of a template-literal accident. The five
+# helper-rendered bodies key off their placeholder line; the rest off their
+# ``{matview_create_kw} {p}_<obj>{matview_options}`` header. ``_L1_TEMPLATE_ORDER``
+# is TEXTUAL appearance order (the split needs it); the graph create-walk
+# supplies the EMIT order (identical except the balance_cadence_gap /
+# expected_eod_balance_breach pair — independent matviews the template
+# fixed in the opposite slot; the walk canonicalizes create to match
+# refresh + drop-reverse).
+_L1_SECTION_MARKERS: Mapping[str, str] = {
+    "computed_subledger_balance": "{computed_subledger_balance_section}",
+    "balance_cadence_gap": "{balance_cadence_gap_section}",
+    "xor_group_violation": "{xor_group_violation_body}",
+    "fan_in_disagreement": "{fan_in_disagreement_body}",
+    "multi_xor_violation": "{multi_xor_violation_body}",
+}
+_L1_TEMPLATE_ORDER: tuple[str, ...] = (
+    "effective_balances", "computed_subledger_balance", "computed_ledger_balance",
+    "data_anchor", "drift", "ledger_drift", "drift_summary", "overdraft",
+    "balance_cadence_gap", "expected_eod_balance_breach", "limit_breach",
+    "stuck_pending", "stuck_unbundled", "chain_parent_disagreement",
+    "xor_group_violation", "transfer_parents", "fan_in_disagreement",
+    "multi_xor_violation", "daily_statement_summary", "l1_exceptions",
+)
+_L1_HEADER, _L1_CREATE_BODIES = _split_matview_template(
+    _L1_INVARIANT_VIEWS_TEMPLATE, _L1_TEMPLATE_ORDER, _L1_SECTION_MARKERS,
+)
+
+
 # Investigation matview names in drop order. Both read from the base
 # ``{p}_transactions`` only — order between the two doesn't matter, but
 # fixing it keeps emit output deterministic.
@@ -4364,3 +4478,14 @@ CREATE UNIQUE INDEX idx_{p}_mte_unique
     ON {p}_inv_money_trail_edges
        (root_transfer_id, source_account_id, target_account_id, edge_seq);
 """
+
+
+# DQ.4.1b — same per-object carve for the two Investigation matviews.
+# Both read only from ``{p}_transactions`` and are mutually independent,
+# so graph create-order matches textual order here (no reorder).
+_INV_TEMPLATE_ORDER: tuple[str, ...] = (
+    "inv_pair_rolling_anomalies", "inv_money_trail_edges",
+)
+_INV_HEADER, _INV_CREATE_BODIES = _split_matview_template(
+    _INV_MATVIEWS_TEMPLATE, _INV_TEMPLATE_ORDER, {},
+)

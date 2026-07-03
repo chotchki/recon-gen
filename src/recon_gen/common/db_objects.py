@@ -10,10 +10,10 @@ were four INDEPENDENT serializations of this one graph that could silently
 diverge — DQ.0 §1 caught exactly that (the DS.3.2 ``effective_balances``
 mis-order in the overlay copy, Oracle-restore-only, untested). Here the
 graph is the single source and each of those FOUR lists DERIVES from it,
-so that divergence class stops being representable. (The DuckDB CTAS
-re-CREATE *body* order is still template-authored — DQ.2.2 folds the
-CREATE emit onto this same graph; DQ.1 covers the refresh / drop /
-ANALYZE / overlay ORDER lists.)
+so that divergence class stops being representable. (DQ.4.1b folded the
+CREATE emit onto this same graph too: ``emit_schema`` + the DuckDB CTAS
+re-CREATE now walk ``create_order`` per object, so create is the fifth
+derived order — the forward walk, exact reverse of drop.)
 
 ``depends_on`` holds DbObject INSTANCES, not names — so a cycle is
 unconstructable (a frozen node cannot reference one that does not exist
@@ -29,6 +29,7 @@ via ``DbObject.physical_name``. So there is ONE canonical graph
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -158,6 +159,26 @@ class DbObject:
         ``DBMS_STATS.GATHER_TABLE_STATS`` (Oracle)."""
         return analyze_table(self.physical_name(prefix), dialect)
 
+    def emit_create(self, fmt: Mapping[str, object], *, body: str) -> str:
+        """Emit this object's CREATE DDL from its authored body template
+        (DQ.4.1b).
+
+        Unlike drop/refresh/analyze — which DELEGATE to a parametrized
+        ``dialect.py`` generator keyed only off the object's NAME — a
+        CREATE body is bespoke, hand-tuned SQL. It's authored in
+        ``schema.py`` (the SQL surface, next to the dialect helpers it
+        interpolates) and passed in here; the object doesn't hold the
+        1300 lines of SELECT text (which also keeps this module's import
+        cone clean). What the object OWNS is the emission: ``emit_schema``
+        and the DuckDB table-refresh both walk ``DbObjectGraph.create_order``
+        and call this, so create ORDER is a graph property — the forward
+        walk, exact reverse of ``drop_order`` — not a template-literal
+        accident. ``fmt`` is the shared dialect-substitution context
+        (matview keyword, ``{p}`` prefix, rendered section bodies). DQ.4.3
+        splices typed passthrough projections generated from
+        ``self.columns`` here."""
+        return body.format(**fmt)
+
 
 @dataclass(frozen=True)
 class DbObjectGraph:
@@ -214,9 +235,8 @@ class DbObjectGraph:
 
     def refresh_order(self) -> tuple[DbObject, ...]:
         """The canonical matview refresh order — the single source the
-        PG/Oracle REFRESH, the DuckDB ANALYZE block, and the overlay
-        restore all derive from. (The DuckDB CTAS re-CREATE body order is
-        template-authored until DQ.2.2 routes it through this graph.)"""
+        PG/Oracle REFRESH, the DuckDB ANALYZE block, the overlay restore,
+        and (DQ.4.1b) the CREATE-body walk all derive from."""
         return self.matviews()
 
     def refresh_names(self, prefix: str) -> list[MatviewName]:
@@ -241,6 +261,18 @@ class DbObjectGraph:
     def drop_ids(self, group: MatviewGroup) -> tuple[DbObjectId, ...]:
         """Unprefixed ids for a group's drop block."""
         return tuple(o.obj_id for o in self.drop_order(group))
+
+    def create_order(self, group: MatviewGroup) -> tuple[DbObject, ...]:
+        """Matviews of ``group`` in creation order (DQ.4.1b) — the forward
+        dependency walk, the exact reverse of ``drop_order``. This is the
+        order ``emit_schema`` + the DuckDB table-refresh emit CREATE bodies
+        in, single-sourced with ``refresh_order`` (create == refresh ==
+        declaration order; the __post_init__ invariant guarantees every
+        object follows what it reads FROM, so it's always a valid apply
+        order). Pre-DQ.4.1b the L1/inv templates hard-coded their own
+        CREATE sequence — a second order surface that could drift from the
+        refresh/drop lists; now it derives from the one graph."""
+        return tuple(o for o in self.matviews() if o.group is group)
 
 
 # ---------------------------------------------------------------------------

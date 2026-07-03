@@ -168,6 +168,32 @@ def test_dq2_emit_schema_create_order_respects_the_graph() -> None:
             )
 
 
+@pytest.mark.parametrize("dialect", [Dialect.POSTGRES, Dialect.ORACLE, Dialect.DUCKDB])
+def test_dq4_1b_matview_create_order_equals_the_graph(dialect: Dialect) -> None:
+    """DQ.4.1b — the MATVIEW CREATE subsequence emitted by emit_schema is
+    EXACTLY ``SCHEMA_GRAPH``'s create order, not merely a valid topo order.
+
+    Since emit_schema now walks ``create_order`` per object (the carved
+    per-object bodies replaced the two monolithic ``.format()`` templates),
+    the create sequence is the forward graph walk — the exact reverse of
+    drop, single-sourced with refresh. This pins the balance_cadence_gap /
+    expected_eod_balance_breach canonicalization (the one reorder the carve
+    introduced) and fails loud if a future template edit reintroduces a
+    second, drifting CREATE order. (Base tables + config views stay
+    template-authored — DQ.4.1b carved only the L1 + Inv matviews — so this
+    checks the matview subsequence, the part the graph now governs.)"""
+    graph_matview_order = [str(o.obj_id) for o in SCHEMA_GRAPH.matviews()]
+    matview_ids = set(graph_matview_order)
+    emitted_matviews = [
+        oid for oid in _emitted_create_order(dialect) if oid in matview_ids
+    ]
+    assert emitted_matviews == graph_matview_order, (
+        "emit_schema's matview CREATE order diverged from SCHEMA_GRAPH's "
+        f"create order.\n emitted: {emitted_matviews}\n graph:   "
+        f"{graph_matview_order}"
+    )
+
+
 # -- the graph is topologically valid + the hard edges hold ----------------
 
 
