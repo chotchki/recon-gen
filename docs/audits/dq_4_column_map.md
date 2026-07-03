@@ -33,3 +33,18 @@ Drill-eligible columns carry a `ColumnShape` per the reading contract: `account_
 ## Validation
 
 The declarations are guarded by a runtime test (DQ.4.1): apply the schema to an in-memory DuckDB, introspect each object's ACTUAL emitted columns (name + order + coarse type), and assert `DbObject.columns` matches — catching any recon/transcription error against the real emitted schema, not against a re-read of the SQL text. The shape/currency/storage annotations cross-check against the DatasetContracts where columns overlap.
+
+## DQ.4.2 — contract ↔ matview reconciliation (design + the landed gate)
+
+From the 43-contract recon (workflow `wadhrl1op`): every `DatasetContract` is a DOWNSTREAM dataset projection over one or more matviews. The reconciliation RULE for a column shared (by name) between a contract and a source matview's `DbObject.columns`:
+
+- **STRICT (fails the build):** STORAGE — a contract money column must be `DOLLARS` (the dataset SQL pre-divides via `cents_to_dollars_sql`); a `CENTS` leak is the BG.7 100x render bug. Money source (`CENTS`) → contract `DOLLARS` is the allowed, documented widen. Coarse TYPE — equal, modulo the money widen `INTEGER/CENTS → DECIMAL/DOLLARS`.
+- **ADVISORY (enrichment-compatible, non-gating):** SHAPE — a contract MAY enrich a drill shape onto a `None`-source (Current*/base tables carry no drill shape; the reading contract adds `ACCOUNT_ID` / `RAIL_NAME` / `DATETIME_DAY`). Allowed iff `source.shape is None`, `contract.shape is None`, or `source.shape.can_assign_to(contract.shape)`. CURRENCY — the house convention is `currency=False` on every contract money column (SQL owns `$`-formatting), so it's non-gating.
+
+This is why the recon's 16 flagged "inconsistencies" are NOT `_COLUMNS` bugs — 15 are legitimate shape-enrichment over `None`-sources, 1 is the currency house-pattern. **Zero annotation fixes.**
+
+**Mechanism (two parts):**
+- **B — reconciliation gate (LANDED, `test_dq4_2_contract_reconciliation.py`).** Builds every dataset via the apps' `build_all_*`, DERIVES each source matview from the dataset's actual SQL (`FROM`/`JOIN` of a graph object — no parallel list), and asserts the rule for all 263 shared columns across 57 sourced datasets. A planted CENTS-leak fixture proves the storage gate fires. Validates the shape/currency/storage annotations the DuckDB-introspection test (DQ.4.1) can't see.
+- **A — the rename GATE (follow-on, folds with the DQ.4.4 literal-collapse).** A `contract_from(*sources, keep=[...], dollars=[...], add=[...], reshape={...})` builder (new `common/contracts.py`, imports both `dataset_contract` + `db_objects` — NOT the reverse, no cycle) resolves `keep`/`dollars` via `SCHEMA_GRAPH[obj][name]` → **KeyError at import on a matview rename** (the invariants-in-types gate). Migrate the ~18 clean single-source contracts to it, one per commit, byte-identity asserted. B stays the universal backstop for the JOIN/compute contracts.
+
+**Operator flag (non-gating):** `EXC_DEAD_LIMIT_SCHEDULES.cap` flips `currency` True(source)→False(contract) with NO `/100` (same DOLLARS storage). Either the blanket contract-money `currency=False` convention is a latent formatting smell across ALL money columns, or `cap` specifically should render as `$`. Surfaced for chotchki; the automated gate treats currency as advisory so it blocks neither.
