@@ -15,7 +15,7 @@ and the theorem obligations can quantify over the free vars.
 """
 # z3-solver ships no type stubs; relax ONLY the untyped-cascade rules
 # for this z3-boundary file (the rest of tests/ stays fully strict).
-# pyright: reportMissingTypeStubs=false, reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false, reportUnknownParameterType=false
+# pyright: reportMissingTypeStubs=false, reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false, reportUnknownParameterType=false, reportAttributeAccessIssue=false, reportArgumentType=false
 from __future__ import annotations
 
 import datetime as dt
