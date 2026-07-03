@@ -650,6 +650,33 @@ RECON_GEN_RUNNER_YES: Final = EnvVar(
     optional=True,
 )
 
+RECON_GEN_TLS_SELF_SIGNED: Final = EnvVar(
+    name="RECON_GEN_TLS_SELF_SIGNED",
+    description=(
+        "Bool (EA.2) — mint a SELF-SIGNED cert for the env's locked SANs "
+        "instead of running the ACME/Cloudflare DNS-01 flow. For the "
+        "cloud-spike CI runner, which has no Cloudflare DNS control; the "
+        "hostname resolves to 127.0.0.1 via /etc/hosts and trust is added "
+        "out-of-band (certifi append + Playwright ignore_https_errors). "
+        "Unset in prod/dev — ACME stays the default."
+    ),
+    coercer=_bool_coercer,
+    optional=True,
+)
+
+RECON_GEN_BROWSER_INSECURE_TLS: Final = EnvVar(
+    name="RECON_GEN_BROWSER_INSECURE_TLS",
+    description=(
+        "Bool (EA.2) — Playwright browser contexts accept untrusted / "
+        "self-signed TLS certs (``ignore_https_errors=True``). For the "
+        "cloud-spike runner where Dex serves a self-signed cert WebKit "
+        "won't trust. Unset everywhere else — the real ACME cert is "
+        "publicly trusted, so browsers validate normally."
+    ),
+    coercer=_bool_coercer,
+    optional=True,
+)
+
 # Y.2.gate.k.1+k.6 — runner CI-mode opt-in. When set, ``setup_variant``
 # skips Docker container spin-up for ``lo`` targets and assumes the DB
 # is already reachable at ``RECON_GEN_DEMO_DATABASE_URL``. Used by GHA
