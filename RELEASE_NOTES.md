@@ -12,6 +12,38 @@
 > `--help`) against the code. The v14.6.0 → v13.14.4 entries below predate that
 > pass and are left as written.
 
+## v16.1.0 — the invariant laws are formally tied to the SQL that detects them
+
+Minor. The whole phase is one idea: every accounting invariant is written ONCE as a law — Cents-native, persona-blind, authored from the written spec and nothing else — and the SQL matview that detects violations of it is checked AGAINST that law, exhaustively, on the real engine. Before this the same law lived three or four times over (the simulation, the detector matview, the generator's planted magnitude, the audit-PDF walk) with nothing forcing them to agree, so two whole bug classes — generator-vs-detector magnitude drift, detector-vs-law semantic drift — were just trusted. They aren't anymore.
+
+The one you'll actually feel: a daily-reporting account with a non-midnight end-of-day cutover (a 17:00 close) was firing a "missing daily balance" alarm on EVERY day it reported on time. The cadence-gap detector compared the stored timestamp against a midnight calendar day without truncating, so a fully-compliant 17:00 account never matched and looked absent all month. If you run `explicit_daily` cadence on anything with a `business_day_offset`, that false positive is gone.
+
+How the rest holds together: each detector's residual (the law) is enumerated over its boundary domain against the REAL emitted schema — `engine violation set == {cells : residual != 0}`, keys AND exact magnitudes, no mock, the engine running INSIDE the verified object. The same domains replay on PostgreSQL and Oracle in the db tier, so the per-dialect matview SQL is proven to detect the identical violation set, not merely to look plausible. A definition-site annotation on every detector class plus an AST gate plus a both-direction walk against the emitted schema makes an un-annotated detector matview a BUILD FAILURE — which is exactly the hole that let `balance_cadence_gap` ship for its whole life as an emitted matview no cross-check ever covered.
+
+An adversarial code review over the new law code (thirteen candidate findings, verified down to four real ones) is what caught the cutover bug — the enumeration gate itself was blind to it, because the test harness only ever emitted midnight balances. That lesson is baked in now: the harness varies the timestamp, and a born-red witness proves the fix.
+
+### Added
+
+- Formal-tie verification for every L1 / L2 invariant: a residual law per detector (`common/spine/residuals.py`), hand-derived known-answer vectors, and an exhaustive enumeration gate asserting the emitted matview detects exactly the law's violation set on the real DuckDB engine.
+- Per-dialect replay: the same enumeration domains run against PostgreSQL and Oracle in the db tier, proving the violation set is dialect-invariant (the matview SQL branches per engine; the detections don't).
+- A completeness gate: `@math_invariant` on every detector class + an AST check + a both-direction emitted-schema walk. An emitted detector matview with no annotation, or an annotation with no matview, fails the build.
+- The anomaly detector's tolerance contract: its z-score is irrational so it can't be exact-compared, but z-squared is rational — the law computes it exactly in `Fraction`, and only the engine's float carries a bounded epsilon, with band-edge buckets given an explicit adjacency waiver.
+- A `no-float-money` lint: `float` is barred from the money-exact modules (the Cents-native laws + the Violation identity). Money never round-trips through binary floating point.
+- The semantic-lock `--check` is wired back onto the chain — DuckDB byte-compare in the unit tier, plus a PostgreSQL / Oracle violation-set check in the db tier — after it went dark with CB.8.
+
+### Changed
+
+- Violation identities carry EXACT integer cents, not rounded float dollars. A drift that moves by a single cent — same account, same day — now shows in the semantic lock; the old dollar projection silently collapsed it.
+- Matview stats are gathered in a cascade with the refresh dependency order (base tables first, each object's stats right after its own materialization), so PostgreSQL and Oracle refresh in seconds instead of the pre-cascade minutes.
+- The anomaly matview's per-pair statistics cast through `DOUBLE PRECISION` on every dialect — DuckDB was silently quantizing mean / stddev / z to three decimals via a bare `NUMERIC` while PostgreSQL kept full precision. Same SQL text, divergent results, now converged.
+- Both bundled example institutions re-locked: `balance_cadence_gap` now materializes on the demo (the invariant had no demo data before), and the money-magnitude values moved from dollars to cents.
+
+### Fixed
+
+- The end-of-day-cutover cadence false positive described above — `to_date` the stored balance side of the existence join, matching what `effective_balances` already did.
+- The cadence-gap account universe was built from balance rows alone, so a declared daily-reporting account with zero rows anywhere, and a transactions-only account with activity, were both invisible — the loudest corruptions producing no alarm. The universe now unions balance-observed, non-failed-leg-observed and L2-declared accounts, and the day frame opens from either feed.
+- Operator-authored account ids / names / roles are SQL-escaped at every cadence interpolation site — an "O'Brien Clearing" account no longer breaks the emit.
+
 ## v16.0.2 — the test chain runs DuckDB end-to-end + screenshots are back
 
 Patch. Almost entirely under the hood — the payoff is confidence, not new
