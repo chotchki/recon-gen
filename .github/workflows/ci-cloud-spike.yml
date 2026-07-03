@@ -112,17 +112,30 @@ jobs:
           timeout 60 bash -c 'until docker exec ci-shared-pg pg_isready -U postgres -q; do sleep 2; done'
 
       - name: Spin a FRESH Oracle container (gvenzl faststart)
-        # gvenzl/oracle-free:23-faststart is pullable + multi-arch + ~20-30s
-        # (the box's oracle-19c:local is un-pullable). Its ORACLE_PASSWORD env
-        # sets the system password at init; it exposes service FREEPDB1 —
-        # matching the runner cfg URL. Wait on the image's built-in HEALTHCHECK
-        # (not a fixed sleep) — first-boot bounces the DB once during setup.
+        # gvenzl/oracle-free:23-faststart is pullable + multi-arch (the box's
+        # oracle-19c:local is un-pullable). ORACLE_PASSWORD sets the system
+        # password at init; it exposes service FREEPDB1 matching the cfg URL.
+        # Readiness = gvenzl's own "DATABASE IS READY TO USE!" log marker
+        # (v1 relied on Docker's HEALTHCHECK status, which stayed empty and
+        # timed out at 600s — v1's failure). Detect a crashed container early
+        # + dump logs on any failure so a red Oracle is diagnosable.
         run: |
           docker run -d --name ci-shared-oracle -p 1521:1521 \
             -e ORACLE_PASSWORD="${ORACLE_PASSWORD}" \
             gvenzl/oracle-free:23-faststart
-          echo "Waiting for Oracle to report healthy..."
-          timeout 600 bash -c 'until [ "$(docker inspect -f "{{.State.Health.Status}}" ci-shared-oracle 2>/dev/null)" = "healthy" ]; do sleep 5; done'
+          echo "Waiting for Oracle 'DATABASE IS READY TO USE'..."
+          for _ in $(seq 1 180); do
+            if docker logs ci-shared-oracle 2>&1 | grep -q "DATABASE IS READY TO USE"; then
+              echo "Oracle ready."; break
+            fi
+            if [ "$(docker inspect -f '{{.State.Running}}' ci-shared-oracle 2>/dev/null)" != "true" ]; then
+              echo "::error::Oracle container is not running — logs:"; docker logs ci-shared-oracle 2>&1 | tail -60; exit 1
+            fi
+            sleep 5
+          done
+          if ! docker logs ci-shared-oracle 2>&1 | grep -q "DATABASE IS READY TO USE"; then
+            echo "::error::Oracle never became ready (15 min) — logs:"; docker logs ci-shared-oracle 2>&1 | tail -60; exit 1
+          fi
 
       - name: Pre-generate the self-signed TLS cert + trust it
         # Mint the self-signed cert for the CI SANs BEFORE the chain (via the
