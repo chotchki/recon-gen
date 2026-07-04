@@ -4,22 +4,23 @@
 
 ## What this builds
 
-Real Let's Encrypt certs for 4 DNS names under `hotchkiss.io`, minted + renewed automatically by `./run_tests.sh` (no per-machine CA install, no browser warnings). The runner manages the DNS records via Cloudflare's API; LE validates via DNS-01 TXT records under the same zone.
+Real Let's Encrypt certs for the 2 DEV DNS names under `hotchkiss.io`, minted + renewed automatically by `./run_tests.sh` (no per-machine CA install, no browser warnings). The runner manages the DNS records via Cloudflare's API; LE validates via DNS-01 TXT records under the same zone.
 
 | Hostname | A → | Purpose |
 |---|---|---|
 | `localdev.recon-gen.hotchkiss.io` | `127.0.0.1` (static) | Operator's Mac browser → local uvicorn over loopback |
-| `dev.recon-gen.hotchkiss.io` | Operator's Mac public IP (auto-discovered) | QuickSight us-east-1 → operator's Mac PG/Oracle Docker |
-| `localci.recon-gen.hotchkiss.io` | `127.0.0.1` (static) | WSL2 CI runner's browser → local uvicorn over loopback |
-| `ci.recon-gen.hotchkiss.io` | WSL2 runner's public IP (auto-discovered) | QuickSight us-east-1 → WSL2 runner's PG/Oracle Docker |
+| `dev.recon-gen.hotchkiss.io` | Operator's Mac public IP (auto-discovered) | stable public-facing dev SAN (was the QuickSight-inbound path; QS removed in v16, kept as a cert SAN) |
 
-One cert per environment (DEV / CI) covering both that env's SANs. Dynamic A records reconcile via the cloudflare_trace pattern (`GET https://1.1.1.1/cdn-cgi/trace`) on every chain run — public IP changes update Cloudflare automatically.
+One DEV cert covering both SANs. The dynamic `dev.*` A record reconciles via the cloudflare_trace pattern (`GET https://1.1.1.1/cdn-cgi/trace`) on every chain run — public IP changes update Cloudflare automatically.
+
+> **CI uses self-signed certs, NOT this Cloudflare coordinator (EA.4).** The GitHub-hosted `ubuntu-latest` runner has no DNS control, so CI mints a *self-signed* cert for the `localci.*` / `ci.*` SANs via `RECON_GEN_TLS_SELF_SIGNED` (no Cloudflare token, no ACME, no repo secret), appends it to certifi for httpx trust, and maps the SANs to loopback with `/etc/hosts`. That flow lives entirely in `.github/workflows/ci.yml`'s `test-everything` job — Steps 1–5 below are the DEV path only and don't apply to CI. (Pre-EA.4, CI ran on a self-hosted WSL2 box that DID use this coordinator with a `ci`-env ACME cert; that box is decommissioned.)
 
 ## Prerequisites
 
 - Cloudflare account managing the `hotchkiss.io` zone.
 - Personal email for the Let's Encrypt ACME account (used for rate-limit / abuse notifications only).
-- For CI integration: admin access to the GitHub repo Settings → Secrets and variables → Actions.
+
+(CI needs none of this — it's self-signed and self-contained; see the callout above and Step 5.)
 
 ## Step 1 — Mint the Cloudflare API token (one-time)
 
@@ -64,7 +65,7 @@ app2:
     cert_path: /Users/<you>/.local/share/recon-gen/tls/dev/cert.pem
     key_path:  /Users/<you>/.local/share/recon-gen/tls/dev/key.pem
     account_email: you@example.com
-    env: dev    # or 'ci' on the WSL2 self-hosted runner
+    env: dev    # 'ci' selects the CI SAN pair (used by the self-signed CI path, not this dev coordinator)
 ```
 
 `cert_path` and `key_path` are where the coordinator writes the freshly-minted PEMs. The runner's storage module owns the parent dir creation + atomic write; you don't pre-create the path. The XDG convention `~/.local/share/recon-gen/tls/<env>/` is recommended — pick anything writable.
@@ -91,23 +92,9 @@ Expected first-run wall time: ~30s (LE finalize + cert download). Subsequent run
 
 Open `https://localdev.recon-gen.hotchkiss.io:8765` in your browser — no warning, real LE chain, padlock icon.
 
-## Step 5 — CI GitHub secret
+## Step 5 — CI needs no TLS setup
 
-The WSL2 self-hosted CI runner uses the same coordinator. Add the secret:
-
-1. GitHub repo → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**.
-2. Name: `CLOUDFLARE_TOKEN`.
-3. Value: the same token from Step 1 (or a separate token if you want per-env rotation; the coordinator doesn't care).
-
-`.github/workflows/ci.yml` already wires `RECON_GEN_CLOUDFLARE_TOKEN: ${{ secrets.CLOUDFLARE_TOKEN }}` into the layered-runner job env (Phase DC.3). The secret reaches the runner process; the runner reads it via the typed `RECON_GEN_CLOUDFLARE_TOKEN.get_or_none()` registry.
-
-Also create a secret for the ACME account email:
-
-1. Same Secrets page → **New repository secret**.
-2. Name: `TLS_ACME_EMAIL`.
-3. Value: your personal email (or an ops-shared email).
-
-`ci.yml`'s cfg-overwrite heredoc will reference it as `account_email: "${{ secrets.TLS_ACME_EMAIL }}"` in the `app2.tls:` block.
+CI is fully self-contained (EA.4). `.github/workflows/ci.yml`'s `test-everything` job sets `RECON_GEN_TLS_SELF_SIGNED=1` and mints a self-signed cert for the `localci.*` / `ci.*` SANs at job start — no Cloudflare token, no `TLS_ACME_EMAIL`, no repo secret, no ACME round-trip. It appends the cert to the runner's certifi bundle (httpx trusts certifi, not `SSL_CERT_FILE`) and maps the SANs to loopback via `/etc/hosts`; `RECON_GEN_BROWSER_INSECURE_TLS=1` tells WebKit to accept it. Nothing to configure — the `CLOUDFLARE_TOKEN` above is a local-dev concern only.
 
 ## Troubleshooting
 
@@ -125,8 +112,8 @@ Also create a secret for the ACME account email:
 
 1. Cloudflare dashboard → API Tokens → revoke the old token.
 2. Mint a new one (same scope, same zone).
-3. Update both `run/secrets.env` (locally) and the GitHub `CLOUDFLARE_TOKEN` secret.
-4. Run `./run_tests.sh up_to=app2` once on each side to confirm the new token works (the coordinator re-reads on every fire).
+3. Update `run/secrets.env` (locally). No GitHub secret to update — CI is self-signed and doesn't use `CLOUDFLARE_TOKEN`.
+4. Run `./run_tests.sh up_to=app2` once to confirm the new token works (the coordinator re-reads on every fire).
 
 The zone ID cache + ACME account key both survive token rotation — no need to clear `~/.local/share/recon-gen/tls/`.
 

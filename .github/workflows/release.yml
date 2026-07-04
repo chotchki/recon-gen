@@ -6,7 +6,7 @@
 # `release-coverage` + `verify-testpypi-install` + `e2e-against-testpypi`
 # + `verify-pypi-install` jobs duplicated work that ci.yml already
 # does — and ci.yml is now the layered runner that covers everything
-# from unit → qs_browser on one self-hosted box.
+# from unit → agreement on a GitHub-hosted ubuntu-latest runner (EA.4).
 #
 # New shape — 5 jobs:
 #   build → smoke → publish-testpypi → publish-pypi → github-release
@@ -18,10 +18,11 @@
 #                     starts; gates the v* tag pipeline on the
 #                     just-completed CI run)
 #
-# Sensitive-credential rationale preserved: build / smoke remain on
-# ubuntu-latest (clean-room — no chance of self-hosted runner state
-# leaking into a published wheel). Publish jobs use Trusted Publisher
-# OIDC, not stored tokens.
+# Sensitive-credential rationale preserved: build / smoke run on their
+# own dedicated ubuntu-latest jobs (clean-room — a fresh runner with
+# none of the test chain's container / cert / self-signed state leaking
+# into a published wheel). Publish jobs use Trusted Publisher OIDC, not
+# stored tokens.
 
 name: Release
 

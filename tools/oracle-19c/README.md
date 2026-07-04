@@ -1,8 +1,14 @@
 # Oracle Database 19c — local-build container image
 
 Builds an Oracle 19c container image we control. Production parity with AWS
-RDS Oracle SE2 19c. Both arm64 (Apple Silicon dev Macs) and amd64 (the WSL2
-self-hosted CI runner) are supported — the build script picks by host arch.
+RDS Oracle SE2 19c. Both arm64 (Apple Silicon dev Macs) and amd64 (Linux /
+Intel dev boxes) are supported — the build script picks by host arch.
+
+> **Optional now (EA.4).** CI no longer uses this image — the GitHub-hosted
+> runner spins `gvenzl/oracle-free:23-faststart`, which `_resolve_oracle_image()`
+> auto-falls-back to whenever `oracle-19c:local` is absent (the local default
+> takes the same fallback). Build this only for closer RDS-Oracle-SE2-19c
+> parity on a dev box; the decommissioned WSL2 CI box used to pre-bake it.
 
 ## Why we build this ourselves
 
@@ -57,7 +63,7 @@ curl 'https://download.oracle.com/.../LINUX.ARM64_1919000_db_home.zip' \
      -H 'Cookie: <whatever-DevTools-copied>' \
      -o tools/oracle-19c/LINUX.ARM64_1919000_db_home.zip
 
-# 3. Repeat for the amd64 zip on the WSL2 runner.
+# 3. Repeat for the amd64 zip on a Linux/amd64 box.
 ```
 
 ### Verify the zip is clean (no Safari wrap)
@@ -81,7 +87,7 @@ unzip -l tools/oracle-19c/LINUX.ARM64_1919000_db_home.zip \
 ./tools/oracle-19c/build.sh
 ```
 
-Takes ~10-15 min on Apple Silicon, ~6-8 min on the WSL2 box. The script:
+Takes ~10-15 min on Apple Silicon, ~6-8 min on a Linux/amd64 box. The script:
 
 1. Clones Oracle's `oracle/docker-images` at the pinned SHA.
 2. Runs their `buildContainerImage.sh -v 19.3.0 -e -i` against the dropped-in
