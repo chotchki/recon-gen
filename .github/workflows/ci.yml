@@ -1,27 +1,35 @@
-# CI — collapsed onto a single self-hosted runner (CB.11.c, 2026-06-02;
-# further collapsed CB.17.f, 2026-06-04).
+# CI — GitHub-hosted cloud runner (EA.4, 2026-07-04). Reverts the
+# CB.11.c/CB.17.f collapse onto the self-hosted WSL2 box. That box only
+# ever existed to reach QuickSight in us-east-1 over the hotchkiss.io
+# DDNS forwards, and QuickSight + the whole AWS footprint are gone (Phase
+# DW, v16). With nothing tying CI to a physical host, the layered runner
+# moves back to `ubuntu-latest` — proven green by the EA.2 cloud spike
+# (full unit → agreement chain, PG + Oracle + DuckDB, ~28 min wall,
+# ~3.7 GB peak RSS on the 4-core/16 GB runner). Rationale:
+# docs/audits/ea_1_self_hosted_rationale.md.
 #
-# The pre-CB.11.c shape had six top-level jobs plus a sibling `e2e.yml`
-# workflow with another four. With the self-hosted recon-gen-ci-local
-# box online and `./run_tests.sh up_to=agreement` driving every layer
-# (unit → db → app2 → app2_browser → agreement) under one roof —
-# Docker, Playwright WebKit, teardown, all AWS-free post-DW.11 — the
-# matrix collapses onto one self-hosted job. Post CB.17.d there is no
-# cell loop: the runner runs ONE pytest invocation per layer; the
-# shared PG + Oracle containers below are the substrate for every
-# layer above unit; the CB.17.f env-URL short-circuit
-# (`RECON_GEN_DEMO_DATABASE_URL_PG` / `_OR`) tells the runner not to
-# re-spin its own container on top of CI's.
+# What the flip changes vs the box (all ported from the EA.2 spike):
+# - Fresh-ephemeral containers per run — a `postgres:17-alpine` + a
+#   `gvenzl/oracle-free:23-faststart` (the box's un-pullable
+#   `oracle-19c:local` is replaced by gvenzl, which `_resolve_oracle_image`
+#   already auto-falls-back to). No flock / adopt / rename / reuse dance:
+#   the VM is discarded at job end, so there are no persistent containers
+#   to coordinate — and no per-run password force-reset, since a fresh
+#   container gets this run's random password at init.
+# - Self-signed TLS instead of ACME-via-Cloudflare: `RECON_GEN_TLS_SELF_SIGNED`
+#   mints the cert for the locked CI SANs, certifi-append is the load-bearing
+#   trust step, and /etc/hosts maps the SAN to loopback. No CLOUDFLARE_TOKEN —
+#   its absence makes any accidental ACME fall-through fail loud.
+# - `--with-deps webkit` + an apt-get for GNU time + graphviz, the two tools
+#   the box pre-baked.
 #
 # What stays out:
-# - `e2e.yml` is deleted (the layered runner does its work). DW.11 also
-#   deleted `nightly-cost-sweep.yml` — with QuickSight + the AWS footprint
-#   gone (DW.0.5 fully-local), there's nothing to sweep.
 # - `release.yml` no longer re-runs tests; it gates on this workflow's
-#   `workflow_run` success (see `release.yml.new`).
-# - `docs-portable-install` stays on ubuntu-latest — it's a wheel-extras
-#   gate, not a runner-layer concern.
-# - `coverage-badge` stays on ubuntu-latest — pure post-processing.
+#   `workflow_run` success — its `wait-for-ci` job polls the CI run on the
+#   tagged SHA and clears the publish pipeline on success/skipped.
+# - `docs-portable-install` / `clean-install-smoke` / `coverage-badge` were
+#   already on ubuntu-latest — pure wheel-extras / post-processing gates,
+#   untouched by the flip.
 
 name: CI
 
@@ -29,8 +37,6 @@ name: CI
 #   - push: main          (post-merge gate)
 #   - pull_request: main  (pre-merge gate)
 #   - workflow_dispatch   (operator manual override)
-# Feature-branch pushes intentionally do NOT fire CI; the self-hosted
-# runner is a finite resource and PR-on-main is the contract.
 on:
   push:
     branches: [main]
@@ -51,36 +57,27 @@ permissions:
 jobs:
   test-everything:
     name: Layered runner (unit → agreement)
-    # v12.0.0 followup, preserved: skip the push-CI when this is a
-    # Release commit. The Release workflow (release.yml) fires on the
-    # tag push and runs its own pipeline; the parallel push-CI burns
-    # AWS rate-limit budget contending with it. Downstream jobs
-    # `needs: test-everything`, so skipping here skips everything.
+    # Skip the push-CI on a Release commit: the Release workflow
+    # (release.yml) fires on the tag push and runs its own gated pipeline,
+    # and its `wait-for-ci` treats this job's `skipped` conclusion as the
+    # deliberate green (the last pre-Release CI on main was already green
+    # for the operator to cut the tag). Downstream jobs `needs:
+    # test-everything`, so skipping here skips the whole CI run.
     if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Release v')
 
-    # The WSL2 Ubuntu runner on the 5800X3D / 64GB Windows box.
-    # Playwright WebKit system deps, libatomic1, Docker, AWS CLI, and
-    # uv are pre-installed (see BY.4 ops doc). recon-gen-ci-local is
-    # the unique label tying jobs to this physical host.
-    runs-on: [self-hosted, recon-gen-ci-local]
+    runs-on: ubuntu-latest
 
-    # Hard cap so a hung Playwright session doesn't pin the runner.
-    # 90 min is comfortable headroom over the observed ~50 min wall on
-    # a full unit→agreement sweep (BY.2 baseline).
+    # Hard cap so a hung Playwright session doesn't pin a runner. 90 min is
+    # comfortable headroom over the EA.2 spike's ~28 min cloud wall.
     timeout-minutes: 90
 
     steps:
       - uses: actions/checkout@v6
 
       - name: Install uv (also installs Python 3.14 per .python-version)
-        # `actions/setup-python` was dropped 2026-06-05: on the WSL2
-        # self-hosted runner it only sees the OS-baked Python (e.g.
-        # 3.12) and can't download arbitrary versions. uv downloads
-        # python-build-standalone wheels for whatever .python-version
-        # pins (default `python-preference = managed`), so a
-        # 3.12-only host upgrades transparently. Hosted runners keep
-        # working the same way — uv prefers its own managed Python
-        # over the runner-provided one when the version mismatches.
+        # uv downloads python-build-standalone for whatever .python-version
+        # pins (default `python-preference = managed`), so it doesn't depend
+        # on the runner's OS-baked Python.
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
@@ -89,44 +86,38 @@ jobs:
       - name: Install dependencies (uv sync from uv.lock)
         # `--extra dev --extra prod` covers what the layers exercise (unit
         # needs dev/pyright + playwright; db/app2 need prod for the seed +
-        # App2 server). DW.10 — no `--extra quicksight`: QuickSight (and
-        # boto3) are gone. Playwright + pytest-xdist live in [dev].
+        # App2 server). No `--extra quicksight` — QuickSight + boto3 are gone
+        # (DW). Playwright + pytest-xdist live in [dev].
         run: uv sync --frozen --extra dev --extra prod
 
-      - name: Install Playwright WebKit browser
-        # WebKit system libs are pre-installed on the runner, so
-        # --with-deps is omitted (it requires sudo). The browser binary
-        # itself still needs per-version install.
-        run: .venv/bin/playwright install webkit
+      - name: Install Playwright WebKit browser (+ system deps)
+        # --with-deps because a fresh ubuntu-latest has none of the WebKit
+        # system libs the WSL2 box pre-baked; sudo works on hosted runners.
+        run: .venv/bin/playwright install --with-deps webkit
 
       - name: Set up biome
-        # biome is a standalone Rust binary; the pytest sessionstart
-        # hook runs `biome check` as a gate when `biome` is on PATH.
-        # Version pinned to match biome.jsonc schema.
+        # biome is a standalone Rust binary; the pytest sessionstart hook
+        # runs `biome check` as a gate when `biome` is on PATH. Version
+        # pinned to match the biome.jsonc schema.
         uses: biomejs/setup-biome@v2
         with:
           version: 2.4.14
 
-      - name: Generate random DB passwords (BX.248)
-        # Per-workflow-run random passwords for the shared PG + Oracle
-        # containers. `openssl rand -hex 14` gives 28 alphanumeric chars
-        # — satisfies Oracle 19c's "letter + digit + 8+chars" rule, no
-        # special chars to escape downstream, AND fits inside Oracle's
-        # 30-byte quoted-identifier limit on `ALTER USER ... IDENTIFIED
-        # BY "<pwd>"` (CE.4-followup; pre-fix used `-hex 16` = 32 chars
-        # which tripped ORA-00972, silently failed the reset, and let
-        # FAILED_LOGIN_ATTEMPTS lock the system account → ORA-28000).
-        # Exported via $GITHUB_ENV so all subsequent steps see
-        # PG_PASSWORD / ORACLE_PASSWORD. Replaces the pre-BX.248
-        # source-checked `postgres` / `qsgentestpwd2026` literals.
-        #
-        # v13.3.0 followup — `::add-mask::` redacts the generated value
-        # from every subsequent log frame (env blocks, command output,
-        # anywhere GHA prints them). Without it the env-block GHA dumps
-        # before every step shows PG_PASSWORD / ORACLE_PASSWORD in
-        # clear text, since the values aren't secrets (GHA auto-masks
-        # `${{ secrets.* }}` values but has no way to know about
-        # runtime-generated strings unless we tell it).
+      - name: Install system tools the box pre-baked (GNU time + graphviz)
+        # ubuntu-latest lacks two tools the WSL2 box had pre-installed:
+        #   - GNU /usr/bin/time (only the bash `time` builtin ships) — needed
+        #     for the peak-RSS capture below.
+        #   - graphviz `dot` — a TEST-only dep: test_cf3_diagram_regression
+        #     cross-checks the wasm-graphviz product renderer against system
+        #     `dot`. The product itself uses @hpcc-js/wasm-graphviz, so this
+        #     is a CI-parity dep, not a runtime one.
+        run: sudo apt-get update && sudo apt-get install -y time graphviz
+
+      - name: Generate random DB passwords
+        # `openssl rand -hex 14` = 28 alphanumeric chars — clears Oracle's
+        # letter+digit+8char rule and fits its 30-byte quoted-identifier
+        # limit (CE.4-followup: -hex 16 = 32 chars tripped ORA-00972).
+        # `::add-mask::` redacts the value from every subsequent log frame.
         run: |
           PG_PASSWORD=$(openssl rand -hex 14)
           ORACLE_PASSWORD=$(openssl rand -hex 14)
@@ -137,13 +128,11 @@ jobs:
             echo "ORACLE_PASSWORD=${ORACLE_PASSWORD}"
           } >> "$GITHUB_ENV"
 
-      - name: Generate random OIDC credentials (DD.4)
-        # Same BX.248 mirror: per-workflow-run random secrets for the
-        # shared Dex container's OIDC client + test user + the App2 JWT
-        # signing key. All three injected into $GITHUB_ENV; the runner's
-        # _ensure_oidc_if_configured reads them via the typed
-        # RECON_GEN_OIDC_CLIENT_SECRET / RECON_GEN_JWT_SECRET /
-        # RECON_GEN_DEX_USER_PASSWORD registry.
+      - name: Generate random OIDC credentials
+        # Per-run random secrets for the Dex OIDC client + test user + the
+        # App2 JWT signing key; the runner's _ensure_oidc_if_configured reads
+        # them via the typed RECON_GEN_OIDC_CLIENT_SECRET / RECON_GEN_JWT_SECRET
+        # / RECON_GEN_DEX_USER_PASSWORD registry.
         run: |
           OIDC_CLIENT_SECRET=$(openssl rand -hex 14)
           JWT_SECRET=$(openssl rand -hex 32)
@@ -157,206 +146,104 @@ jobs:
             echo "RECON_GEN_DEX_USER_PASSWORD=${DEX_USER_PASSWORD}"
           } >> "$GITHUB_ENV"
 
-      - name: Ensure shared PG + Oracle are up (reuse persistent containers when present)
-        # CI box exposes PG on host port 5432 and Oracle on host port
-        # 1521 for the local test layers. (Pre-DW.11 these also had
-        # `hotchkiss.io:5432` / `:1521` DDNS forwards so QS-in-us-east-1
-        # could reach the containers — QuickSight is gone, so the
-        # inbound forwards close and the ports are local-only now.)
-        #
-        # If a persistent container is already bound to those ports —
-        # reuse it (skip the start, record `STARTED_BY_CI=false` so
-        # teardown leaves it alone). Otherwise bring fresh ones up.
-        id: ensure_dbs
+      - name: Spin a FRESH Postgres container
+        # No flock / adopt / rename / reuse (the box's persistent-container
+        # dance) — the VM is discarded at job end. The tuning mirrors
+        # `runner.py::_start_fresh_pg_container` (which local dev uses) so
+        # CI ≡ local under xdist -n 4: max_connections=300 keeps
+        # app2_browser off "too many clients", --shm-size=2g + effective
+        # /dev/shm avoids "could not resize shared memory segment" on
+        # concurrent matview refreshes, pg_stat_statements feeds the
+        # top-queries capture below.
         run: |
-          STARTED_PG=false
-          STARTED_OR=false
-          # CI-followup.1 — serialize concurrent CI runs through the
-          # docker setup. Without this, two runs landing back-to-back
-          # both enter the adoption-path retune branch
-          # (docker rm -f ci-shared-pg; docker run -d --name ci-shared-pg)
-          # and race: one rm -f wins, the other's run -d hits Conflict
-          # because the first race-recreated the container. Bit
-          # v13.11.0, v13.12.0, v13.13.x; manual unstick is
-          # ``docker rm -f ci-shared-pg`` on the runner. /tmp persists
-          # for the runner lifetime so the lockfile survives across
-          # jobs/runs. 300s timeout so a wedged lock surfaces loud
-          # instead of hanging forever. Acquired at script top via
-          # ``exec`` (not a subshell) so the lock lives for the
-          # duration of the bash script + STARTED_PG/STARTED_OR
-          # variable scope is preserved for the trailing
-          # ``$GITHUB_OUTPUT`` writes. Two separate locks (one per
-          # container) rather than one giant lock so the failure mode
-          # signals which resource is wedged when a lock-acquire
-          # times out.
-          exec 9>/tmp/ci-shared-pg.lock
-          flock -w 300 9 || { echo "::error::Failed to acquire ci-shared-pg lock within 300s — runner is wedged"; exit 1; }
-          exec 8>/tmp/ci-shared-oracle.lock
-          flock -w 300 8 || { echo "::error::Failed to acquire ci-shared-oracle lock within 300s — runner is wedged"; exit 1; }
-          # v13.3.0 followup — the reuse-by-port path didn't normalize
-          # the existing container's name to ``ci-shared-pg`` /
-          # ``ci-shared-oracle``, so the subsequent Force-reset step
-          # (which hardcodes those names in ``docker exec``) blew up
-          # with "No such container: ci-shared-pg". Rename the existing
-          # container to the canonical name on the reuse path so every
-          # downstream step works regardless of how the container got
-          # there.
-          # CL-followup — mirror `runner.py:_start_fresh_pg_container`
-          # tuning so CI's adopted container matches local. Without
-          # this, ci-shared-pg runs stock alpine defaults
-          # (max_connections=100, shared_buffers=128MB), and app2_browser
-          # under xdist `-n 4` saturates with "FATAL: sorry, too many
-          # clients already". Local uses runner.py's _start_fresh_pg_
-          # container path which already has the full tuning; CI takes
-          # the env-URL short-circuit so the runner never gets to apply
-          # it — hence this duplicate.
-          PG_CMD=(postgres
-            -c max_connections=300
-            -c shared_buffers=1GB
-            -c work_mem=32MB
-            -c maintenance_work_mem=256MB
-            -c effective_cache_size=4GB
-            -c synchronous_commit=off
-            -c shared_preload_libraries=pg_stat_statements)
-          if nc -z 127.0.0.1 5432 2>/dev/null; then
-            EXISTING_PG=$(docker ps --filter "publish=5432" --format '{{.Names}}' | head -1)
-            if [ -z "${EXISTING_PG}" ]; then
-              echo "::error::Port 5432 is bound but no Docker container owns it — runner is in an unexpected state." >&2
-              exit 1
-            fi
-            if [ "${EXISTING_PG}" != "ci-shared-pg" ]; then
-              echo "Shared PG already listening on :5432 as '${EXISTING_PG}' — renaming to ci-shared-pg."
-              docker rename "${EXISTING_PG}" ci-shared-pg
-            fi
-            # Adoption-path retune: if the running container was started
-            # with stale args (e.g. pre-CL-followup), kill + recreate
-            # with the tuned cmd. Probing `SHOW max_connections;` is the
-            # cheapest definitive check.
-            EFFECTIVE_MAX_CONN=$(docker exec ci-shared-pg psql -U postgres -tAc "SHOW max_connections;" 2>/dev/null | tr -d '[:space:]' || echo "0")
-            # DG.3 — also check /dev/shm size. Default Docker tmpfs is
-            # 64MB which saturates on concurrent matview refreshes /
-            # parallel queries and surfaces as
-            # ``psycopg.errors.DiskFull: could not resize shared memory
-            # segment ... No space left on device``. v13.15.1 release
-            # gate hit this on test_inv_filters.py recipient fanout
-            # KPIs. 2g is comfortable for the xdist -n 4 worker pool.
-            EFFECTIVE_SHM=$(docker exec ci-shared-pg sh -c "df -B1 /dev/shm | tail -1 | awk '{print \$2}'" 2>/dev/null || echo "0")
-            if [ "${EFFECTIVE_MAX_CONN}" != "300" ] || [ "${EFFECTIVE_SHM}" -lt 2000000000 ]; then
-              echo "ci-shared-pg has max_connections=${EFFECTIVE_MAX_CONN} (expected 300) or /dev/shm=${EFFECTIVE_SHM} bytes (expected ≥2GB) — recreating with tuned args."
-              docker rm -f ci-shared-pg
-              docker run -d --name ci-shared-pg \
-                --shm-size=2g \
-                -e POSTGRES_PASSWORD="${PG_PASSWORD}" \
-                -p 5432:5432 \
-                postgres:17-alpine \
-                "${PG_CMD[@]}"
-              STARTED_PG=true
-              echo "Waiting for retuned PG..."
-              timeout 60 bash -c 'until docker exec ci-shared-pg pg_isready -U postgres -q; do sleep 2; done'
-            else
-              echo "ci-shared-pg already has max_connections=300 + /dev/shm≥2GB — reusing in place."
-            fi
-          else
-            # DR-followup — a prior run's teardown STOPS ci-shared-pg (it
-            # doesn't remove it); a blind `docker run --name ci-shared-pg`
-            # then exits 125 on a name conflict with the stopped container
-            # (the setup/teardown asymmetry that stranded the v14.5.0 cut).
-            # Drop any stopped same-name leftover before creating.
-            docker rm -f ci-shared-pg >/dev/null 2>&1 || true
-            docker run -d --name ci-shared-pg \
-              --shm-size=2g \
-              -e POSTGRES_PASSWORD="${PG_PASSWORD}" \
-              -p 5432:5432 \
-              postgres:17-alpine \
-              "${PG_CMD[@]}"
-            STARTED_PG=true
-            echo "Waiting for fresh PG..."
-            timeout 60 bash -c 'until docker exec ci-shared-pg pg_isready -U postgres -q; do sleep 2; done'
-          fi
-          if nc -z 127.0.0.1 1521 2>/dev/null; then
-            EXISTING_OR=$(docker ps --filter "publish=1521" --format '{{.Names}}' | head -1)
-            if [ -n "${EXISTING_OR}" ] && [ "${EXISTING_OR}" != "ci-shared-oracle" ]; then
-              echo "Shared Oracle already listening on :1521 as '${EXISTING_OR}' — renaming to ci-shared-oracle."
-              docker rename "${EXISTING_OR}" ci-shared-oracle
-            elif [ -z "${EXISTING_OR}" ]; then
-              echo "::error::Port 1521 is bound but no Docker container owns it — runner is in an unexpected state." >&2
-              exit 1
-            else
-              echo "Shared Oracle already named ci-shared-oracle — reusing in place."
-            fi
-          else
-            # DR-followup — fail LOUDLY (not with a cryptic pull-125) if the
-            # un-pullable Oracle image is missing. It's build-it-yourself
-            # (tools/oracle-19c/build.sh, needs the ~3GB Oracle zip that
-            # isn't in the CI checkout, so an in-CI rebuild can't self-heal)
-            # and is now recon-gen.keep-labeled to survive the daily
-            # `docker image prune` cron that stranded the v14.5.0 cut.
-            if ! docker image inspect recon-gen/oracle-19c:local >/dev/null 2>&1; then
-              echo "::error::recon-gen/oracle-19c:local missing on the runner — rebuild via tools/oracle-19c/build.sh (build-it-yourself image, not in any registry; now label-excluded from the prune cron)." >&2
-              exit 1
-            fi
-            # Drop any stopped same-name leftover (the prior run's teardown
-            # stops, doesn't remove) before creating, else docker-run 125s.
-            docker rm -f ci-shared-oracle >/dev/null 2>&1 || true
-            docker run -d --name ci-shared-oracle \
-              -e ORACLE_PWD="${ORACLE_PASSWORD}" \
-              -e ORACLE_PDB=FREEPDB1 \
-              -p 1521:1521 \
-              recon-gen/oracle-19c:local
-            STARTED_OR=true
-            echo "Waiting for fresh Oracle (pre-init'd image, ~15-30s)..."
-            timeout 180 bash -c 'until docker logs ci-shared-oracle 2>&1 | grep -q "DATABASE IS READY TO USE"; do sleep 3; done'
-          fi
-          echo "started_pg=${STARTED_PG}" >> "$GITHUB_OUTPUT"
-          echo "started_or=${STARTED_OR}" >> "$GITHUB_OUTPUT"
-          echo "Shared DBs ready (CI-started: PG=${STARTED_PG} OR=${STARTED_OR})."
+          docker run -d --name ci-shared-pg -p 5432:5432 \
+            -e POSTGRES_PASSWORD="${PG_PASSWORD}" --shm-size=2g \
+            postgres:17-alpine \
+            -c max_connections=300 \
+            -c shared_buffers=1GB \
+            -c work_mem=32MB \
+            -c maintenance_work_mem=256MB \
+            -c effective_cache_size=4GB \
+            -c synchronous_commit=off \
+            -c shared_preload_libraries=pg_stat_statements
+          echo "Waiting for Postgres..."
+          timeout 60 bash -c 'until docker exec ci-shared-pg pg_isready -U postgres -q; do sleep 2; done'
 
-      - name: Force-reset PG + Oracle passwords to this run's random values
-        # BX.248 — passwords are random per workflow_run (above), so on
-        # adopted containers the in-container credential is whatever
-        # the PREVIOUS workflow_run set it to. Reset both to this run's
-        # values via local superuser auth that doesn't need the prior
-        # password: PG via `psql -U postgres` over unix socket (trust
-        # auth in pg_hba.conf for local connections), Oracle via
-        # `sqlplus / as sysdba` (OS auth for the in-container oracle
-        # user). Idempotent on fresh containers too.
+      - name: Spin a FRESH Oracle container (gvenzl faststart)
+        # gvenzl/oracle-free:23-faststart is pullable + multi-arch (the box's
+        # oracle-19c:local is un-pullable). ORACLE_PASSWORD sets the system
+        # password at init; it exposes service FREEPDB1 matching the cfg URL.
+        # Readiness = gvenzl's "DATABASE IS READY TO USE" log marker (Docker's
+        # HEALTHCHECK status stays empty — the EA.2 v1 timeout). Detect a
+        # crashed container early + dump logs on any failure so a red Oracle
+        # is diagnosable.
         run: |
-          docker exec ci-shared-pg \
-            psql -U postgres -c "ALTER USER postgres WITH PASSWORD '${PG_PASSWORD}';"
-          # CE.4-followup — ACCOUNT UNLOCK in case past runs racked up
-          # FAILED_LOGIN_ATTEMPTS and locked the account (ORA-28000).
-          # Also bump the DEFAULT profile to UNLIMITED so transient
-          # stale-password retries during the BX.248 randomization
-          # dance don't re-lock us. Idempotent.
-          docker exec -i ci-shared-oracle bash -lc "sqlplus -s / as sysdba <<EOF
-          ALTER USER system IDENTIFIED BY \"${ORACLE_PASSWORD}\" ACCOUNT UNLOCK;
-          ALTER PROFILE default LIMIT FAILED_LOGIN_ATTEMPTS UNLIMITED PASSWORD_LIFE_TIME UNLIMITED;
-          EXIT;
-          EOF"
+          docker run -d --name ci-shared-oracle -p 1521:1521 \
+            -e ORACLE_PASSWORD="${ORACLE_PASSWORD}" \
+            gvenzl/oracle-free:23-faststart
+          echo "Waiting for Oracle 'DATABASE IS READY TO USE'..."
+          for _ in $(seq 1 180); do
+            if docker logs ci-shared-oracle 2>&1 | grep -q "DATABASE IS READY TO USE"; then
+              echo "Oracle ready."; break
+            fi
+            if [ "$(docker inspect -f '{{.State.Running}}' ci-shared-oracle 2>/dev/null)" != "true" ]; then
+              echo "::error::Oracle container is not running — logs:"; docker logs ci-shared-oracle 2>&1 | tail -60; exit 1
+            fi
+            sleep 5
+          done
+          if ! docker logs ci-shared-oracle 2>&1 | grep -q "DATABASE IS READY TO USE"; then
+            echo "::error::Oracle never became ready (15 min) — logs:"; docker logs ci-shared-oracle 2>&1 | tail -60; exit 1
+          fi
+
+      - name: Pre-generate the self-signed TLS cert + trust it
+        # Mint the self-signed cert for the CI SANs BEFORE the chain (via the
+        # RECON_GEN_TLS_SELF_SIGNED branch in _dev/tls/ensure.py) so the
+        # runner's own ensure_dev_env finds it already-valid. httpx trusts
+        # certifi's bundle (NOT SSL_CERT_FILE), so APPEND the cert to certifi
+        # — the load-bearing trust step for the server-side authlib/Dex-
+        # readiness HTTPS calls. SSL_CERT_FILE is belt-and-suspenders for any
+        # stdlib-ssl consumer.
+        run: |
+          CERT_DIR="$HOME/.local/share/recon-gen/tls/ci"
+          mkdir -p "$CERT_DIR"
+          RECON_GEN_TLS_SELF_SIGNED=1 .venv/bin/python - <<'PY'
+          from pathlib import Path
+          from recon_gen._dev.tls.ensure import ensure_dev_env, Env
+          d = Path.home() / ".local/share/recon-gen/tls/ci"
+          ensure_dev_env(
+              Env.CI, cert_path=d / "cert.pem", key_path=d / "key.pem",
+              account_email="ci@localhost",
+          )
+          print("self-signed cert minted at", d)
+          PY
+          CERTIFI="$(.venv/bin/python -c 'import certifi; print(certifi.where())')"
+          cat "$CERT_DIR/cert.pem" >> "$CERTIFI"
+          echo "SSL_CERT_FILE=${CERTIFI}" >> "$GITHUB_ENV"
+          echo "Appended self-signed cert to ${CERTIFI}"
+
+      - name: Map the CI hostname to loopback (PRIMARY)
+        # The locked issuer/redirect SAN resolves to the local Dex + App2.
+        run: echo "127.0.0.1 localci.recon-gen.hotchkiss.io ci.recon-gen.hotchkiss.io" | sudo tee -a /etc/hosts
 
       - name: Materialize per-dialect runner cfgs (one cfg per dialect)
-        # DW.11 — QuickSight removed: no `aws:` block, no QS-side cfg.
-        # The `aws:` block is optional post-DV.5 (a cfg with no AWS keys
-        # loads fine for every surface — dashboards / studio / audit /
-        # schema / data); CI only needs the local DB cfg + the App2 Dex
-        # OIDC / session / TLS blocks (App2's own auth, AWS-independent).
-        #
-        # `db.url` points at the shared containers from the step above.
-        # The env-URL short-circuit on the test step
-        # (`RECON_GEN_DEMO_DATABASE_URL_PG` / `_OR`) tells the runner
-        # not to re-spin its own; this URL is the cfg-side default used
-        # for seed CLI subprocess invocations.
-        # BX.248 — heredoc is UNquoted so `${PG_PASSWORD}` / `${ORACLE_PASSWORD}`
-        # expand from the env. `${{ github.run_id }}` is GitHub template
-        # syntax substituted by the runner BEFORE the shell sees it, so
-        # unquoting the heredoc is safe.
+        # QuickSight removed (DW.11): no `aws:` block. CI needs the local DB
+        # cfg + App2's own Dex OIDC / session / self-signed-TLS blocks
+        # (AWS-independent). Both cfgs point db.url at the fresh containers
+        # above; the env-URL short-circuit on the run step
+        # (RECON_GEN_DEMO_DATABASE_URL_PG / _OR) tells the runner not to
+        # re-spin its own. Heredoc UNquoted so ${PG_PASSWORD} /
+        # ${ORACLE_PASSWORD} expand; ${{ github.run_id }} is GitHub template
+        # syntax substituted by the runner before the shell sees it.
+        # table_prefix uses the `rc_` base, not the box's `recon_ci_` — the
+        # latter sits AT the 30-char cap once the isolation suffix is added
+        # (EA.2 v6 fix).
         run: |
           mkdir -p run
           cat > run/config.postgres.yaml <<EOF
           db:
             dialect: "postgres"
             url: "postgresql://postgres:${PG_PASSWORD}@127.0.0.1:5432/postgres"
-            table_prefix: "recon_ci_${{ github.run_id }}_pg"
+            table_prefix: "rc_${{ github.run_id }}_pg"
             default_l2_instance: "tests/l2/sasquatch_pr.yaml"
           auth:
             oidc:
@@ -374,14 +261,14 @@ jobs:
             tls:
               cert_path: "~/.local/share/recon-gen/tls/ci/cert.pem"
               key_path: "~/.local/share/recon-gen/tls/ci/key.pem"
-              account_email: "${{ secrets.TLS_ACME_EMAIL }}"
+              account_email: "ci@localhost"
               env: "ci"
           EOF
           cat > run/config.oracle.yaml <<EOF
           db:
             dialect: "oracle"
             url: "oracle+oracledb://system:${ORACLE_PASSWORD}@127.0.0.1:1521/?service_name=FREEPDB1"
-            table_prefix: "recon_ci_${{ github.run_id }}_or"
+            table_prefix: "rc_${{ github.run_id }}_or"
             default_l2_instance: "tests/l2/sasquatch_pr.yaml"
           auth:
             oidc:
@@ -399,76 +286,42 @@ jobs:
             tls:
               cert_path: "~/.local/share/recon-gen/tls/ci/cert.pem"
               key_path: "~/.local/share/recon-gen/tls/ci/key.pem"
-              account_email: "${{ secrets.TLS_ACME_EMAIL }}"
+              account_email: "ci@localhost"
               env: "ci"
           EOF
 
       - name: Run the full layered chain (unit → agreement)
-        # DW.11 — QuickSight + the whole AWS footprint removed:
-        # ./run_tests.sh up_to=agreement invokes the chain
-        # unit → db → app2 → app2_browser → agreement, ONE pytest
-        # invocation per layer, fully local (no AWS tier). `agreement`
-        # is the terminal cross-renderer cross-check.
-        # `--coverage` writes `.coverage.<run-id>.<layer>` files into
-        # runs/<id>/.
-        #
-        # The `RECON_GEN_DEMO_DATABASE_URL_PG` / `_OR` env vars below
-        # point at the shared containers from the top of the job. The
-        # CB.17.f short-circuit in `_start_thin_container` honors them
-        # and returns immediately — no testcontainers spin, no second
-        # container competing for resources.
-        #
-        # DJ.1 (2026-06-15) — RECON_GEN_E2E env-var gate retired.
-        # e2e-tier tests collect by default; per-fixture cfg-shape
-        # checks gate the heavyweight setup.
+        # ./run_tests.sh up_to=agreement invokes unit → db → app2 →
+        # app2_browser → agreement, ONE pytest invocation per layer, fully
+        # local (no AWS tier). `agreement` is the terminal cross-renderer
+        # cross-check. --coverage writes `.coverage.<run-id>.<layer>` files
+        # into runs/<id>/. The RECON_GEN_DEMO_DATABASE_URL_PG / _OR env vars
+        # point every layer + seed subprocess at the fresh containers (the
+        # CB.17.f short-circuit in `_start_thin_container` honors them and
+        # returns immediately — no testcontainers spin).
         env:
-          # Phase DC.3 — Cloudflare API token for the run-internal TLS
-          # coordinator (ensure_dev_env). Scope: Zone:DNS:Edit on
-          # hotchkiss.io. Read by `RECON_GEN_CLOUDFLARE_TOKEN.get_or_none()`
-          # in `_dev/tls/ensure.py`; fires only when the cfg.app2.tls
-          # block is set AND the chain target is in TLS_TOUCHING_LAYERS
-          # ({app2, app2_browser}) — App2's own HTTPS, not AWS.
-          RECON_GEN_CLOUDFLARE_TOKEN: ${{ secrets.CLOUDFLARE_TOKEN }}
-          # Phase DD.4 — Dex IdP URL for the App2 OAuth flow. Set by
-          # the runner if the runner spun a local Dex (when this env
-          # var is absent the runner spins one); CI relies on the
-          # _ensure_oidc_if_configured short-circuit to skip spinup
-          # when this is set. Per the DD.4 design, the WSL2 runner
-          # would have a separately-managed ci-shared-dex container —
-          # tracked as a follow-up; for now the runner spawns
-          # per-workflow-run Dex when needed.
-          # RECON_GEN_DEX_URL: "https://localci.recon-gen.hotchkiss.io:5556/dex"
-          # CB.17.f env-URL short-circuit — runner reads these from
-          # `_start_thin_container` and skips its own container spin.
-          # The seed subprocesses (`recon-gen schema apply` etc.)
-          # inherit them and reach the shared containers directly.
+          # Self-signed instead of ACME (NO CLOUDFLARE_TOKEN — the self-signed
+          # branch never calls Cloudflare, and its absence makes any accidental
+          # fall-through fail loud rather than silently mint).
+          RECON_GEN_TLS_SELF_SIGNED: "1"
+          RECON_GEN_BROWSER_INSECURE_TLS: "1"
           RECON_GEN_DEMO_DATABASE_URL_PG: "postgresql://postgres:${{ env.PG_PASSWORD }}@127.0.0.1:5432/postgres"
           RECON_GEN_DEMO_DATABASE_URL_OR: "oracle+oracledb://system:${{ env.ORACLE_PASSWORD }}@127.0.0.1:1521/?service_name=FREEPDB1"
-          # RECON_GEN_RUNNER_YES bypasses the destructive-op prompt;
-          # the runner needs it in non-interactive CI.
+          # RECON_GEN_RUNNER_YES bypasses the destructive-op prompt; the
+          # runner needs it in non-interactive CI.
           RECON_GEN_RUNNER_YES: "1"
-          # CE.4-followup-4 (2026-06-04) — re-pin to DuckDB. CE.4 was
-          # the unpin; CE.4-followups #1-#3 fixed Oracle password
-          # length (ORA-00972 from 32-char quoted-identifier limit) +
-          # account-unlock (ORA-28000 from accumulated failed logins) +
-          # xdist_group cross-worker contention. But Session Start on
-          # the CI's shared persistent PG/Oracle containers STILL hangs
-          # at the browser→HTTP→studio_server stack — 14 trainer tests
-          # erred with Page.wait_for_function: Timeout 600000ms, same
-          # symptom 3 CI cycles running, despite CE.0 measuring 33s on
-          # a fresh local PG container via direct Python. The bug
-          # reproduces in CI but not locally and we can't trace why
-          # from log-only triage. Re-pin to DuckDB; file as backlog;
-          # CF cold-read defects have higher leverage.
+          # CE.4 trainer-hang re-pin (EA.3-confirmed): un-pinning to du,pg,or
+          # hangs the app2 layer for ~40 min in
+          # _studio_deploy_helpers.py:_run_server — the SAME CE.4 hang the box
+          # hits, and it REPRODUCES on fresh cloud containers, so it's a
+          # genuine PG/Oracle trainer-studio-server bug (backlog), not a
+          # persistent-container-state artifact. Pin to du to match the box's
+          # operator-locked workaround; cloud CI is no stricter than the box
+          # until that bug is fixed.
           RECON_GEN_TRAINER_DIALECTS: "du"
-        # CB.17.h — wrap the chain in /usr/bin/time -v so the WSL2
-        # runner records peak RSS (Maximum resident set size). The
-        # value lands at the end of the step log and (via the
-        # `tee runs/<id>-time.log` below) in the runs/ artifact for
-        # post-CB.15 drift tracking — the OOM that triggered the cell
-        # collapse should no longer reproduce. Per
-        # [[feedback_timings_as_smell]], capture as data — let drift
-        # speak.
+        # Wrap the chain in /usr/bin/time -v to record peak RSS (Maximum
+        # resident set size) — lands at the end of the step log and in the
+        # runs/ artifact for drift tracking ([[feedback_timings_as_smell]]).
         run: |
           mkdir -p runs
           /usr/bin/time -v -o runs/peak-rss-time.log \
@@ -479,11 +332,10 @@ jobs:
           grep "Maximum resident set size" runs/peak-rss-time.log || true
 
       - name: Upload runner artifacts (triage parity)
-        # The `runs/<run-id>/` tree is the same artifact shape an
-        # operator sees locally — per-variant per-layer cmd.json /
-        # stdout.log / stderr.log / timings.json + screenshots from any
-        # failing browser tests. The local `_dev/runner.py::collect_run_outputs`
-        # already lays it out canonically.
+        # The `runs/<run-id>/` tree is the same artifact shape an operator
+        # sees locally — per-variant per-layer cmd.json / stdout.log /
+        # stderr.log / timings.json + screenshots from any failing browser
+        # tests. `_dev/runner.py::collect_run_outputs` lays it out canonically.
         if: always()
         uses: actions/upload-artifact@v7
         with:
@@ -493,11 +345,10 @@ jobs:
           retention-days: 14
 
       - name: Upload coverage data files
-        # CB.17.g: per-layer `.coverage.<layer>` files land directly at
-        # cwd (REPO_ROOT) — the runner's COVERAGE_FILE override sets
-        # them there. No `find runs -name '.coverage.*' | xargs cp .`
-        # staging step needed. The aggregator job downloads this
-        # artifact and runs `coverage combine`.
+        # CB.17.g: per-layer `.coverage.<layer>` files land directly at cwd
+        # (REPO_ROOT) — the runner's COVERAGE_FILE override sets them there.
+        # The aggregator job downloads this artifact and runs `coverage
+        # combine`.
         if: always()
         uses: actions/upload-artifact@v7
         with:
@@ -509,11 +360,11 @@ jobs:
 
       - name: Surface top-queries in Step Summary + upload as artifact
         # CB.17.k — the `capture_top_queries` teardown writes
-        # `runs/<id>/db/<dialect>/top-queries.md` with pg_stat_statements
-        # / v$sqlstats top-50 for each dialect the session touched. Render
-        # them inline in the GitHub Step Summary (same UX as the coverage
-        # report) AND upload as a focused artifact so it's downloadable
-        # without grabbing the full multi-GB runs/ tree.
+        # `runs/<id>/db/<dialect>/top-queries.md` with pg_stat_statements /
+        # v$sqlstats top-50 for each dialect the session touched. Render them
+        # inline in the GitHub Step Summary (same UX as the coverage report)
+        # AND upload as a focused artifact so it's downloadable without
+        # grabbing the full multi-GB runs/ tree.
         if: always()
         run: |
           {
@@ -550,20 +401,12 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-      - name: Stop shared PG + Oracle containers (only if this run started them)
-        # Teardown is conditional on the `ensure_dbs` step's outputs —
-        # if CI reused persistent containers, leave them running for
-        # the next run; if CI brought fresh ones up, tear them down.
+      - name: Teardown fresh containers
+        # The VM is discarded at job end, but tear down explicitly so a
+        # mid-job failure can't strand a container in a cached runner image
+        # layer. recon-gen-test-dex is the runner-spawned OIDC IdP.
         if: always()
-        run: |
-          if [ "${{ steps.ensure_dbs.outputs.started_pg }}" = "true" ]; then
-            docker stop ci-shared-pg 2>/dev/null || true
-            docker rm ci-shared-pg 2>/dev/null || true
-          fi
-          if [ "${{ steps.ensure_dbs.outputs.started_or }}" = "true" ]; then
-            docker stop ci-shared-oracle 2>/dev/null || true
-            docker rm ci-shared-oracle 2>/dev/null || true
-          fi
+        run: docker rm -f ci-shared-pg ci-shared-oracle recon-gen-test-dex || true
 
   # Build a wheel from the current commit, install it in a fresh venv
   # (NOT an editable / src-tree install), and run `docs apply --portable`
@@ -576,14 +419,9 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Install uv (also installs Python 3.14 per .python-version)
-        # `actions/setup-python` was dropped 2026-06-05: on the WSL2
-        # self-hosted runner it only sees the OS-baked Python (e.g.
-        # 3.12) and can't download arbitrary versions. uv downloads
-        # python-build-standalone wheels for whatever .python-version
-        # pins (default `python-preference = managed`), so a
-        # 3.12-only host upgrades transparently. Hosted runners keep
-        # working the same way — uv prefers its own managed Python
-        # over the runner-provided one when the version mismatches.
+        # uv downloads python-build-standalone for whatever .python-version
+        # pins (default `python-preference = managed`), independent of the
+        # runner's OS-baked Python.
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
@@ -685,14 +523,9 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Install uv (also installs Python 3.14 per .python-version)
-        # `actions/setup-python` was dropped 2026-06-05: on the WSL2
-        # self-hosted runner it only sees the OS-baked Python (e.g.
-        # 3.12) and can't download arbitrary versions. uv downloads
-        # python-build-standalone wheels for whatever .python-version
-        # pins (default `python-preference = managed`), so a
-        # 3.12-only host upgrades transparently. Hosted runners keep
-        # working the same way — uv prefers its own managed Python
-        # over the runner-provided one when the version mismatches.
+        # uv downloads python-build-standalone for whatever .python-version
+        # pins (default `python-preference = managed`), independent of the
+        # runner's OS-baked Python.
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
