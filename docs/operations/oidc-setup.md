@@ -26,7 +26,7 @@ POLICY 1 invariant: every block in this doc applies identically to CI and local 
 
 **Posture B: HTTPS + production OIDC.** Add both `auth.oidc` and `auth.session` blocks to your cfg yaml pointing at your real IdP (Step 2). Set `app2.tls` from [tls-setup.md](tls-setup.md). The middleware fires on every request; redirect chain hits your IdP.
 
-**Posture C: HTTPS + managed Dex (CI parity).** Same as B but point the issuer URL at the runner-managed Dex container (`https://localdev.recon-gen.hotchkiss.io:5557/dex` for your Mac, `https://localci...:5556/dex` for the WSL2 CI runner). The runner spins Dex automatically when the `app2` layer fires.
+**Posture C: HTTPS + managed Dex (CI parity).** Same as B but point the issuer URL at the runner-managed Dex container (`https://localdev.recon-gen.hotchkiss.io:5557/dex` for your Mac, `https://localci...:5556/dex` on the CI runner, where `localci.*` resolves to loopback via `/etc/hosts`). The runner spins Dex automatically when the `app2` layer fires.
 
 You can switch postures freely — they're cfg-driven, not code-branched.
 
@@ -112,16 +112,9 @@ The runner owns the Dex container lifecycle. On the first `./run_tests.sh up_to=
 
 The `RECON_GEN_DEX_URL` env var (registered but disabled by default) short-circuits container spinup when a pre-spun Dex is reachable — for the shared-CI-Dex pattern not yet wired in `ci.yml`.
 
-## Step 5 — CI GitHub secrets
+## Step 5 — CI needs no OIDC secrets
 
-The WSL2 self-hosted CI runner uses the same coordinator. Add three new secrets:
-
-1. GitHub repo → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**.
-2. Name: `OIDC_CLIENT_SECRET` — value: any random 32-byte hex string. (CI uses managed Dex, so this is just a per-run shared secret between Dex's static-client block and authlib's client config. It does NOT need to match a real IdP's secret.)
-3. Same for `JWT_SECRET` — value: `openssl rand -hex 32`.
-4. Same for `DEX_USER_PASSWORD` — value: `openssl rand -hex 14`.
-
-`.github/workflows/ci.yml` already wires all three via the `Generate random OIDC credentials` step + cfg-overwrite heredoc (Phase DD.4.ci). The secrets reach the runner process; the runner reads them via the typed `RECON_GEN_*.get_or_none()` registry.
+CI generates ephemeral OIDC credentials per run — no GitHub secrets to add. `.github/workflows/ci.yml`'s `Generate random OIDC credentials` step mints `OIDC_CLIENT_SECRET` (`openssl rand -hex 14`), `JWT_SECRET` (`-hex 32`) and `DEX_USER_PASSWORD` (`-hex 14`) into `$GITHUB_ENV`, and the cfg-overwrite heredoc points the `auth.oidc` / `auth.session` blocks at them (Phase DD.4.ci). Because CI uses managed Dex, the same values feed Dex's static-client block, so the shared secret matches for that run only — it never has to line up with a real IdP. The runner reads them via the typed `RECON_GEN_*.get_or_none()` registry. Nothing to configure.
 
 You can also generate fresh values in-CI rather than reading from GitHub secrets — `ci.yml`'s step uses `openssl rand` for all three, so the GitHub secrets are unused today. Kept for the day you want to pin a known-good test-IdP secret across runs.
 
