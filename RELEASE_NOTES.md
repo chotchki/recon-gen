@@ -12,6 +12,17 @@
 > `--help`) against the code. The v14.6.0 → v13.14.4 entries below predate that
 > pass and are left as written.
 
+## v16.3.1 — the runner flip lands; CI runs on cloud
+
+Patch. v16.3.0's note ended "the runner flip itself is still ahead; the reasons the box existed are gone" — this is that flip. ci.yml's layered runner moves off the single self-hosted WSL2 box back to `ubuntu-latest`, the EA.2 spike's proven recipe ported into the real workflow: fresh-ephemeral `postgres:17-alpine` + `gvenzl/oracle-free:23-faststart` per run (no persistent-container coordination, no per-run password force-reset — a fresh container gets its password at init), self-signed TLS for App2's own auth on a runner with no DNS control, and the two tools the box pre-baked (`--with-deps` WebKit, GNU time + graphviz) installed inline. Same `./run_tests.sh up_to=agreement` shape, same per-layer artifact paths, same fully-local container substrate — POLICY 1 parity holds; the runner underneath just isn't a physical machine anymore.
+
+Why a patch and not part of v16.3.0: the v16.3.0 tag was cut while CI still gated on the box, and the box went offline before its CI could run — so v16.3.0 never reached PyPI. This flip is what unblocked the publish, so it ships here as the first cut of the DQ typed-DB-object model (see the v16.3.0 notes below) to actually land on the index. Nothing in the shipped product changes between v16.3.0 and v16.3.1 — the wheel IS the DQ content, only the machine that builds and verifies it moved.
+
+### Changed
+
+- `.github/workflows/ci.yml` — the `test-everything` layered runner moves from the self-hosted WSL2 box to `ubuntu-latest`: fresh-ephemeral PG + gvenzl-Oracle containers per run, self-signed TLS (`RECON_GEN_TLS_SELF_SIGNED` + certifi-append + /etc/hosts), `--with-deps webkit` + apt `time`/`graphviz`, `rc_` table_prefix, PG tuning matched to `runner.py::_start_fresh_pg_container` for CI ≡ local parity. `release.yml` is unchanged — it already ran on cloud and gates on ci.yml's `workflow_run` success.
+- No product change from v16.3.0: the emitted schema, dashboards, audit PDF and CLI are byte-identical — `.github/` isn't in the wheel, so this is purely a CI-substrate move plus the version bump.
+
 ## v16.3.0 — every database object has ONE typed declaration; a column rename fails at construction
 
 Minor. The whole DQ phase is one idea: every schema object — the base tables, the config views, all twenty-four matviews — now has a SINGLE typed declaration that owns its two facts, what it READS FROM and what COLUMNS it emits. Before this those facts lived scattered and hand-copied, and two bug classes rode along on the copying. The refresh order, the DuckDB ANALYZE order, the two drop-block orders and the snapshotter's overlay-restore order were four independent hand-maintained lists of the same dependency graph, free to drift — and one of them HAD, silently, an Oracle-restore-only mis-order that no test covered. And a matview column was a bare string on both sides of the emit / read seam, so renaming one and forgetting the other was a "works until the dashboard renders blank" bug that only the running query caught.
