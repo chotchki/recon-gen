@@ -52,6 +52,7 @@ from recon_gen.common.tree.datasets import Dataset
 from recon_gen.common.tree.structure import Analysis, App, Sheet
 from recon_gen.common.tree.visuals import Dim, Table
 from tests._test_helpers import make_test_config
+from tests._timing_signal import timing_signal
 
 
 # -- render_metadata_panel unit tests --------------------------------------
@@ -643,12 +644,10 @@ def test_render_metadata_panel_large_payload_under_budget() -> None:
     html = render_metadata_panel(payload, transaction_id="txn-large")
     elapsed = time.perf_counter() - start
 
-    # Soft wall-clock budget — flag O(n²) regressions without flaking
-    # on a busy CI runner.
-    assert elapsed < 0.5, (
-        f"render_metadata_panel(2000-key dict) took {elapsed:.3f}s "
-        f"(budget 500ms)"
-    )
+    # EA.3 — timings-as-signal (tests/_timing_signal.py): the O(n²)-regression
+    # guard becomes a recorded signal, not a hard fail that flakes on a slow
+    # CI runner (an actual O(n²) regression shows as a large over-budget).
+    timing_signal("cy_render_metadata_panel_2000", elapsed, budget_s=0.5)
 
     # Response body stays bounded — guards a json.dumps(indent=2) blowup
     # or per-leaf HTML growth that would push the payload past sanity.
@@ -697,12 +696,9 @@ def test_route_medium_payload_round_trip_under_budget(
         elapsed = time.perf_counter() - start
 
     assert resp.status_code == 200
-    # Same 500ms soft budget through the route layer — generous but
-    # catches gross regressions.
-    assert elapsed < 0.5, (
-        f"route round-trip for 400-key dict took {elapsed:.3f}s "
-        f"(budget 500ms)"
-    )
+    # EA.3 — timings-as-signal: the route-layer budget is a recorded signal,
+    # not a hard fail (a gross regression shows as a large over-budget).
+    timing_signal("cy_route_metadata_400", elapsed, budget_s=0.5)
     body_size = len(resp.text)
     assert body_size < 2_000_000, (
         f"route response body size {body_size} exceeds 2MB cap"

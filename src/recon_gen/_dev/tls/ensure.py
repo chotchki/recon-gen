@@ -19,15 +19,24 @@ timeout). The runner (DC.3, not in this commit) surfaces these as
 
 from __future__ import annotations
 
+import datetime as dt
 from enum import StrEnum
 from pathlib import Path
 from typing import Final
+
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.x509.oid import NameOID
 
 from recon_gen._dev.tls import storage
 from recon_gen._dev.tls.acme_client import run_acme_dns01
 from recon_gen._dev.tls.cloudflare_api import CloudflareClient
 from recon_gen._dev.tls.public_ip import discover as discover_public_ip
-from recon_gen.common.env_keys import RECON_GEN_CLOUDFLARE_TOKEN
+from recon_gen.common.env_keys import (
+    RECON_GEN_CLOUDFLARE_TOKEN,
+    RECON_GEN_TLS_SELF_SIGNED,
+)
 
 
 class Env(StrEnum):
@@ -94,6 +103,25 @@ def ensure_dev_env(
         BlockingIOError: when the renew lock is held by another process
             and the timeout elapses.
     """
+    # EA.2 — self-signed short-circuit for the cloud-spike CI runner, which
+    # has no Cloudflare DNS control. Mint a self-signed cert for the same
+    # locked SANs and skip the ACME/Cloudflare machinery entirely. Placed
+    # ABOVE the token check so an unset RECON_GEN_CLOUDFLARE_TOKEN doesn't
+    # raise; conversely, if the flag is UNSET the token requirement still
+    # fires loud (no silent ACME fallthrough). The hostname is resolved to
+    # 127.0.0.1 via /etc/hosts on the runner; trust is added out-of-band
+    # (certifi append for httpx + Playwright ignore_https_errors).
+    if RECON_GEN_TLS_SELF_SIGNED.get_or_none():
+        sans = list(_HOSTS_BY_ENV[env])
+        with storage.acquire_renew_lock():
+            if not _cert_already_valid(cert_path, sans):
+                cert_pem, key_pem = _mint_self_signed(sans=sans)
+                storage.write_cert_and_key(
+                    cert_path=cert_path, key_path=key_path,
+                    cert_pem=cert_pem, key_pem=key_pem,
+                )
+        return
+
     token = RECON_GEN_CLOUDFLARE_TOKEN.get_or_none()
     if not token:
         raise ValueError(
@@ -137,6 +165,45 @@ def ensure_dev_env(
 
 
 # -- internals -------------------------------------------------------------
+
+
+# EA.2 — self-signed validity window. Long (825d, the CA/Browser Forum's
+# historical max) so the cert clears the 30-day ``_RENEWAL_THRESHOLD_DAYS``
+# check on every spike run without re-minting; a throwaway CI cert has no
+# reason to be short-lived.
+_SELF_SIGNED_DAYS: Final = 825
+
+
+def _mint_self_signed(*, sans: list[str]) -> tuple[bytes, bytes]:
+    """Mint a self-signed RSA-2048 cert + PKCS8 key covering ``sans``
+    (EA.2). CN = first SAN; all SANs land in the SubjectAlternativeName so
+    the cert validates for the locked hostname tuple. Returns
+    ``(cert_pem, key_pem)`` — the same shape ``run_acme_dns01`` yields, so
+    ``storage.write_cert_and_key`` consumes it unchanged."""
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, sans[0])])
+    now = dt.datetime.now(dt.UTC)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - dt.timedelta(days=1))
+        .not_valid_after(now + dt.timedelta(days=_SELF_SIGNED_DAYS))
+        .add_extension(
+            x509.SubjectAlternativeName([x509.DNSName(n) for n in sans]),
+            critical=False,
+        )
+        .sign(key, hashes.SHA256())
+    )
+    cert_pem = cert.public_bytes(serialization.Encoding.PEM)
+    key_pem = key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    return cert_pem, key_pem
 
 
 def _make_cloudflare_client(*, token: str) -> CloudflareClient:

@@ -53,15 +53,16 @@ Three reference points:
   `build_*_dataset()` function. Read the contract first; it's
   the interface. Read the SQL second; it's the default
   implementation.
-- **`tests/unit/test_dataset_sql_contract_projection.py`** — the
-  regression test. Sweeps every dataset the 4 app builders emit,
-  scans each `BuiltDataset.sql` SELECT list and asserts every
-  declared contract column NAME appears (name-presence,
-  order-agnostic). This is the test that catches a projection bug
-  before it reaches the dashboards. (The per-builder InputColumn
-  gate retired with the QS emitter in DW.8.1.b —
-  `test_dataset_contract.py` now covers only the `DatasetContract`
-  primitives + the Oracle case-fold wrapper.)
+- **`tests/unit/test_dq5_sqlglot_lineage.py`** — the regression
+  test (DQ.5, replaced the old text-scan guard). Sweeps every
+  dataset the 4 app builders emit, PARSES each `BuiltDataset.sql`
+  with SQLGlot against the DB-object catalog, and asserts the
+  SELECT projection is EXACTLY the contract's columns — name AND
+  order — plus that every WHERE / JOIN / GROUP-BY column ref
+  resolves. This catches a projection bug (dropped, reordered, or
+  mis-aliased column) at the unit tier before it reaches the
+  dashboards. (SQLGlot is a test-only dep — the wheel-smoke skips
+  this file via `importorskip`.)
 
 ## What you'll see in the demo
 

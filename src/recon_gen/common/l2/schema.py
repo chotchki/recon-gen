@@ -44,6 +44,7 @@ the base layer. Add them then.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Final
 
 from recon_gen.common.sql import (
@@ -67,7 +68,6 @@ from recon_gen.common.sql import (
     matview_options,
     order_by_day_expr,
     range_interval_days,
-    refresh_matview,
     safe_identifier,
     serial_type,
     json_text_type,
@@ -83,6 +83,7 @@ from .config_table import (
     kv_as_of_as_timestamp_sql,
 )
 from .primitives import L2Instance
+from recon_gen.common.db_objects import SCHEMA_GRAPH, MatviewGroup
 
 
 def emit_schema(
@@ -266,6 +267,71 @@ def emit_schema_drop_sql(
 # column shape; ETL authors read them or PRAGMA the live tables.
 
 
+def _split_matview_template(
+    template: str,
+    template_order: tuple[str, ...],
+    section_markers: Mapping[str, str],
+) -> tuple[str, dict[str, str]]:
+    """Carve a monolithic matview-block template into per-object CREATE
+    bodies (DQ.4.1b).
+
+    Splits ``template`` at the line that starts each object's CREATE —
+    ``{matview_create_kw} {p}_<obj>{matview_options}`` for a regular
+    matview, or the object's rendered-section placeholder (e.g.
+    ``{balance_cadence_gap_section}``) for the five bodies rendered by a
+    helper — pulling each object's leading ``--`` comment block into its
+    own chunk so the chunk is self-contained and REORDERABLE. Returns the
+    leading header (text before the first object) plus an
+    ``{obj_id: body_template}`` map, each still carrying its ``{...}``
+    substitution slots for the shared ``.format(**fmt)`` at emit time.
+
+    Byte-safety is guaranteed BY CONSTRUCTION: the chunks are contiguous
+    line-aligned slices of the original, and the closing assertion proves
+    ``header + "".join(chunks in template order) == template``. So the
+    ONLY observable change downstream is whatever the graph create-walk
+    reorders (independent matviews whose relative CREATE slot the template
+    fixed arbitrarily) — verified against the byte-golden.
+    """
+    lines = template.splitlines(keepends=True)
+    starts: list[int] = []
+    for obj_id in template_order:
+        marker = section_markers.get(obj_id) or (
+            "{matview_create_kw} {p}_" + obj_id + "{matview_options}"
+        )
+        hits = [i for i, ln in enumerate(lines) if ln.startswith(marker)]
+        if len(hits) != 1:
+            raise ValueError(
+                f"template split: {obj_id!r} marker {marker!r} matched "
+                f"{len(hits)} lines (expected exactly 1)"
+            )
+        # Pull the immediately-preceding contiguous comment block into this
+        # object's chunk (comments sit directly above their CREATE; a blank
+        # line separates one object's trailing whitespace from the next
+        # object's leading comment).
+        j = hits[0]
+        while j - 1 >= 0 and lines[j - 1].lstrip().startswith("--"):
+            j -= 1
+        starts.append(j)
+    if starts != sorted(starts):
+        raise ValueError(
+            f"template split: chunk starts not in ascending order {starts} "
+            f"— template_order must match textual appearance order"
+        )
+    header = "".join(lines[: starts[0]])
+    bodies: dict[str, str] = {}
+    for k, obj_id in enumerate(template_order):
+        end = starts[k + 1] if k + 1 < len(template_order) else len(lines)
+        bodies[obj_id] = "".join(lines[starts[k] : end])
+    recon = header + "".join(bodies[o] for o in template_order)
+    if recon != template:
+        raise ValueError(
+            "template split is not byte-exact — the carve dropped or "
+            "duplicated content (this is a bug in _split_matview_template, "
+            "not the template)"
+        )
+    return header, bodies
+
+
 def wipe_demo_data_sql(
     instance: L2Instance,
     *,
@@ -367,81 +433,6 @@ def refresh_matviews_sql(
     Z.C — ``prefix`` is the cfg.db.table_prefix.
     """
     p = prefix
-    names = [
-        # Leaves: reads from base tables only.
-        f"{p}_current_transactions",
-        f"{p}_current_daily_balances",
-        # CL.5 — carry-forward effective balance: every (account, day)
-        # in scope, with sparse-day gaps filled via LAST_VALUE IGNORE
-        # NULLS window. Drift / ledger_drift / overdraft now read this
-        # so sparse accounts surface the institution's REAL position
-        # (not just emitted rows). Reads from current_daily_balances +
-        # current_transactions; refresh after those two.
-        f"{p}_effective_balances",
-        # Helpers: read from current_* + the carry-forward spine
-        # (DS.3.2 keyed them onto effective_balances so carried days
-        # get a computed side — refresh AFTER it).
-        f"{p}_computed_subledger_balance",
-        f"{p}_computed_ledger_balance",
-        # DK.1 — data_anchor singleton matview: GREATEST over MAX(
-        # transactions.posting) and MAX(daily_balances.business_day_end
-        # WHERE account_scope='internal'). Read by dashboards at
-        # app-build time when cfg.test.generator.end_date is unset
-        # (replaces pre-DK live(wall-clock) fallback). Leaf — reads
-        # only from current_* views; no downstream matview depends
-        # on it. Refresh alongside effective_balances.
-        f"{p}_data_anchor",
-        # L1 invariants: read from current_* + helpers.
-        f"{p}_drift",
-        f"{p}_ledger_drift",
-        # DL.3.5 — drift_summary reads from drift + ledger_drift via
-        # UNION ALL; must refresh AFTER both parents are fresh.
-        f"{p}_drift_summary",
-        f"{p}_overdraft",
-        f"{p}_expected_eod_balance_breach",
-        # CL.6 — cadence-aware missing-balance invariant.
-        f"{p}_balance_cadence_gap",
-        f"{p}_limit_breach",
-        f"{p}_stuck_pending",
-        f"{p}_stuck_unbundled",
-        # AB.2.3 — Chain Parent Disagreement: two-template chains where
-        # leg_rail firings of one child Transfer disagree on which
-        # parent firing they belong to. Reads from current_transactions
-        # (no dependency on other L1 matviews). Sits with the other
-        # L1 invariants in dependency order.
-        f"{p}_chain_parent_disagreement",
-        # AB.3.3 — XOR group violations: per (Transfer, template, XOR
-        # group) firing-cardinality check. Reads current_transactions
-        # + the L2 declaration (inlined); independent of other L1
-        # matviews. Refresh before l1_exceptions so its UNION ALL
-        # branch reads fresh rows.
-        f"{p}_xor_group_violation",
-        # AB.4.3 — Per-child Transfer parent set (long form). Derived
-        # from current_transactions; AB.4.7's fan_in_disagreement
-        # JOINs against this. Refresh before fan_in_disagreement so
-        # the downstream matview sees fresh rows.
-        f"{p}_transfer_parents",
-        # AB.4.7 — Fan-in disagreement L1 invariant. JOINs against
-        # _transfer_parents (AB.4.3) for the parent-count derivation;
-        # MUST refresh AFTER _transfer_parents.
-        f"{p}_fan_in_disagreement",
-        # AB.6.5 — Multi-XOR violation L1 invariant. Reads from
-        # current_transactions + L2 declaration inlined; independent
-        # of other L1 matviews. Refresh before l1_exceptions so
-        # its UNION ALL branch reads fresh rows.
-        f"{p}_multi_xor_violation",
-        # Dashboard-shape matviews: read from current_* +
-        # L1 invariants. MUST refresh AFTER all L1 invariants are
-        # fresh so l1_exceptions's UNION reads up-to-date data.
-        f"{p}_daily_statement_summary",
-        f"{p}_l1_exceptions",
-        # Investigation matviews (N.3.b): read directly from base
-        # ``{p}_transactions``, so they're independent of every L1
-        # matview. Order between the two doesn't matter — they don't
-        # reference each other.
-        f"{p}_inv_pair_rolling_anomalies",
-        f"{p}_inv_money_trail_edges",
-    ]
     if dialect in (Dialect.DUCKDB):
         # X.3.c — neither SQLite nor DuckDB has native matviews; both
         # land them as plain tables via CREATE TABLE AS SELECT (CA.2
@@ -497,13 +488,15 @@ def refresh_matviews_sql(
         for t in (f"{p}_transactions", f"{p}_daily_balances")
     )
     cascade = "\n".join(
-        refresh_matview(
-            n, dialect,
-            concurrently=(dialect is Dialect.POSTGRES and n not in _NON_UNIQUE_MATVIEWS),
+        obj.emit_refresh(
+            p, dialect,
+            concurrently=(
+                dialect is Dialect.POSTGRES and obj.obj_id not in _NON_UNIQUE_MATVIEWS
+            ),
         )
         + "\n"
-        + analyze_table(n, dialect)
-        for n in names
+        + obj.emit_analyze(p, dialect)
+        for obj in SCHEMA_GRAPH.refresh_order()
     )
     return f"{base_table_stats}\n{cascade}\n{money_trail_tripwire_sql(p, dialect)}"
 
@@ -547,38 +540,9 @@ def _emit_table_based_matview_refresh(
     current_creates = _emit_table_based_current_matview_creates(p, dialect)
     invariants = _emit_l1_invariant_views(instance, prefix=p, dialect=dialect)
     inv_views = _emit_inv_views(instance, prefix=p, dialect=dialect)
-    names = [
-        f"{p}_current_transactions",
-        f"{p}_current_daily_balances",
-        # CL.5 — carry-forward source for drift / ledger_drift / overdraft.
-        f"{p}_effective_balances",
-        # DS.3.2 — the two computed_* helpers read the spine now.
-        f"{p}_computed_subledger_balance",
-        f"{p}_computed_ledger_balance",
-        # DK.1 — data_anchor singleton matview (DuckDB table-based refresh
-        # path; mirrors the PG/Oracle list above).
-        f"{p}_data_anchor",
-        f"{p}_drift",
-        f"{p}_ledger_drift",
-        # DL.3.5 — drift_summary reads drift + ledger_drift via UNION ALL.
-        f"{p}_drift_summary",
-        f"{p}_overdraft",
-        f"{p}_expected_eod_balance_breach",
-        f"{p}_balance_cadence_gap",
-        f"{p}_limit_breach",
-        f"{p}_stuck_pending",
-        f"{p}_stuck_unbundled",
-        f"{p}_chain_parent_disagreement",
-        f"{p}_xor_group_violation",
-        f"{p}_transfer_parents",
-        f"{p}_fan_in_disagreement",
-        f"{p}_multi_xor_violation",
-        f"{p}_daily_statement_summary",
-        f"{p}_l1_exceptions",
-        f"{p}_inv_pair_rolling_anomalies",
-        f"{p}_inv_money_trail_edges",
-    ]
-    analyzes = "\n".join(analyze_table(n, dialect) for n in names)
+    analyzes = "\n".join(
+        obj.emit_analyze(p, dialect) for obj in SCHEMA_GRAPH.refresh_order()
+    )
     return (
         f"-- ===========================================================\n"
         f"-- Table-based matview refresh for L2 instance: {p} ({dialect.value})\n"
@@ -1051,7 +1015,7 @@ def _emit_l1_invariant_views(
     )
     csb_section = _render_computed_subledger_balance_section(p, dialect)
     bcg_section = _render_balance_cadence_gap_section(instance, p, dialect)
-    return _L1_INVARIANT_VIEWS_TEMPLATE.format(
+    fmt: dict[str, object] = dict(
         p=p,
         computed_subledger_balance_section=csb_section,
         balance_cadence_gap_section=bcg_section,
@@ -1130,6 +1094,16 @@ def _emit_l1_invariant_views(
         # Route through ``typed_null`` so the alias maps to NUMBER(19)
         # on Oracle, BIGINT on PG, INTEGER on SQLite.
         null_bigint=typed_null("bigint", dialect),
+    )
+    # DQ.4.1b — emit the header, then each object's carved CREATE body in
+    # graph create-order. The single behavioral change vs the old whole-
+    # template ``.format()`` is that the graph walk canonicalizes the
+    # balance_cadence_gap / expected_eod_balance_breach pair (independent
+    # matviews) to create-in-refresh-order; every other object keeps its
+    # textual slot, so the output is byte-identical modulo that swap.
+    return _L1_HEADER.format(**fmt) + "".join(
+        obj.emit_create(fmt, body=_L1_CREATE_BODIES[str(obj.obj_id)])
+        for obj in SCHEMA_GRAPH.create_order(MatviewGroup.L1)
     )
 
 
@@ -1664,7 +1638,7 @@ def _emit_inv_views(
     pair_partition = (
         "PARTITION BY recipient_account_id, sender_account_id"
     )
-    return _INV_MATVIEWS_TEMPLATE.format(
+    fmt: dict[str, object] = dict(
         p=p,
         matview_options=matview_options(dialect),
         matview_create_kw=matview_create_keyword(dialect),
@@ -1688,6 +1662,13 @@ def _emit_inv_views(
         window_end_expr=cast("ps.posted_day", "TIMESTAMP", dialect),
         with_recursive_kw=with_recursive(dialect),
         trail_depth_cap=str(MONEY_TRAIL_DEPTH_CAP),
+    )
+    # DQ.4.1b — header + per-object carved bodies in graph create-order
+    # (identical to textual order here: the two Inv matviews are mutually
+    # independent, so no reorder — byte-identical to the old .format()).
+    return _INV_HEADER.format(**fmt) + "".join(
+        obj.emit_create(fmt, body=_INV_CREATE_BODIES[str(obj.obj_id)])
+        for obj in SCHEMA_GRAPH.create_order(MatviewGroup.INVESTIGATION)
     )
 
 
@@ -2340,46 +2321,15 @@ CREATE INDEX idx_{p}_curr_db_scope_day
 # supersession is transparent. Drop order is reverse of create order
 # (no view here depends on another in this block, but ordering is
 # conservative).
-# L1 invariant matview names in drop order: dashboard-shape matviews
-# (l1_exceptions, daily_statement_summary) drop FIRST because they
-# read from the L1 invariant matviews (which read from current_* +
-# computed_*). The two helper matviews (computed_ledger_balance,
-# computed_subledger_balance) drop last.
-_L1_INVARIANT_DROP_NAMES: tuple[str, ...] = (
-    "l1_exceptions",
-    "daily_statement_summary",
-    "multi_xor_violation",
-    "fan_in_disagreement",
-    "transfer_parents",
-    "xor_group_violation",
-    "chain_parent_disagreement",
-    "stuck_unbundled",
-    "stuck_pending",
-    "limit_breach",
-    # CL.6 — balance_cadence_gap reads current_daily_balances +
-    # current_transactions only; no dependency on the other L1
-    # invariants, but drops cleanly here alongside them.
-    "balance_cadence_gap",
-    "expected_eod_balance_breach",
-    "overdraft",
-    # DL.3.5 — drift_summary depends on drift + ledger_drift (UNION ALL).
-    # Drop BEFORE its parents so the parent drops don't fail with
-    # "dependent objects" on PG.
-    "drift_summary",
-    "ledger_drift",
-    "drift",
-    # DS.3.2 — the two computed_* helpers read effective_balances now;
-    # drop them BEFORE it or PG refuses with "dependent objects".
-    "computed_ledger_balance",
-    "computed_subledger_balance",
-    # CL.5 — effective_balances is the carry-forward source for the
-    # invariants + helpers above; drop after them all.
-    "effective_balances",
-    # DK.1 — data_anchor is a leaf (reads only from current_*); no
-    # downstream matview depends on it (consumers query at app-build).
-    # Drops alongside effective_balances as another leaf helper.
-    "data_anchor",
-)
+# L1 invariant matview drop order — DERIVED from SCHEMA_GRAPH (DQ.1.4):
+# the reverse of the L1-group refresh order, so dashboard-shape sinks
+# (l1_exceptions, daily_statement_summary) drop FIRST and the
+# effective_balances spine drops after everything that reads it. A
+# free-floating leaf (data_anchor — nothing in the L1 block depends on
+# it) lands at a valid-but-arbitrary reverse-topo slot; the drop is
+# idempotent + order-immaterial for such a node. The four order lists
+# no longer diverge because they all project this one graph (DQ.0 §1).
+_L1_INVARIANT_DROP_NAMES: tuple[str, ...] = SCHEMA_GRAPH.drop_ids(MatviewGroup.L1)
 
 
 _L1_INVARIANT_DROPS_HEADER = """\
@@ -2408,8 +2358,8 @@ def _emit_l1_invariant_drops(p: str, dialect: Dialect) -> str:
     first, helpers last).
     """
     drops = "\n".join(
-        drop_matview_if_exists(f"{p}_{name}", dialect)
-        for name in _L1_INVARIANT_DROP_NAMES
+        obj.emit_drop(p, dialect)
+        for obj in SCHEMA_GRAPH.drop_order(MatviewGroup.L1)
     )
     return f"{_L1_INVARIANT_DROPS_HEADER}\n{drops}\n"
 
@@ -4119,13 +4069,41 @@ CREATE UNIQUE INDEX idx_{p}_l1ex_unique
 """
 
 
+# DQ.4.1b — carve the monolithic L1 template into per-object CREATE bodies
+# so ``emit_schema`` walks ``SCHEMA_GRAPH.create_order`` and emits each
+# object's slice, making create ORDER a graph property (the forward walk,
+# exact reverse of drop) instead of a template-literal accident. The five
+# helper-rendered bodies key off their placeholder line; the rest off their
+# ``{matview_create_kw} {p}_<obj>{matview_options}`` header. ``_L1_TEMPLATE_ORDER``
+# is TEXTUAL appearance order (the split needs it); the graph create-walk
+# supplies the EMIT order (identical except the balance_cadence_gap /
+# expected_eod_balance_breach pair — independent matviews the template
+# fixed in the opposite slot; the walk canonicalizes create to match
+# refresh + drop-reverse).
+_L1_SECTION_MARKERS: Mapping[str, str] = {
+    "computed_subledger_balance": "{computed_subledger_balance_section}",
+    "balance_cadence_gap": "{balance_cadence_gap_section}",
+    "xor_group_violation": "{xor_group_violation_body}",
+    "fan_in_disagreement": "{fan_in_disagreement_body}",
+    "multi_xor_violation": "{multi_xor_violation_body}",
+}
+_L1_TEMPLATE_ORDER: tuple[str, ...] = (
+    "effective_balances", "computed_subledger_balance", "computed_ledger_balance",
+    "data_anchor", "drift", "ledger_drift", "drift_summary", "overdraft",
+    "balance_cadence_gap", "expected_eod_balance_breach", "limit_breach",
+    "stuck_pending", "stuck_unbundled", "chain_parent_disagreement",
+    "xor_group_violation", "transfer_parents", "fan_in_disagreement",
+    "multi_xor_violation", "daily_statement_summary", "l1_exceptions",
+)
+_L1_HEADER, _L1_CREATE_BODIES = _split_matview_template(
+    _L1_INVARIANT_VIEWS_TEMPLATE, _L1_TEMPLATE_ORDER, _L1_SECTION_MARKERS,
+)
+
+
 # Investigation matview names in drop order. Both read from the base
 # ``{p}_transactions`` only — order between the two doesn't matter, but
 # fixing it keeps emit output deterministic.
-_INV_MATVIEW_DROP_NAMES: tuple[str, ...] = (
-    "inv_money_trail_edges",
-    "inv_pair_rolling_anomalies",
-)
+_INV_MATVIEW_DROP_NAMES: tuple[str, ...] = SCHEMA_GRAPH.drop_ids(MatviewGroup.INVESTIGATION)
 
 
 # CV.2 — minimum number of historical pair-windows a pair must have
@@ -4171,8 +4149,8 @@ def _emit_inv_matview_drops(p: str, dialect: Dialect) -> str:
     instance prefix; no ``.format()`` substitution on the body.
     """
     drops = "\n".join(
-        drop_matview_if_exists(f"{p}_{name}", dialect)
-        for name in _INV_MATVIEW_DROP_NAMES
+        obj.emit_drop(p, dialect)
+        for obj in SCHEMA_GRAPH.drop_order(MatviewGroup.INVESTIGATION)
     )
     return f"{_INV_MATVIEW_DROPS_HEADER}\n{drops}\n"
 
@@ -4500,3 +4478,14 @@ CREATE UNIQUE INDEX idx_{p}_mte_unique
     ON {p}_inv_money_trail_edges
        (root_transfer_id, source_account_id, target_account_id, edge_seq);
 """
+
+
+# DQ.4.1b — same per-object carve for the two Investigation matviews.
+# Both read only from ``{p}_transactions`` and are mutually independent,
+# so graph create-order matches textual order here (no reorder).
+_INV_TEMPLATE_ORDER: tuple[str, ...] = (
+    "inv_pair_rolling_anomalies", "inv_money_trail_edges",
+)
+_INV_HEADER, _INV_CREATE_BODIES = _split_matview_template(
+    _INV_MATVIEWS_TEMPLATE, _INV_TEMPLATE_ORDER, {},
+)

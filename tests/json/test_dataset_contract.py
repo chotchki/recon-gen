@@ -3,9 +3,9 @@
 Covers the ``DatasetContract`` primitives + the Oracle case-fold SQL
 wrapper. The per-builder "columns match contract" gate retired with the
 QS emitter (DW.8.1.b): build_dataset no longer emits an InputColumn list,
-and the genuine concern — every contract column appears in the dataset
-SQL — is owned by ``test_dataset_sql_contract_projection`` (which sweeps
-every builder in the apps' ``build_all_*`` sets).
+and the genuine concern — the dataset SQL projects exactly the contract
+columns — is owned by ``test_dq5_3_dataset_projection_matches_its_contract``
+(SQLGlot parse over every builder in the apps' ``build_all_*`` sets).
 """
 
 from __future__ import annotations

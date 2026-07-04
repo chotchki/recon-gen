@@ -2,8 +2,8 @@
 contracts carry the new ``metadata`` column and the dataset SQL
 projects it.
 
-The cross-cutting projection gate (``test_dataset_sql_contract_projection``)
-already enforces "every contract column appears in the SQL", so a
+The cross-cutting projection gate (``test_dq5_3_dataset_projection_matches_its_contract``)
+already enforces "the SQL projection IS exactly the contract columns", so a
 missing projection breaks that test. This file adds a focused gate
 that the column was named **metadata** specifically — covers the
 spec contract (App2's renderer will look up ``metadata`` by that

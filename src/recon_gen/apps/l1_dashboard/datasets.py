@@ -18,6 +18,7 @@ Substep landmarks:
 from __future__ import annotations
 
 from recon_gen.common.config import Config
+from recon_gen.common.contracts import added, contract_from, dollars, keep
 from recon_gen.common.dataset_contract import (
     ColumnShape,
     ColumnSpec,
@@ -422,9 +423,14 @@ def _aging_bucket_case_sql(
     return f"CASE {whens} ELSE '{overflow_label}' END"
 
 
-DRIFT_CONTRACT = DatasetContract(columns=[
-    ColumnSpec("account_id", "STRING", shape=ColumnShape.ACCOUNT_ID),
-    ColumnSpec("account_name", "STRING"),
+# DQ.4.2b — contract_from DERIVES every column from the ``drift_summary``
+# matview's DbObject.columns (the dataset reads FROM drift_summary, the
+# per-account + class-rollup union), so a rename of any of these emitted
+# columns is a KeyError at import. Fully sourced — drift_summary emits
+# account_display + abs_drift too, so nothing is dataset-computed here.
+DRIFT_CONTRACT = contract_from("drift_summary", [
+    keep("account_id"),
+    keep("account_name"),
     # DL.3 — account_display (``"<name> (<id>)"``) is the shape Daily
     # Statement's account picker reads + the shape its WHERE clause
     # matches via ``account_display_expr``. Drills writing
@@ -434,57 +440,51 @@ DRIFT_CONTRACT = DatasetContract(columns=[
     # the WHERE clause expects. Pre-DL.3 the drills wrote raw
     # ``account_id`` → destination's narrowed to 0 rows because
     # ``"external-001" != "Foo (external-001)"``.
-    ColumnSpec(
-        "account_display", "STRING", shape=ColumnShape.ACCOUNT_DISPLAY,
-    ),
-    ColumnSpec("account_role", "STRING"),
-    ColumnSpec("account_parent_role", "STRING"),
-    ColumnSpec("business_day_start", "DATETIME", shape=ColumnShape.DATETIME_DAY),
-    ColumnSpec("business_day_end", "DATETIME", shape=ColumnShape.DATETIME_DAY),
-    ColumnSpec("stored_balance", "DECIMAL"),
-    ColumnSpec("computed_balance", "DECIMAL"),
-    ColumnSpec("drift", "DECIMAL"),
+    keep("account_display"),
+    keep("account_role"),
+    keep("account_parent_role"),
+    keep("business_day_start"),
+    keep("business_day_end"),
+    dollars("stored_balance"),
+    dollars("computed_balance"),
+    dollars("drift"),
     # BO.4 — magnitude companion to the signed ``drift`` column. Tables
     # keep ``drift`` (operators need direction in detail rows); the
     # "Largest * Drift" KPIs read ``abs_drift`` so the sign convention
     # matches Drift Timelines' precomputed ``abs_drift`` and the
     # subtitle's "Max |drift|" wording matches the underlying SQL.
-    ColumnSpec("abs_drift", "DECIMAL"),
+    dollars("abs_drift"),
 ])
 
 
-LEDGER_DRIFT_CONTRACT = DatasetContract(columns=[
-    ColumnSpec("account_id", "STRING", shape=ColumnShape.ACCOUNT_ID),
-    ColumnSpec("account_name", "STRING"),
+LEDGER_DRIFT_CONTRACT = contract_from("drift_summary", [
+    keep("account_id"),
+    keep("account_name"),
     # DL.3 — see DRIFT_CONTRACT for account_display rationale.
-    ColumnSpec(
-        "account_display", "STRING", shape=ColumnShape.ACCOUNT_DISPLAY,
-    ),
-    ColumnSpec("account_role", "STRING"),
-    ColumnSpec("business_day_start", "DATETIME", shape=ColumnShape.DATETIME_DAY),
-    ColumnSpec("business_day_end", "DATETIME", shape=ColumnShape.DATETIME_DAY),
-    ColumnSpec("stored_balance", "DECIMAL"),
-    ColumnSpec("computed_balance", "DECIMAL"),
-    ColumnSpec("drift", "DECIMAL"),
+    keep("account_display"),
+    keep("account_role"),
+    keep("business_day_start"),
+    keep("business_day_end"),
+    dollars("stored_balance"),
+    dollars("computed_balance"),
+    dollars("drift"),
     # BO.4 — same magnitude companion as DRIFT_CONTRACT; see comment there.
-    ColumnSpec("abs_drift", "DECIMAL"),
+    dollars("abs_drift"),
 ])
 
 
 # Overdraft view exposes only the stored balance (no computed/drift) —
 # the violation IS the negative stored balance, no comparison needed.
-OVERDRAFT_CONTRACT = DatasetContract(columns=[
-    ColumnSpec("account_id", "STRING", shape=ColumnShape.ACCOUNT_ID),
-    ColumnSpec("account_name", "STRING"),
+OVERDRAFT_CONTRACT = contract_from("overdraft", [
+    keep("account_id"),
+    keep("account_name"),
     # DL.3 — see DRIFT_CONTRACT for account_display rationale.
-    ColumnSpec(
-        "account_display", "STRING", shape=ColumnShape.ACCOUNT_DISPLAY,
-    ),
-    ColumnSpec("account_role", "STRING"),
-    ColumnSpec("account_parent_role", "STRING"),
-    ColumnSpec("business_day_start", "DATETIME", shape=ColumnShape.DATETIME_DAY),
-    ColumnSpec("business_day_end", "DATETIME", shape=ColumnShape.DATETIME_DAY),
-    ColumnSpec("stored_balance", "DECIMAL"),
+    added("account_display", "STRING", shape=ColumnShape.ACCOUNT_DISPLAY),
+    keep("account_role"),
+    keep("account_parent_role"),
+    keep("business_day_start"),
+    keep("business_day_end"),
+    dollars("stored_balance"),
 ])
 
 
@@ -493,24 +493,20 @@ OVERDRAFT_CONTRACT = DatasetContract(columns=[
 # debit total exceeded the L2-configured cap. `business_day` is the
 # truncated day (DATETIME, not the start/end pair the daily-balance
 # views carry — the M.1a.7 view uses DATE_TRUNC on transaction posting).
-LIMIT_BREACH_CONTRACT = DatasetContract(columns=[
-    ColumnSpec("account_id", "STRING", shape=ColumnShape.ACCOUNT_ID),
-    ColumnSpec("account_name", "STRING"),
+LIMIT_BREACH_CONTRACT = contract_from("limit_breach", [
+    keep("account_id"),
+    keep("account_name"),
     # DL.3 — see DRIFT_CONTRACT for account_display rationale.
-    ColumnSpec(
-        "account_display", "STRING", shape=ColumnShape.ACCOUNT_DISPLAY,
-    ),
-    ColumnSpec("account_role", "STRING"),
-    ColumnSpec("account_parent_role", "STRING"),
-    ColumnSpec("business_day", "DATETIME", shape=ColumnShape.DATETIME_DAY),
-    ColumnSpec("rail_name", "STRING", shape=ColumnShape.RAIL_NAME),
-    # AB.1 (2026-05-19): new column — 'Outbound' / 'Inbound' literal,
-    # emitted by the per-direction matview UNION ALL. Visual surfaces
-    # in AB.1.8; contract listed here so `SELECT * FROM matview`
-    # projects all 9 columns into the dataset's declared shape.
-    ColumnSpec("direction", "STRING"),
-    ColumnSpec("outbound_total", "DECIMAL"),
-    ColumnSpec("cap", "DECIMAL"),
+    added("account_display", "STRING", shape=ColumnShape.ACCOUNT_DISPLAY),
+    keep("account_role"),
+    keep("account_parent_role"),
+    keep("business_day"),
+    keep("rail_name"),
+    # AB.1 (2026-05-19): 'Outbound' / 'Inbound' literal, emitted by the
+    # per-direction matview UNION ALL. Visual surfaces in AB.1.8.
+    keep("direction"),
+    dollars("outbound_total"),
+    dollars("cap"),
 ])
 
 
@@ -524,18 +520,16 @@ LIMIT_BREACH_CONTRACT = DatasetContract(columns=[
 # `account_parent_role` and `rail_name` are NULL for branches that
 # don't carry them (ledger_drift has no parent; only limit_breach has
 # rail_name).
-L1_EXCEPTIONS_CONTRACT = DatasetContract(columns=[
-    ColumnSpec("check_type", "STRING"),
-    ColumnSpec("account_id", "STRING", shape=ColumnShape.ACCOUNT_ID),
-    ColumnSpec("account_name", "STRING"),
+L1_EXCEPTIONS_CONTRACT = contract_from("l1_exceptions", [
+    keep("check_type"),
+    keep("account_id"),
+    keep("account_name"),
     # DL.3 — see DRIFT_CONTRACT for account_display rationale.
-    ColumnSpec(
-        "account_display", "STRING", shape=ColumnShape.ACCOUNT_DISPLAY,
-    ),
-    ColumnSpec("account_role", "STRING"),
-    ColumnSpec("account_parent_role", "STRING"),
-    ColumnSpec("business_day", "DATETIME", shape=ColumnShape.DATETIME_DAY),
-    ColumnSpec("rail_name", "STRING", shape=ColumnShape.RAIL_NAME),
+    added("account_display", "STRING", shape=ColumnShape.ACCOUNT_DISPLAY),
+    keep("account_role"),
+    keep("account_parent_role"),
+    keep("business_day"),
+    keep("rail_name"),
     # CR.3 (2026-06-08) — transfer_id surfaces for transfer-keyed
     # violations (chain_parent_disagreement, xor_group_violation,
     # fan_in_disagreement, multi_xor_violation, stuck_pending,
@@ -543,14 +537,14 @@ L1_EXCEPTIONS_CONTRACT = DatasetContract(columns=[
     # Pre-CR.3 the offending row could only be identified by shelling
     # into the DB; the matview's `transfer_id` was dropped at the
     # UNION boundary.
-    ColumnSpec("transfer_id", "STRING", shape=ColumnShape.TRANSFER_ID),
+    keep("transfer_id"),
     # AO.4 — split: amount populated for money branches (drift, ledger_drift,
     # overdraft, expected_eod_balance_breach, limit_breach, stuck_pending,
     # stuck_unbundled); count populated for transfer-keyed cardinality
     # branches (chain_parent_disagreement, xor_group_violation,
     # fan_in_disagreement, multi_xor_violation). Exactly one non-NULL per row.
-    ColumnSpec("magnitude_amount", "DECIMAL"),
-    ColumnSpec("magnitude_count", "INTEGER"),
+    dollars("magnitude_amount"),
+    keep("magnitude_count"),
 ])
 
 
@@ -628,39 +622,36 @@ DAILY_STATEMENT_TRANSACTIONS_CONTRACT = DatasetContract(columns=[
 # / bundle_id / supersedes since they're internal-only and the per-leg
 # table doesn't need them. account_id + transfer_id stay for drill
 # wiring (M.2b.7).
-TRANSACTIONS_CONTRACT = DatasetContract(columns=[
-    # DR.2 — logical-transaction key, drill-eligible (search/navigate axis).
-    ColumnSpec("transaction_id", "STRING", shape=ColumnShape.TRANSACTION_ID),
-    ColumnSpec("account_id", "STRING", shape=ColumnShape.ACCOUNT_ID),
-    ColumnSpec("account_name", "STRING"),
+TRANSACTIONS_CONTRACT = contract_from("current_transactions", [
+    # DR.2 — logical-transaction key, drill-eligible; dataset-computed
+    # (current_transactions keys on the physical entry, not transaction_id).
+    added("transaction_id", "STRING", shape=ColumnShape.TRANSACTION_ID),
+    keep("account_id", shape=ColumnShape.ACCOUNT_ID),
+    keep("account_name"),
     # DL.3 — see DRIFT_CONTRACT for account_display rationale.
-    ColumnSpec(
-        "account_display", "STRING", shape=ColumnShape.ACCOUNT_DISPLAY,
-    ),
-    ColumnSpec("account_role", "STRING"),
-    ColumnSpec("account_parent_role", "STRING"),
-    ColumnSpec("transfer_id", "STRING", shape=ColumnShape.TRANSFER_ID),
-    ColumnSpec("transfer_parent_id", "STRING"),
-    ColumnSpec("rail_name", "STRING", shape=ColumnShape.RAIL_NAME),
-    ColumnSpec("amount_money", "DECIMAL"),
-    ColumnSpec("amount_direction", "STRING"),
-    ColumnSpec("status", "STRING"),
-    ColumnSpec("origin", "STRING"),
-    ColumnSpec("posting", "DATETIME"),
+    added("account_display", "STRING", shape=ColumnShape.ACCOUNT_DISPLAY),
+    keep("account_role"),
+    keep("account_parent_role"),
+    keep("transfer_id", shape=ColumnShape.TRANSFER_ID),
+    keep("transfer_parent_id"),
+    keep("rail_name", shape=ColumnShape.RAIL_NAME),
+    dollars("amount_money"),
+    keep("amount_direction"),
+    keep("status"),
+    keep("origin"),
+    keep("posting"),
     # Phase DA — day-grain projection of `posting`, drill source for the
     # Daily Statement balance-date parameter on the Posting Ledger.
     # Distinct from `posting` which stays minute-grain for sort + display.
-    # Filled at SELECT time via date_trunc_day('posting', dialect).
-    ColumnSpec("business_day", "DATETIME", shape=ColumnShape.DATETIME_DAY),
-    ColumnSpec("transfer_completion", "DATETIME"),
+    # Dataset-computed via date_trunc_day('posting', dialect).
+    added("business_day", "DATETIME", shape=ColumnShape.DATETIME_DAY),
+    keep("transfer_completion"),
     # CY.4 — surfaced for the Table visual's metadata_popup feature.
     # Carried on every row so the App2 renderer can show a per-row
     # popup; not rendered as a column header (see render.py's
     # `data-metadata-popup` attribute). CY.4.1: hidden=True suppresses
-    # the column header + cell on App2's table renderer (QS path is
-    # unaffected since QS only declares fields on the visual's columns
-    # list).
-    ColumnSpec("metadata", "STRING", hidden=True),
+    # the column header + cell on App2's table renderer.
+    keep("metadata", hidden=True),
 ])
 
 
@@ -682,37 +673,38 @@ DRIFT_TIMELINE_CONTRACT = DatasetContract(columns=[
 # 2 contracts so the L.1.17 typed Column refs catch column-name
 # mismatches at the wiring site (one contract collapsing both would
 # require optional cols, which the contract intentionally doesn't model).
-STUCK_PENDING_CONTRACT = DatasetContract(columns=[
-    ColumnSpec("transaction_id", "STRING"),
-    ColumnSpec("account_id", "STRING", shape=ColumnShape.ACCOUNT_ID),
-    ColumnSpec("account_name", "STRING"),
-    ColumnSpec("account_role", "STRING"),
-    ColumnSpec("account_parent_role", "STRING"),
-    ColumnSpec("transfer_id", "STRING", shape=ColumnShape.TRANSFER_ID),
-    ColumnSpec("rail_name", "STRING", shape=ColumnShape.RAIL_NAME),
-    ColumnSpec("amount_money", "DECIMAL"),
-    ColumnSpec("amount_direction", "STRING"),
-    ColumnSpec("posting", "DATETIME"),
-    ColumnSpec("max_pending_age_seconds", "INTEGER"),
-    ColumnSpec("age_seconds", "DECIMAL"),
-    ColumnSpec("stuck_pending_aging_bucket", "STRING"),
+STUCK_PENDING_CONTRACT = contract_from("stuck_pending", [
+    keep("transaction_id"),
+    keep("account_id"),
+    keep("account_name"),
+    keep("account_role"),
+    keep("account_parent_role"),
+    keep("transfer_id"),
+    keep("rail_name"),
+    dollars("amount_money"),
+    keep("amount_direction"),
+    keep("posting"),
+    keep("max_pending_age_seconds"),
+    keep("age_seconds"),
+    # aging bucket is a dataset-side CASE over age_seconds, not emitted.
+    added("stuck_pending_aging_bucket", "STRING"),
 ])
 
 
-STUCK_UNBUNDLED_CONTRACT = DatasetContract(columns=[
-    ColumnSpec("transaction_id", "STRING"),
-    ColumnSpec("account_id", "STRING", shape=ColumnShape.ACCOUNT_ID),
-    ColumnSpec("account_name", "STRING"),
-    ColumnSpec("account_role", "STRING"),
-    ColumnSpec("account_parent_role", "STRING"),
-    ColumnSpec("transfer_id", "STRING", shape=ColumnShape.TRANSFER_ID),
-    ColumnSpec("rail_name", "STRING", shape=ColumnShape.RAIL_NAME),
-    ColumnSpec("amount_money", "DECIMAL"),
-    ColumnSpec("amount_direction", "STRING"),
-    ColumnSpec("posting", "DATETIME"),
-    ColumnSpec("max_unbundled_age_seconds", "INTEGER"),
-    ColumnSpec("age_seconds", "DECIMAL"),
-    ColumnSpec("stuck_unbundled_aging_bucket", "STRING"),
+STUCK_UNBUNDLED_CONTRACT = contract_from("stuck_unbundled", [
+    keep("transaction_id"),
+    keep("account_id"),
+    keep("account_name"),
+    keep("account_role"),
+    keep("account_parent_role"),
+    keep("transfer_id"),
+    keep("rail_name"),
+    dollars("amount_money"),
+    keep("amount_direction"),
+    keep("posting"),
+    keep("max_unbundled_age_seconds"),
+    keep("age_seconds"),
+    added("stuck_unbundled_aging_bucket", "STRING"),
 ])
 
 
@@ -724,38 +716,38 @@ STUCK_UNBUNDLED_CONTRACT = DatasetContract(columns=[
 # `supersedes` column tells you why the higher entry exists per L1's
 # v1 SupersedeReason vocabulary (Inflight / BundleAssignment /
 # TechnicalCorrection).
-SUPERSESSION_TRANSACTIONS_CONTRACT = DatasetContract(columns=[
-    ColumnSpec("entry", "INTEGER"),
-    # DR.2 — drill source for the same-sheet trail self-filter (DR.4).
-    ColumnSpec("transaction_id", "STRING", shape=ColumnShape.TRANSACTION_ID),
-    ColumnSpec("supersedes", "STRING"),
-    ColumnSpec("l1_supersession_no_reason", "INTEGER"),
-    ColumnSpec("account_id", "STRING", shape=ColumnShape.ACCOUNT_ID),
-    ColumnSpec("account_name", "STRING"),
-    ColumnSpec("transfer_id", "STRING", shape=ColumnShape.TRANSFER_ID),
-    ColumnSpec("rail_name", "STRING", shape=ColumnShape.RAIL_NAME),
-    ColumnSpec("amount_money", "DECIMAL"),
-    ColumnSpec("amount_direction", "STRING"),
-    ColumnSpec("status", "STRING"),
-    ColumnSpec("posting", "DATETIME"),
-    ColumnSpec("bundle_id", "STRING"),
+SUPERSESSION_TRANSACTIONS_CONTRACT = contract_from("transactions", [
+    keep("entry"),
+    # DR.2 — drill source for the same-sheet trail self-filter (DR.4);
+    # dataset-computed (the base table keys on the physical entry).
+    added("transaction_id", "STRING", shape=ColumnShape.TRANSACTION_ID),
+    keep("supersedes"),
+    added("l1_supersession_no_reason", "INTEGER"),
+    keep("account_id", shape=ColumnShape.ACCOUNT_ID),
+    keep("account_name"),
+    keep("transfer_id", shape=ColumnShape.TRANSFER_ID),
+    keep("rail_name", shape=ColumnShape.RAIL_NAME),
+    dollars("amount_money"),
+    keep("amount_direction"),
+    keep("status"),
+    keep("posting"),
+    keep("bundle_id"),
 ])
 
 
-SUPERSESSION_DAILY_BALANCES_CONTRACT = DatasetContract(columns=[
-    ColumnSpec("entry", "INTEGER"),
-    ColumnSpec("account_id", "STRING", shape=ColumnShape.ACCOUNT_ID),
-    ColumnSpec("account_name", "STRING"),
+SUPERSESSION_DAILY_BALANCES_CONTRACT = contract_from("daily_balances", [
+    keep("entry"),
+    keep("account_id", shape=ColumnShape.ACCOUNT_ID),
+    keep("account_name"),
     # DL.3 — see DRIFT_CONTRACT for account_display rationale (drill at
-    # ``app.py:1730`` from Daily Balances Audit → Daily Statement).
-    ColumnSpec(
-        "account_display", "STRING", shape=ColumnShape.ACCOUNT_DISPLAY,
-    ),
-    ColumnSpec("account_role", "STRING"),
-    ColumnSpec("supersedes", "STRING"),
-    ColumnSpec("business_day_start", "DATETIME", shape=ColumnShape.DATETIME_DAY),
-    ColumnSpec("business_day_end", "DATETIME", shape=ColumnShape.DATETIME_DAY),
-    ColumnSpec("money", "DECIMAL"),
+    # ``app.py:1730`` from Daily Balances Audit → Daily Statement);
+    # dataset-computed (``"<name> (<id>)"``).
+    added("account_display", "STRING", shape=ColumnShape.ACCOUNT_DISPLAY),
+    keep("account_role"),
+    keep("supersedes"),
+    keep("business_day_start", shape=ColumnShape.DATETIME_DAY),
+    keep("business_day_end", shape=ColumnShape.DATETIME_DAY),
+    dollars("money"),
 ])
 
 
@@ -798,28 +790,25 @@ L1_CONTROL_ACCOUNTS_CONTRACT = DatasetContract(columns=[
     ColumnSpec("last_txn_date", "DATETIME"),
 ])
 
-L1_TX_IDS_CONTRACT = DatasetContract(columns=[
-    ColumnSpec("transfer_id", "STRING", shape=ColumnShape.TRANSFER_ID),
+L1_TX_IDS_CONTRACT = contract_from("current_transactions", [
+    keep("transfer_id", shape=ColumnShape.TRANSFER_ID),
 ])
 
-# DR.3 — companion picker source for the Transaction ID typeahead.
-L1_TX_TRANSACTION_IDS_CONTRACT = DatasetContract(columns=[
-    ColumnSpec(
-        "transaction_id", "STRING", shape=ColumnShape.TRANSACTION_ID,
-    ),
+# DR.3 — companion picker source for the Transaction ID typeahead;
+# transaction_id is dataset-computed (current_transactions keys on entry).
+L1_TX_TRANSACTION_IDS_CONTRACT = contract_from("current_transactions", [
+    added("transaction_id", "STRING", shape=ColumnShape.TRANSACTION_ID),
 ])
 
 # DR.6 — companion picker source for the Supersession Audit's Transaction
-# ID dropdown (only superseded ids).
-L1_SUPERSESSION_TX_IDS_CONTRACT = DatasetContract(columns=[
-    ColumnSpec(
-        "transaction_id", "STRING", shape=ColumnShape.TRANSACTION_ID,
-    ),
+# ID dropdown (only superseded ids); computed off the base transactions.
+L1_SUPERSESSION_TX_IDS_CONTRACT = contract_from("transactions", [
+    added("transaction_id", "STRING", shape=ColumnShape.TRANSACTION_ID),
 ])
 
-L1_TX_FACETS_CONTRACT = DatasetContract(columns=[
-    ColumnSpec("status", "STRING"),
-    ColumnSpec("origin", "STRING"),
+L1_TX_FACETS_CONTRACT = contract_from("current_transactions", [
+    keep("status"),
+    keep("origin"),
 ])
 
 

@@ -75,10 +75,18 @@ def isolate_xdg(
 ) -> Path:
     """Point ``XDG_STATE_HOME`` at a tmp dir for every test in this
     module so we never read / write the operator's real state.
+
+    EA.2 — also clear ``RECON_GEN_TLS_SELF_SIGNED`` so the default (ACME)
+    path is what these tests exercise regardless of the ambient env. The
+    cloud-spike CI runner sets it globally (EA.2), which would fire the
+    self-signed short-circuit and make every ACME-path assertion fail —
+    POLICY-1 (CI ≡ local) says a test must not flip behavior on ambient
+    env. The one self-signed test re-sets it explicitly.
     """
     state_root = tmp_path / "state"
     state_root.mkdir()
     monkeypatch.setenv("XDG_STATE_HOME", str(state_root))
+    monkeypatch.delenv("RECON_GEN_TLS_SELF_SIGNED", raising=False)  # typing-smell: ignore[envvar-bypass]: test isolation must delenv the raw name so the ACME-path tests are deterministic regardless of ambient env
     return state_root
 
 
@@ -734,3 +742,66 @@ def test_ensure_dev_env_reconciles_dynamic_a_record_to_public_ip(
     }
     assert calls["localci.recon-gen.hotchkiss.io"] == "127.0.0.1"
     assert calls["ci.recon-gen.hotchkiss.io"] == "198.51.100.77"
+
+
+def test_ensure_dev_env_self_signed_short_circuit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """EA.2 — with ``RECON_GEN_TLS_SELF_SIGNED`` set, ``ensure_dev_env``
+    mints a self-signed cert for the env's locked SANs and touches NEITHER
+    Cloudflare NOR ACME NOR public-IP discovery — and needs no
+    ``RECON_GEN_CLOUDFLARE_TOKEN`` (the short-circuit is above the token
+    check). This is the cloud-spike path (a runner with no DNS control)."""
+    monkeypatch.setenv("RECON_GEN_TLS_SELF_SIGNED", "1")  # typing-smell: ignore[envvar-bypass]: test drives RECON_GEN_TLS_SELF_SIGNED.get_or_none()
+    # Deliberately NO RECON_GEN_CLOUDFLARE_TOKEN — the short-circuit must
+    # not require it.
+    cert_path = tmp_path / "cert.pem"
+    key_path = tmp_path / "key.pem"
+
+    with patch.object(ensure_mod, "_make_cloudflare_client") as cf_mock:
+        with patch.object(ensure_mod, "discover_public_ip") as ip_mock:
+            with patch.object(ensure_mod, "run_acme_dns01") as acme_mock:
+                ensure_dev_env(
+                    Env.CI,
+                    cert_path=cert_path,
+                    key_path=key_path,
+                    account_email="spike@localhost",
+                )
+
+    cf_mock.assert_not_called()
+    ip_mock.assert_not_called()
+    acme_mock.assert_not_called()
+
+    # A real self-signed cert landed, covering the CI SANs, self-issued.
+    cert = x509.load_pem_x509_certificate(cert_path.read_bytes())
+    assert key_path.exists()
+    assert cert.issuer == cert.subject
+    san = cert.extensions.get_extension_for_class(
+        x509.SubjectAlternativeName
+    ).value
+    assert set(san.get_values_for_type(x509.DNSName)) == set(_HOSTS_BY_ENV[Env.CI])
+
+
+def test_ensure_dev_env_self_signed_reuses_valid_cert(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """EA.2 — the self-signed branch is idempotent: a pre-placed cert that
+    already covers the SANs + has validity left is NOT re-minted (so the
+    spike's pre-gen step + the runner's own call don't fight)."""
+    monkeypatch.setenv("RECON_GEN_TLS_SELF_SIGNED", "1")  # typing-smell: ignore[envvar-bypass]: test drives RECON_GEN_TLS_SELF_SIGNED.get_or_none()
+    cert_path = tmp_path / "cert.pem"
+    key_path = tmp_path / "key.pem"
+    sans = list(_HOSTS_BY_ENV[Env.CI])
+    cert_pem, key_pem = _mint_self_signed(
+        sans=sans, not_after=dt.datetime.now(dt.UTC) + dt.timedelta(days=90),
+    )
+    cert_path.write_bytes(cert_pem)
+    key_path.write_bytes(key_pem)
+
+    ensure_dev_env(
+        Env.CI, cert_path=cert_path, key_path=key_path,
+        account_email="spike@localhost",
+    )
+
+    # Untouched — same bytes (no re-mint).
+    assert cert_path.read_bytes() == cert_pem

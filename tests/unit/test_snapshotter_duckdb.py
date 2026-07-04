@@ -40,6 +40,7 @@ from recon_gen.common.db import (
 )
 from recon_gen.common.sql import Dialect
 from tests._test_helpers import make_test_config
+from tests._timing_signal import timing_signal
 from recon_gen.common.snapshotter import DuckDBFileSnapshotter
 
 
@@ -256,10 +257,10 @@ class TestRestoreSLA:
                 await pool.close()
 
         elapsed = asyncio.run(_run())
-        assert elapsed < 0.250, (
-            f"restore took {elapsed * 1000:.1f}ms, "
-            f"expected <250ms (operator target ~50ms)"
-        )
+        # EA.3 — timings-as-signal (tests/_timing_signal.py): record the
+        # restore SLA (operator target ~50ms) without hard-failing on the
+        # box-calibrated 250ms absolute, tight on a slower CI runner.
+        timing_signal("snapshotter_duckdb_restore", elapsed, budget_s=0.250)
 
 
 # -- snap file invariants -------------------------------------------------

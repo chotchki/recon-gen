@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Callable, Generator, TypeVar, cast
 from recon_gen.common.env_keys import (
     EnvVarInvalid,
     RECON_E2E_SCREENSHOT_DIR,
+    RECON_GEN_BROWSER_INSECURE_TLS,
     RECON_GEN_RUN_DIR,
     RECON_GEN_TRACE_ALL,
 )
@@ -128,6 +129,10 @@ def webkit_page(
         browser = p.webkit.launch(headless=headless)
         context = browser.new_context(
             viewport={"width": viewport[0], "height": viewport[1]},
+            # EA.2 — accept the self-signed Dex cert on the cloud-spike
+            # runner (WebKit trusts no self-signed cert otherwise). Env-gated
+            # so it's a hard no-op everywhere the real ACME cert is used.
+            ignore_https_errors=bool(RECON_GEN_BROWSER_INSECURE_TLS.get_or_none()),
         )
         # Y.2.gate.c.11 — start tracing immediately so the trace bundle
         # captures EVERYTHING the test does. We decide whether to save
