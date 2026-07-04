@@ -227,11 +227,15 @@ jobs:
           RECON_GEN_DEMO_DATABASE_URL_PG: "postgresql://postgres:${{ env.PG_PASSWORD }}@127.0.0.1:5432/postgres"
           RECON_GEN_DEMO_DATABASE_URL_OR: "oracle+oracledb://system:${{ env.ORACLE_PASSWORD }}@127.0.0.1:1521/?service_name=FREEPDB1"
           RECON_GEN_RUNNER_YES: "1"
-          # Coupling-3 experiment: un-pin the trainer dialects (box pins "du"
-          # to dodge a hang that only reproduces on its PERSISTENT PG/Oracle).
-          # Fresh containers are the condition the hang comment says doesn't
-          # repro — if this passes, the box CI can migrate to fresh-per-run.
-          RECON_GEN_TRAINER_DIALECTS: "du,pg,or"
+          # Coupling-3 experiment — ANSWERED (v6): un-pinning to du,pg,or hung
+          # the app2 layer for 40min (hang watchdog SIGKILL) in
+          # _studio_deploy_helpers.py:_run_server, the SAME CE.4 trainer hang
+          # the box hits. So the hang is NOT persistent-container-state — it
+          # reproduces on fresh cloud containers, i.e. it's a genuine
+          # PG/Oracle trainer-studio-server bug (backlog, not a CI-migration
+          # issue). Re-pin to du to match the box's operator-locked workaround;
+          # the cloud CI is no stricter than the box until that bug is fixed.
+          RECON_GEN_TRAINER_DIALECTS: "du"
         run: |
           mkdir -p runs
           /usr/bin/time -v -o runs/peak-rss-time.log \
